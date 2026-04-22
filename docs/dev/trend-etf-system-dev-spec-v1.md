@@ -7,7 +7,7 @@
 - 调度：APScheduler
 - 数据处理：pandas / numpy
 - 可视化：前端图表库（建议 ECharts）
-- 存储：Parquet + JSON + 日志文件
+- 存储：SQLite + 日志文件（advice 与审计日志保留 JSON/JSONL）
 - 原则：接口分层、配置驱动、可替换实现、可审计
 
 ## 2. 代码结构建议
@@ -33,6 +33,7 @@ src/
     provider_efinance.py
     provider_akshare.py
     storage/
+      db.py
       market_store.py
       runtime_store.py
   strategy/
@@ -65,8 +66,8 @@ config/
   strategy.yaml
   instruments.yaml
 data/
-  market/etf/*.parquet
-  runtime/*.json
+  trend_quant.db          # SQLite（行情、信号、回测、成交、仓位、优化任务）
+  runtime/advice/*.json   # 保留的 JSON 操作建议
 logs/
 ```
 
@@ -139,11 +140,15 @@ class INotifier(Protocol):
 
 ## 5. 运行时状态与文件
 
-- `data/runtime/positions/current_positions.json`
-- `data/runtime/signals/YYYY-MM-DD.json`
-- `data/runtime/advice/YYYY-MM-DD.json`
-- `data/runtime/trades/manual_trades_YYYY-MM-DD.json`
-- `data/runtime/backtests/{run_id}/result.json`
+- `data/trend_quant.db`（SQLite）
+  - `market_data`：行情
+  - `signals`：每日信号
+  - `signal_states`：最新状态
+  - `manual_trades`：手工成交
+  - `position_snapshots`：仓位快照
+  - `backtests`：回测结果
+  - `optimization_jobs`：优化任务
+- `data/runtime/advice/*.json`（保留）
 - `logs/app/YYYY-MM-DD.log`
 - `logs/calc/YYYY-MM-DD.jsonl`
 
@@ -163,7 +168,7 @@ class INotifier(Protocol):
   - 成功后发送最终ACTION
 - `job_daily_update_after_close`
   - 收盘后执行
-  - 增量更新Parquet
+  - 增量更新SQLite
 
 ## 7. 通知格式
 
@@ -193,7 +198,7 @@ class INotifier(Protocol):
 
 流程：
 
-1. 读取Parquet日线数据
+1. 读取SQLite日线数据
 2. 按日循环计算趋势信号
 3. 按收盘价模拟成交并计入成本
 4. 执行T+1约束
@@ -202,10 +207,7 @@ class INotifier(Protocol):
 
 输出：
 
-- `summary.json`
-- `daily_nav.csv/parquet`
-- `trades.json`
-- `charts_payload.json`
+- 存入SQLite `backtests` 表（含 summary、trades、charts 等完整 JSON）
 
 ## 9. 前端页面与接口
 

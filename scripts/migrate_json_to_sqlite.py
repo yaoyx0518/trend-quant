@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Migrate historical JSON data into SQLite database."""
+"""Migrate historical JSON and Parquet data into SQLite database."""
 
 from __future__ import annotations
 

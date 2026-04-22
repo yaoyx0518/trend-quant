@@ -42,9 +42,9 @@
   - APScheduler
   - 先纯Python部署，后补Docker
 - 存储：
-  - 行情：Parquet
-  - 配置/信号/回测/交易回写：JSON
-  - 无数据库（V1）
+  - 行情/信号/回测/交易/仓位：SQLite
+  - 操作建议与审计日志：JSON/JSONL
+  - 内置 SQLite（V1）
 - 通知：
   - 飞书机器人 + 邮件
   - 等级：INFO/WARN/ACTION/ERROR
