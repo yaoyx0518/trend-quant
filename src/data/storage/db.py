@@ -102,6 +102,20 @@ class Database:
                     created_at TEXT,
                     finished_at TEXT
                 );
+
+                CREATE TABLE IF NOT EXISTS market_data (
+                    symbol TEXT NOT NULL,
+                    time TEXT NOT NULL,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume REAL,
+                    amount REAL,
+                    provider TEXT,
+                    PRIMARY KEY (symbol, time)
+                );
+                CREATE INDEX IF NOT EXISTS idx_market_data_symbol_time ON market_data(symbol, time);
                 """
             )
 
@@ -536,6 +550,83 @@ class Database:
                 continue
             self.save_optimization_job(job_id, status, result)
             count += 1
+        return count
+
+    # ------------------------------------------------------------------
+    # market_data
+    # ------------------------------------------------------------------
+    def save_market_data(self, symbol: str, df) -> None:
+        if df.empty:
+            return
+        records: list[tuple] = []
+        for _, row in df.iterrows():
+            records.append(
+                (
+                    symbol,
+                    str(row.get("time", "")),
+                    float(row["open"]) if hasattr(row, "__getitem__") and row.get("open") is not None and str(row.get("open")) != "nan" else None,
+                    float(row["high"]) if hasattr(row, "__getitem__") and row.get("high") is not None and str(row.get("high")) != "nan" else None,
+                    float(row["low"]) if hasattr(row, "__getitem__") and row.get("low") is not None and str(row.get("low")) != "nan" else None,
+                    float(row["close"]) if hasattr(row, "__getitem__") and row.get("close") is not None and str(row.get("close")) != "nan" else None,
+                    float(row["volume"]) if hasattr(row, "__getitem__") and row.get("volume") is not None and str(row.get("volume")) != "nan" else None,
+                    float(row["amount"]) if hasattr(row, "__getitem__") and row.get("amount") is not None and str(row.get("amount")) != "nan" else None,
+                    str(row.get("provider", "")) if hasattr(row, "__getitem__") and row.get("provider") is not None else None,
+                )
+            )
+        with self._connect() as conn:
+            conn.executemany(
+                """INSERT OR REPLACE INTO market_data
+                   (symbol, time, open, high, low, close, volume, amount, provider)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                records,
+            )
+
+    def load_market_data(self, symbol: str):
+        import pandas as pd
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT time, open, high, low, close, volume, amount, symbol, provider
+                   FROM market_data WHERE symbol = ? ORDER BY time""",
+                (symbol,),
+            ).fetchall()
+        if not rows:
+            return pd.DataFrame()
+        df = pd.DataFrame([dict(r) for r in rows])
+        df["time"] = pd.to_datetime(df["time"], errors="coerce")
+        for col in ("open", "high", "low", "close", "volume", "amount"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+
+    def list_market_symbols(self) -> list[str]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT DISTINCT symbol FROM market_data ORDER BY symbol"
+            ).fetchall()
+            return [r["symbol"] for r in rows]
+
+    def get_market_data_summary(self, symbol: str) -> dict:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT COUNT(*) AS rows, MIN(time) AS start, MAX(time) AS end
+                   FROM market_data WHERE symbol = ?""",
+                (symbol,),
+            ).fetchone()
+        if row is None or row["rows"] == 0:
+            return {"rows": 0, "start": None, "end": None}
+        return {"rows": row["rows"], "start": row["start"], "end": row["end"]}
+
+    def migrate_market_data_from_parquet(self, base_dir: str = "data/market/etf") -> int:
+        import pandas as pd
+        from pathlib import Path
+
+        count = 0
+        for p in Path(base_dir).glob("*.parquet"):
+            df = pd.read_parquet(p)
+            if not df.empty:
+                self.save_market_data(p.stem, df)
+                count += len(df)
         return count
 
 

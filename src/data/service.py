@@ -147,7 +147,7 @@ class DataService:
                 "local_end_before": local_end_before,
                 "local_start_after": local_start_before,
                 "local_end_after": local_end_before,
-                "path": str(self.market_store.path_for(symbol)),
+                "path": f"sqlite/{symbol}",
             }
 
         merged = pd.concat([existing, fetched], ignore_index=True)

@@ -11,6 +11,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from data.service import DataService
+from data.storage.db import get_db
 from data.storage.market_store import MarketStore
 from data.storage.runtime_store import RuntimeStore
 
@@ -121,22 +122,15 @@ async def list_instruments() -> dict:
     name_map = _config_name_map()
 
     known_symbols = set(config_by_symbol.keys())
-    for p in market_store.base_dir.glob("*.parquet"):
-        known_symbols.add(p.stem.upper())
+    for symbol in get_db().list_market_symbols():
+        known_symbols.add(symbol.upper())
 
     items: list[dict] = []
     for symbol in sorted(known_symbols):
-        path = market_store.path_for(symbol)
-        rows = 0
-        local_start = None
-        local_end = None
-        if path.exists():
-            try:
-                df = pd.read_parquet(path, columns=["time"])
-            except Exception:
-                df = pd.read_parquet(path)
-            rows = int(len(df))
-            local_start, local_end = _date_span(df)
+        summary = get_db().get_market_data_summary(symbol)
+        rows = summary.get("rows", 0)
+        local_start = summary.get("start")
+        local_end = summary.get("end")
 
         cfg = config_by_symbol.get(symbol, {})
         in_config = bool(cfg)

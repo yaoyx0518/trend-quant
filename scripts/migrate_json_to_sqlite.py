@@ -27,6 +27,7 @@ def main() -> int:
     counts["position_snapshots"] = db.migrate_position_snapshots_from_json(store)
     counts["backtests"] = db.migrate_backtests_from_json(store)
     counts["optimization_jobs"] = db.migrate_optimizations_from_json(store)
+    counts["market_data_rows"] = db.migrate_market_data_from_parquet()
 
     print("\nMigration complete:")
     for name, count in counts.items():
@@ -45,6 +46,7 @@ def main() -> int:
         "position_snapshots",
         "backtests",
         "optimization_jobs",
+        "market_data",
     ]
     for table in tables:
         row = conn.execute(f"SELECT COUNT(*) AS cnt FROM {table}").fetchone()
