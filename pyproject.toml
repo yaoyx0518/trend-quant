@@ -1,0 +1,33 @@
+[project]
+name = "trend-etf-system"
+version = "0.1.0"
+description = "A-share ETF trend trading system skeleton"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.116.0",
+  "uvicorn[standard]>=0.35.0",
+  "jinja2>=3.1.6",
+  "apscheduler>=3.11.0",
+  "pandas>=2.3.0",
+  "numpy>=2.2.0",
+  "pyyaml>=6.0.2",
+  "pyarrow>=21.0.0",
+  "pydantic>=2.11.0",
+  "email-validator>=2.2.0",
+  "httpx>=0.28.0",
+  "efinance==0.5.5.2",
+  "akshare>=1.17.0"
+]
+
+[build-system]
+requires = ["setuptools>=80.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100

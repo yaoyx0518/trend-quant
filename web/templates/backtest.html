@@ -1,0 +1,2388 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section>
+  <h2>Backtest Center</h2>
+
+  <div class="bt-form-row">
+    <label>Start Date <input id="startDate" type="date" value="2025-01-01"></label>
+    <label>End Date <input id="endDate" type="date"></label>
+    <label>Initial Capital <input id="capital" type="number" value="200000" min="10000" step="1000"></label>
+    <label>Strategy
+      <select id="strategySelect"></select>
+    </label>
+    <button id="runBtn" type="button">Run Backtest</button>
+    <button id="goOptimizeBtn" type="button">Go To Optimization</button>
+  </div>
+  <div>
+    <h3 style="margin: 0 0 8px;">Backtest Symbols</h3>
+    <div id="backtestSymbolTableWrap">
+      <table id="backtestSymbolTable">
+        <thead>
+          <tr>
+            <th>Select</th>
+            <th>Instrument</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div class="bt-form-row" style="margin-top: 10px;">
+      <label>Benchmark
+        <select id="benchmarkMode">
+          <option value="equal_weight_pool" selected>Equal-weight selected pool</option>
+          <option value="symbol">Single symbol (buy & hold)</option>
+        </select>
+      </label>
+      <label id="benchmarkSymbolWrap" style="display:none;">
+        Benchmark Symbol
+        <input id="benchmarkSymbol" type="text" value="512500.SS" placeholder="e.g. 510300.SH">
+      </label>
+    </div>
+    <p id="momentumUniverseHint" style="display:none; margin-top: 8px; color: #556070;">
+      Momentum TOPN uses all enabled instruments by default. No manual symbol selection is required.
+    </p>
+  </div>
+  <div id="trendParamsRow" class="bt-form-row">
+    <label>n_short <input id="btNShort" type="number" value="5" min="1" step="1"></label>
+    <label>n_mid <input id="btNMid" type="number" value="20" min="1" step="1"></label>
+    <label>n_long <input id="btNLong" type="number" value="40" min="1" step="1"></label>
+    <label>entry_threshold_min <input id="btEntryThresholdMin" type="number" value="10" step="0.1"></label>
+    <label>entry_threshold_max <input id="btEntryThresholdMax" type="number" value="20" step="0.1"></label>
+  </div>
+  <div id="momentumTrendParamsRow" class="bt-form-row" style="display:none;">
+    <strong>TrendScore Param:</strong>
+    <label>n_short <input id="btMomentumNShort" type="number" value="5" min="1" step="1"></label>
+    <label>n_mid <input id="btMomentumNMid" type="number" value="20" min="1" step="1"></label>
+    <label>n_long <input id="btMomentumNLong" type="number" value="40" min="1" step="1"></label>
+    <label>entry_threshold <input id="btMomentumEntryThreshold" type="number" value="10" step="0.1"></label>
+  </div>
+  <div id="momentumParamsRow" class="bt-form-row" style="display:none;">
+    <strong>Momentum Param:</strong>
+    <label>mom_short <input id="btMomentumShortWindow" type="number" value="10" min="2" step="1"></label>
+    <label>mom_long <input id="btMomentumLongWindow" type="number" value="20" min="3" step="1"></label>
+    <label>w_mom_short <input id="btMomentumShortWeight" type="number" value="0.6" min="0" max="1" step="0.05"></label>
+    <label>w_mom_long <input id="btMomentumLongWeight" type="number" value="0.4" min="0" max="1" step="0.05"></label>
+  </div>
+  <div id="momentumHybridParamsRow" class="bt-form-row" style="display:none;">
+    <strong>HybridTrend Param:</strong>
+    <label>w_hybrid_mom <input id="btHybridMomentumWeight" type="number" value="1.0" min="0" max="1" step="0.05"></label>
+    <label>w_hybrid_trend <input id="btHybridTrendWeight" type="number" value="0.0" min="0" max="1" step="0.05"></label>
+  </div>
+  <div id="momentumTopNParamsRow" class="bt-form-row" style="display:none;">
+    <strong>TopN Strategy Param:</strong>
+    <label>max_holdings <input id="btMomentumMaxHoldings" type="number" value="5" min="1" step="1"></label>
+    <label>rebalance_weekday <input id="btRebalanceWeekday" type="number" value="1" min="1" max="5" step="1"></label>
+  </div>
+  <div id="momentumSignalModulesRow" style="display:none;">
+    <strong>Signal Modules:</strong>
+    <div class="bt-form-row" style="margin-top: 6px;">
+      <span><strong>Buy:</strong></span>
+      <label><input id="btBuyFilterMa20" type="checkbox" checked> price_above_ma20</label>
+      <span>AND</span>
+      <label><input id="btBuyFilterMa60" type="checkbox"> price_above_ma60</label>
+      <span>AND</span>
+      <label><input id="btBuyFilterMa200" type="checkbox"> price_above_ma200</label>
+      <span>AND</span>
+      <label><input id="btBuyFilterTrendMax" type="checkbox"> trend_score_max</label>
+      <span>AND</span>
+      <label>max_entry_trend_score <input id="btMaxEntryTrendScore" type="number" value="20" step="0.1"></label>
+    </div>
+    <div class="bt-form-row" style="margin-top: 4px;">
+      <span><strong>Sell:</strong></span>
+      <label><input id="btSellSignalHardStop" type="checkbox" checked> hard_stop</label>
+      <span>OR</span>
+      <label><input id="btSellSignalChandelier" type="checkbox" checked> chandelier_stop</label>
+      <span>OR</span>
+      <label><input id="btSellSignalMaBreakdown" type="checkbox"> ma_breakdown_max</label>
+    </div>
+  </div>
+
+  <p id="btStatus">Ready.</p>
+
+  <h3>Strategy Metrics</h3>
+  <div id="summaryCards" class="cards"></div>
+
+  <h3>Benchmark Metrics</h3>
+  <div id="benchmarkCards" class="cards"></div>
+  <h3>Strategy Highlights</h3>
+  <div id="strategyHighlightCards" class="cards"></div>
+
+  <div>
+    <h3>Net Value (Strategy vs Benchmark)</h3>
+    <div id="navChart" class="chart-lg"></div>
+  </div>
+
+  <div>
+    <div class="bt-form-row">
+      <h3 style="margin: 0;">Asset K-Line</h3>
+      <label>Instrument
+        <select id="klineSymbolSelect"></select>
+      </label>
+    </div>
+    <div id="klineChart" class="chart-lg chart-kline"></div>
+  </div>
+
+  <div>
+    <h3>Trend Score (Linked To Asset K-Line)</h3>
+    <div id="trendChart" class="chart-md"></div>
+    <h3 id="hybridChartTitle" style="display:none;">Hybrid Score (Linked To Asset K-Line)</h3>
+    <div id="hybridChart" class="chart-md" style="display:none;"></div>
+    <div id="trendDistModule">
+      <h3>Trend Score Distribution (All Symbols)</h3>
+      <div id="trendDistChart" class="chart-md"></div>
+    </div>
+  </div>
+
+  <div>
+    <h3>Daily Holdings (Stacked)</h3>
+    <div class="bt-form-row" style="margin-bottom: 8px;">
+      <button id="holdingsSelectAllBtn" type="button">Select All</button>
+      <button id="holdingsSelectNoneBtn" type="button">Select None</button>
+    </div>
+    <div id="holdingsSymbolSelector" class="bt-form-row"></div>
+    <div id="holdingsChart" class="chart-md"></div>
+  </div>
+
+  <div>
+    <h3>Drawdown</h3>
+    <div id="ddChart" class="chart-md"></div>
+  </div>
+
+  <div class="chart-grid">
+    <div>
+      <h3>Monthly Return Heatmap</h3>
+      <div id="heatChart" class="chart-md"></div>
+    </div>
+    <div>
+      <h3>Symbol Backtest Summary</h3>
+      <table id="symbolTable">
+        <thead>
+          <tr>
+            <th><button type="button" class="sym-sort-btn" data-sort-key="instrument" style="all:unset;cursor:pointer;">Instrument <span data-sort-indicator="instrument">↕</span></button></th>
+            <th><button type="button" class="sym-sort-btn" data-sort-key="trade_count" style="all:unset;cursor:pointer;">Trades <span data-sort-indicator="trade_count">↕</span></button></th>
+            <th><button type="button" class="sym-sort-btn" data-sort-key="win_rate" style="all:unset;cursor:pointer;">Win Rate <span data-sort-indicator="win_rate">↕</span></button></th>
+            <th><button type="button" class="sym-sort-btn" data-sort-key="profit_factor" style="all:unset;cursor:pointer;">Profit Factor <span data-sort-indicator="profit_factor">↕</span></button></th>
+            <th><button type="button" class="sym-sort-btn" data-sort-key="contribution_abs" style="all:unset;cursor:pointer;">Contribution <span data-sort-indicator="contribution_abs">↓</span></button></th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <h3>Annual Return Table</h3>
+  <table id="annualTable">
+    <thead>
+      <tr>
+        <th>Year</th>
+        <th>Strategy Return</th>
+        <th>Strategy Trades</th>
+        <th>Strategy Win Rate</th>
+        <th>Strategy Profit Factor</th>
+        <th>Strategy Sharpe</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="bt-form-row">
+    <h3 style="margin: 0;">Trades</h3>
+    <label>Instrument
+      <select id="tradeSymbolFilter">
+        <option value="">ALL</option>
+      </select>
+    </label>
+  </div>
+
+  <table id="tradeTable">
+    <thead>
+      <tr>
+        <th>Date</th>
+        <th>Instrument</th>
+        <th>Side</th>
+        <th>Trend Score</th>
+        <th>Momentum Z</th>
+        <th>Hybrid Score</th>
+        <th>Qty</th>
+        <th>Price</th>
+        <th>Fee</th>
+        <th>Buy Cost</th>
+        <th>Buy Ratio</th>
+        <th>Sell PnL</th>
+        <th>Reason</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <hr>
+  <h2 id="optimizeSectionTitle">Parameter Optimization</h2>
+
+  <div class="bt-form-row">
+    <button id="optLoadParamsBtn" type="button">Load Tunable Params</button>
+    <label><input id="optEnableLoo" type="checkbox"> Enable LOO</label>
+    <label>Parallel
+      <select id="optParallelMode">
+        <option value="auto" selected>auto</option>
+        <option value="single">single</option>
+        <option value="manual">manual</option>
+      </select>
+    </label>
+    <label>Manual Workers <input id="optManualWorkers" type="number" min="1" max="32" value="4" disabled></label>
+  </div>
+
+  <div class="bt-form-row">
+    <button id="optAddWindowBtn" type="button">Add Window</button>
+    <span id="optWindowHint">Use custom date ranges for optimization.</span>
+  </div>
+
+  <table id="optWindowTable">
+    <thead>
+      <tr>
+        <th>Start Date</th>
+        <th>End Date</th>
+        <th>Action</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>Tunable Parameters</h3>
+  <table id="optParamTable">
+    <thead>
+      <tr>
+        <th>Use</th>
+        <th>Param Key</th>
+        <th>Current</th>
+        <th>Min</th>
+        <th>Max</th>
+        <th>Step</th>
+        <th>Type</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="bt-form-row">
+    <span>Selected Params: <strong id="optSelectedCount">0</strong></span>
+    <button id="optStartBtn" type="button">Start Optimization</button>
+    <button id="optCancelBtn" type="button" disabled>Cancel Optimization</button>
+  </div>
+
+  <div class="opt-progress-wrap">
+    <progress id="optProgress" max="1" value="0"></progress>
+    <span id="optProgressText">0%</span>
+  </div>
+  <p id="optStatus">Optimization idle.</p>
+
+  <h3>Optimization Summary</h3>
+  <pre id="optSummary">No result yet.</pre>
+
+  <h3>Optimization Results (Top 50 by Score)</h3>
+  <table id="optResultTable">
+    <thead>
+      <tr>
+        <th>Rank</th>
+        <th>Score</th>
+        <th>Partial</th>
+        <th>Coverage</th>
+        <th>Median Sharpe</th>
+        <th>Min Sharpe</th>
+        <th>Std Sharpe</th>
+        <th>Worst DD</th>
+        <th>Trade Count</th>
+        <th>Win Rate</th>
+        <th>Profit Factor</th>
+        <th>Hard Pass</th>
+        <th>Params</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+(() => {
+  const runBtn = document.getElementById('runBtn');
+  const goOptimizeBtn = document.getElementById('goOptimizeBtn');
+  const statusEl = document.getElementById('btStatus');
+  const strategySelectEl = document.getElementById('strategySelect');
+  const trendParamsRowEl = document.getElementById('trendParamsRow');
+  const momentumTrendParamsRowEl = document.getElementById('momentumTrendParamsRow');
+  const momentumParamsRowEl = document.getElementById('momentumParamsRow');
+  const momentumHybridParamsRowEl = document.getElementById('momentumHybridParamsRow');
+  const momentumTopNParamsRowEl = document.getElementById('momentumTopNParamsRow');
+  const momentumSignalModulesRowEl = document.getElementById('momentumSignalModulesRow');
+  const backtestSymbolTableWrapEl = document.getElementById('backtestSymbolTableWrap');
+  const momentumUniverseHintEl = document.getElementById('momentumUniverseHint');
+  const benchmarkModeEl = document.getElementById('benchmarkMode');
+  const benchmarkSymbolWrapEl = document.getElementById('benchmarkSymbolWrap');
+  const benchmarkSymbolEl = document.getElementById('benchmarkSymbol');
+  const DEFAULT_BENCHMARK_SYMBOL = '512500.SS';
+  const backtestSymbolTableBodyEl = document.querySelector('#backtestSymbolTable tbody');
+  const symbolFilterEl = document.getElementById('tradeSymbolFilter');
+  const klineSymbolEl = document.getElementById('klineSymbolSelect');
+  const holdingsSelectorEl = document.getElementById('holdingsSymbolSelector');
+  const holdingsSelectAllBtn = document.getElementById('holdingsSelectAllBtn');
+  const holdingsSelectNoneBtn = document.getElementById('holdingsSelectNoneBtn');
+  const symbolSortBtnEls = Array.from(document.querySelectorAll('#symbolTable .sym-sort-btn'));
+  const nShortEl = document.getElementById('btNShort');
+  const nMidEl = document.getElementById('btNMid');
+  const nLongEl = document.getElementById('btNLong');
+  const entryThresholdMinEl = document.getElementById('btEntryThresholdMin');
+  const entryThresholdMaxEl = document.getElementById('btEntryThresholdMax');
+  const momentumNShortEl = document.getElementById('btMomentumNShort');
+  const momentumNMidEl = document.getElementById('btMomentumNMid');
+  const momentumNLongEl = document.getElementById('btMomentumNLong');
+  const momentumEntryThresholdEl = document.getElementById('btMomentumEntryThreshold');
+  const momentumMaxHoldingsEl = document.getElementById('btMomentumMaxHoldings');
+  const momentumShortWindowEl = document.getElementById('btMomentumShortWindow');
+  const momentumLongWindowEl = document.getElementById('btMomentumLongWindow');
+  const momentumShortWeightEl = document.getElementById('btMomentumShortWeight');
+  const momentumLongWeightEl = document.getElementById('btMomentumLongWeight');
+  const hybridMomentumWeightEl = document.getElementById('btHybridMomentumWeight');
+  const hybridTrendWeightEl = document.getElementById('btHybridTrendWeight');
+  const rebalanceWeekdayEl = document.getElementById('btRebalanceWeekday');
+  const buyFilterMa20El = document.getElementById('btBuyFilterMa20');
+  const buyFilterMa60El = document.getElementById('btBuyFilterMa60');
+  const buyFilterMa200El = document.getElementById('btBuyFilterMa200');
+  const buyFilterTrendMaxEl = document.getElementById('btBuyFilterTrendMax');
+  const maxEntryTrendScoreEl = document.getElementById('btMaxEntryTrendScore');
+  const sellSignalHardStopEl = document.getElementById('btSellSignalHardStop');
+  const sellSignalChandelierEl = document.getElementById('btSellSignalChandelier');
+  const sellSignalMaBreakdownEl = document.getElementById('btSellSignalMaBreakdown');
+  const initialInstruments = {{ instruments | tojson }};
+  const initialStrategyCatalog = {{ strategy_catalog | tojson }};
+
+  const navChart = echarts.init(document.getElementById('navChart'));
+  const klineChart = echarts.init(document.getElementById('klineChart'));
+  const trendChart = echarts.init(document.getElementById('trendChart'));
+  const trendDistChart = echarts.init(document.getElementById('trendDistChart'));
+  const hybridChart = echarts.init(document.getElementById('hybridChart'));
+  const holdingsChart = echarts.init(document.getElementById('holdingsChart'));
+  const ddChart = echarts.init(document.getElementById('ddChart'));
+  const heatChart = echarts.init(document.getElementById('heatChart'));
+  const trendDistModuleEl = document.getElementById('trendDistModule');
+  const hybridChartTitleEl = document.getElementById('hybridChartTitle');
+  const hybridChartEl = document.getElementById('hybridChart');
+
+  navChart.group = 'bt-time';
+  klineChart.group = 'bt-time';
+  trendChart.group = 'bt-time';
+  hybridChart.group = 'bt-time';
+  holdingsChart.group = 'bt-time';
+  ddChart.group = 'bt-time';
+  echarts.connect('bt-time');
+
+  let allTrades = [];
+  let allSymbolStats = [];
+  let trendSeriesMapCache = {};
+  let trendDatesCache = [];
+  let hybridSeriesMapCache = {};
+  let hybridDatesCache = [];
+  let trendBuyPointsCache = [];
+  let trendSellPointsCache = [];
+  let holdingsSeriesKeys = [];
+  let symbolColorMap = {};
+  let klineMap = {};
+  let currentKlineCandles = [];
+  let momentumStrategyActive = false;
+  let symbolStatsSort = { key: 'contribution_abs', direction: 'desc' };
+
+  function pct(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return (v * 100).toFixed(2) + '%';
+  }
+
+  function num(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return Number(v).toFixed(2);
+  }
+
+  function num3(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return Number(v).toFixed(3);
+  }
+
+  function qty(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return String(Math.round(Number(v)));
+  }
+
+  function signedAmount(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    const n = Number(v);
+    return `${n > 0 ? '+' : ''}${n.toFixed(2)}`;
+  }
+
+  function asNumber(v, fallback = 0) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function escapeHtml(text) {
+    const s = String(text ?? '');
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function symbolCode(symbol) {
+    const s = String(symbol || '').trim().toUpperCase();
+    if (!s) return '';
+    return s.includes('.') ? s.split('.')[0] : s;
+  }
+
+  function stripEtfSuffix(name) {
+    return String(name || '').trim().replace(/\s*ETF\s*$/i, '');
+  }
+
+  function buildSymbolDisplayMap(instruments) {
+    const out = {};
+    const items = Array.isArray(instruments) ? instruments : [];
+    for (const item of items) {
+      const symbol = String(item?.symbol || '').trim().toUpperCase();
+      if (!symbol) continue;
+      const cleaned = stripEtfSuffix(String(item?.name || '').trim());
+      if (cleaned) out[symbol] = cleaned;
+    }
+    return out;
+  }
+
+  const symbolDisplayNameMap = buildSymbolDisplayMap(initialInstruments);
+
+  function formatSymbolDisplay(symbol) {
+    const normalized = String(symbol || '').trim().toUpperCase();
+    const code = symbolCode(normalized);
+    const name = String(symbolDisplayNameMap[normalized] || '').trim();
+    if (name && code) return `${name}（${code}）`;
+    return name || code || normalized;
+  }
+
+  function holdingsDisplayName(rawKey) {
+    return rawKey === 'CASH' ? 'CASH' : formatSymbolDisplay(rawKey);
+  }
+
+
+  const SYMBOL_COLOR_PALETTE = [
+    '#d62728', '#1f77b4', '#ff7f0e', '#2ca02c', '#17becf',
+    '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#9467bd',
+  ];
+  const TREND_DIST_MIN = -100;
+  const TREND_DIST_MAX = 100;
+  const TREND_DIST_EDGE = 30;
+  const TREND_DIST_CORE_EDGE = 20;
+  const TREND_DIST_CORE_STEP = 2;
+  const TREND_DIST_OUTER_STEP = 5;
+  const KLINE_TRADE_STYLE = Object.freeze({
+    BUY: { color: '#ff9f43', marker: 'triangle', symbolOffset: [0, -16] },
+    SELL: { color: '#3d9cff', marker: 'diamond', symbolOffset: [0, 16] },
+  });
+  const TREND_TRADE_STYLE = Object.freeze({
+    BUY: { color: '#ff9f43', marker: 'triangle', symbolOffset: [0, -10] },
+    SELL: { color: '#3d9cff', marker: 'diamond', symbolOffset: [0, 10] },
+  });
+  const KLINE_MA_PERIODS = [20, 30, 40, 60, 200];
+  const KLINE_MA_COLORS = Object.freeze({
+    5: '#e53935',
+    10: '#fb8c00',
+    20: '#fbc02d',
+    30: '#43a047',
+    40: '#1e88e5',
+    60: '#8e24aa',
+    200: '#000000',
+  });
+
+  function buildSymbolColorMap(symbols) {
+    const map = {};
+    (symbols || []).forEach((s, idx) => {
+      map[s] = SYMBOL_COLOR_PALETTE[idx % SYMBOL_COLOR_PALETTE.length];
+    });
+    return map;
+  }
+
+  function buildTrendDistribution(trendSeriesMap) {
+    const bins = [];
+    bins.push({ label: `[${TREND_DIST_MIN},${-TREND_DIST_EDGE}]`, min: TREND_DIST_MIN, max: -TREND_DIST_EDGE });
+    for (let left = -TREND_DIST_EDGE; left < -TREND_DIST_CORE_EDGE; left += TREND_DIST_OUTER_STEP) {
+      bins.push({ label: `[${left},${left + TREND_DIST_OUTER_STEP})`, min: left, max: left + TREND_DIST_OUTER_STEP });
+    }
+    for (let left = -TREND_DIST_CORE_EDGE; left < TREND_DIST_CORE_EDGE; left += TREND_DIST_CORE_STEP) {
+      bins.push({ label: `[${left},${left + TREND_DIST_CORE_STEP})`, min: left, max: left + TREND_DIST_CORE_STEP });
+    }
+    for (let left = TREND_DIST_CORE_EDGE; left < TREND_DIST_EDGE; left += TREND_DIST_OUTER_STEP) {
+      bins.push({ label: `[${left},${left + TREND_DIST_OUTER_STEP})`, min: left, max: left + TREND_DIST_OUTER_STEP });
+    }
+    bins.push({ label: `[${TREND_DIST_EDGE},${TREND_DIST_MAX}]`, min: TREND_DIST_EDGE, max: TREND_DIST_MAX });
+
+    const labels = bins.map((b) => b.label);
+    const counts = new Array(bins.length).fill(0);
+    let total = 0;
+
+    for (const values of Object.values(trendSeriesMap || {})) {
+      for (const raw of (values || [])) {
+        if (raw === null || raw === undefined) continue;
+        const v = Number(raw);
+        if (!Number.isFinite(v)) continue;
+        total += 1;
+        if (v <= -TREND_DIST_EDGE) {
+          counts[0] += 1;
+          continue;
+        }
+        if (v >= TREND_DIST_EDGE) {
+          counts[counts.length - 1] += 1;
+          continue;
+        }
+        for (let i = 1; i < bins.length - 1; i += 1) {
+          const b = bins[i];
+          if (v >= b.min && v < b.max) {
+            counts[i] += 1;
+            break;
+          }
+        }
+      }
+    }
+
+    return { labels, counts, total };
+  }
+
+  function parseFinite(value, fallback) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function findStrategyConfig(strategyId) {
+    const items = Array.isArray(initialStrategyCatalog?.items) ? initialStrategyCatalog.items : [];
+    return items.find((x) => String(x?.id || '') === String(strategyId || '')) || null;
+  }
+
+  const MOMENTUM_STRATEGY_IDS = new Set(['momentum_topn_v1', 'momentum_topn_v2', 'momentum_topn_v3']);
+  const BUY_FILTER_IDS = Object.freeze({
+    MA20: 'price_above_ma20',
+    MA60: 'price_above_ma60',
+    MA200: 'price_above_ma200',
+    TREND_MAX: 'trend_score_max',
+  });
+  const SELL_SIGNAL_IDS = Object.freeze({
+    HARD_STOP: 'hard_stop',
+    CHANDELIER: 'chandelier_stop',
+    MA_BREAKDOWN: 'ma_breakdown_max',
+  });
+
+  function isMomentumStrategy(strategyId) {
+    return MOMENTUM_STRATEGY_IDS.has(String(strategyId || ''));
+  }
+
+  function normalizeIdList(raw) {
+    if (Array.isArray(raw)) return raw.map((x) => String(x || '').trim()).filter(Boolean);
+    if (raw === null || raw === undefined) return [];
+    const text = String(raw || '').trim();
+    if (!text) return [];
+    return text.split(',').map((x) => String(x || '').trim()).filter(Boolean);
+  }
+
+  function renderStrategySelector() {
+    const items = Array.isArray(initialStrategyCatalog?.items) ? initialStrategyCatalog.items : [];
+    if (!items.length) {
+      strategySelectEl.innerHTML = '<option value="trend_score_v1">trend_score_v1</option>';
+      strategySelectEl.value = 'trend_score_v1';
+      return;
+    }
+    strategySelectEl.innerHTML = items
+      .map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name || item.id)}</option>`)
+      .join('');
+    const defaultId = String(initialStrategyCatalog?.default_id || items[0].id || 'trend_score_v1');
+    strategySelectEl.value = items.some((x) => String(x.id) === defaultId) ? defaultId : String(items[0].id);
+  }
+
+  function applyStrategyParamsFromCatalog(strategyId) {
+    const cfg = findStrategyConfig(strategyId);
+    const p = cfg?.params || {};
+    if (isMomentumStrategy(strategyId)) {
+      const buyFilters = new Set(normalizeIdList(p.buy_filters));
+      const sellSignals = new Set(normalizeIdList(p.sell_signals));
+      momentumNShortEl.value = Math.round(parseFinite(p.n_short, 5));
+      momentumNMidEl.value = Math.round(parseFinite(p.n_mid, 20));
+      momentumNLongEl.value = Math.round(parseFinite(p.n_long, 40));
+      momentumEntryThresholdEl.value = parseFinite(p.entry_threshold, 10);
+      momentumMaxHoldingsEl.value = Math.round(parseFinite(p.max_holdings, 5));
+      momentumShortWindowEl.value = Math.round(parseFinite(p.momentum_window_short, 10));
+      momentumLongWindowEl.value = Math.round(parseFinite(p.momentum_window_long, 20));
+      momentumShortWeightEl.value = parseFinite(p.momentum_weight_short, 0.6);
+      momentumLongWeightEl.value = parseFinite(p.momentum_weight_long, 0.4);
+      hybridMomentumWeightEl.value = parseFinite(p.hybrid_weight_momentum, 1.0);
+      hybridTrendWeightEl.value = parseFinite(p.hybrid_weight_trend, 0.0);
+      rebalanceWeekdayEl.value = Math.round(parseFinite(p.rebalance_weekday, 1));
+      if (buyFilterMa20El) buyFilterMa20El.checked = buyFilters.has(BUY_FILTER_IDS.MA20);
+      if (buyFilterMa60El) buyFilterMa60El.checked = buyFilters.has(BUY_FILTER_IDS.MA60);
+      if (buyFilterMa200El) buyFilterMa200El.checked = buyFilters.has(BUY_FILTER_IDS.MA200);
+      if (buyFilterTrendMaxEl) buyFilterTrendMaxEl.checked = buyFilters.has(BUY_FILTER_IDS.TREND_MAX);
+      if (sellSignalHardStopEl) sellSignalHardStopEl.checked = sellSignals.has(SELL_SIGNAL_IDS.HARD_STOP);
+      if (sellSignalChandelierEl) sellSignalChandelierEl.checked = sellSignals.has(SELL_SIGNAL_IDS.CHANDELIER);
+      if (sellSignalMaBreakdownEl) sellSignalMaBreakdownEl.checked = sellSignals.has(SELL_SIGNAL_IDS.MA_BREAKDOWN);
+      maxEntryTrendScoreEl.value = parseFinite(p.max_entry_trend_score, 20);
+      return;
+    }
+    nShortEl.value = Math.round(parseFinite(p.n_short, 5));
+    nMidEl.value = Math.round(parseFinite(p.n_mid, 20));
+    nLongEl.value = Math.round(parseFinite(p.n_long, 40));
+    entryThresholdMinEl.value = parseFinite(p.entry_threshold_min, parseFinite(p.entry_threshold, 10));
+    entryThresholdMaxEl.value = parseFinite(p.entry_threshold_max, 20);
+  }
+
+  function applyStrategyPanel() {
+    const strategyId = String(strategySelectEl?.value || 'trend_score_v1');
+    const isMomentum = isMomentumStrategy(strategyId);
+    trendParamsRowEl.style.display = isMomentum ? 'none' : '';
+    momentumTrendParamsRowEl.style.display = isMomentum ? '' : 'none';
+    momentumParamsRowEl.style.display = isMomentum ? '' : 'none';
+    momentumHybridParamsRowEl.style.display = isMomentum ? '' : 'none';
+    momentumTopNParamsRowEl.style.display = isMomentum ? '' : 'none';
+    momentumSignalModulesRowEl.style.display = isMomentum ? '' : 'none';
+    backtestSymbolTableWrapEl.style.display = isMomentum ? 'none' : '';
+    momentumUniverseHintEl.style.display = isMomentum ? '' : 'none';
+  }
+
+  function applyBenchmarkPanel() {
+    const mode = String(benchmarkModeEl?.value || 'equal_weight_pool');
+    const isSymbolMode = mode === 'symbol';
+    benchmarkSymbolWrapEl.style.display = isSymbolMode ? '' : 'none';
+    if (isSymbolMode && benchmarkSymbolEl && String(benchmarkSymbolEl.value || '').trim() === '') {
+      benchmarkSymbolEl.value = DEFAULT_BENCHMARK_SYMBOL;
+    }
+  }
+
+  function renderBacktestSymbolTable(instruments) {
+    const items = Array.isArray(instruments) ? instruments : [];
+    const rows = items
+      .map((item) => ({
+        symbol: String(item?.symbol || '').trim(),
+        checked: item?.enabled !== false,
+      }))
+      .filter((x) => x.symbol);
+
+    if (!rows.length) {
+      backtestSymbolTableBodyEl.innerHTML = '<tr><td colspan="2">No industry ETF instruments configured.</td></tr>';
+      return;
+    }
+
+    backtestSymbolTableBodyEl.innerHTML = rows.map((row) => `
+      <tr data-symbol="${escapeHtml(row.symbol)}">
+        <td><input type="checkbox" data-role="bt-symbol" ${row.checked ? 'checked' : ''}></td>
+        <td>${escapeHtml(formatSymbolDisplay(row.symbol))}</td>
+      </tr>
+    `).join('');
+  }
+
+  function collectBacktestSelection() {
+    const rows = Array.from(backtestSymbolTableBodyEl.querySelectorAll('tr[data-symbol]'));
+    const selectedSymbols = [];
+
+    for (const row of rows) {
+      const symbol = String(row.getAttribute('data-symbol') || '').trim();
+      if (!symbol) continue;
+      const checked = Boolean(row.querySelector('input[data-role="bt-symbol"]')?.checked);
+      if (!checked) continue;
+
+      selectedSymbols.push(symbol);
+    }
+
+    return { selectedSymbols };
+  }
+
+  function calcKlineMaValues(candles, period) {
+    const closes = (candles || []).map((c) => Number(c?.[1]));
+    const out = [];
+    for (let i = 0; i < closes.length; i += 1) {
+      if (i + 1 < period) {
+        out.push(null);
+        continue;
+      }
+      let sum = 0;
+      let ok = true;
+      for (let j = i - period + 1; j <= i; j += 1) {
+        const v = closes[j];
+        if (!Number.isFinite(v)) {
+          ok = false;
+          break;
+        }
+        sum += v;
+      }
+      out.push(ok ? (sum / period) : null);
+    }
+    return out;
+  }
+
+  function buildKlineMaSeries(candles, period, precomputedMaMap) {
+    const name = `MA${period}`;
+    const precomputed = precomputedMaMap && Array.isArray(precomputedMaMap[String(period)])
+      ? precomputedMaMap[String(period)]
+      : null;
+    const data = precomputed || calcKlineMaValues(candles, period);
+    return {
+      name,
+      type: 'line',
+      symbol: 'none',
+      smooth: true,
+      lineStyle: { width: 1.0, type: 'dashed', color: KLINE_MA_COLORS[period] || '#666' },
+      data,
+      tooltip: { valueFormatter: (v) => num3(v) },
+      z: 3,
+    };
+  }
+
+  function renderTrendDistribution(trendSeriesMap) {
+    const dist = buildTrendDistribution(trendSeriesMap);
+    const percent = dist.total > 0
+      ? dist.counts.map((c) => c / dist.total)
+      : dist.counts.map(() => 0);
+
+    trendDistChart.setOption({
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (items) => {
+          if (!items || !items.length) return '-';
+          const i = Number(items[0].dataIndex || 0);
+          const c = dist.counts[i] || 0;
+          const p = dist.total > 0 ? (percent[i] * 100).toFixed(2) : '0.00';
+          return [
+            `Range: ${dist.labels[i] || '-'}`,
+            `Count: ${c}`,
+            `Share: ${p}%`,
+          ].join('<br/>');
+        },
+      },
+      dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
+      xAxis: {
+        type: 'category',
+        data: dist.labels,
+        axisLabel: { interval: 0, rotate: 45, fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        minInterval: 1,
+      },
+      series: [{
+        name: 'Count',
+        type: 'bar',
+        barMaxWidth: 20,
+        itemStyle: { color: '#0b6e99' },
+        data: dist.counts,
+      }],
+      graphic: dist.total > 0 ? [] : [{
+        type: 'text',
+        left: 'center',
+        top: 'middle',
+        style: { text: 'No trend data', fill: '#6b7280', fontSize: 14 },
+      }],
+    }, true);
+  }
+  function renderSummary(summary) {
+    const cards = document.getElementById('summaryCards');
+    const rows = [
+      ['Total Return', pct(summary.total_return)],
+      ['Annual Return', pct(summary.annual_return)],
+      ['Max Drawdown', pct(summary.max_drawdown)],
+      ['Sharpe', num(summary.sharpe)],
+      ['Sortino', num(summary.sortino)],
+      ['Calmar', num(summary.calmar)],
+      ['Win Rate', pct(summary.win_rate)],
+      ['Profit Factor', num(summary.profit_factor)],
+      ['Turnover', num(summary.turnover)],
+      ['Trade Count', qty(summary.trade_count)],
+    ];
+    cards.innerHTML = rows.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  }
+
+  function renderBenchmarkSummary(summary) {
+    const cards = document.getElementById('benchmarkCards');
+    const rows = [
+      ['BM Total Return', pct(summary.total_return)],
+      ['BM Annual Return', pct(summary.annual_return)],
+      ['BM Max Drawdown', pct(summary.max_drawdown)],
+      ['BM Sharpe', num(summary.sharpe)],
+      ['BM Sortino', num(summary.sortino)],
+      ['BM Calmar', num(summary.calmar)],
+    ];
+    cards.innerHTML = rows.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  }
+
+  function renderStrategyHighlights(highlights, strategyId) {
+    const cards = document.getElementById('strategyHighlightCards');
+    if (!cards) return;
+    const sid = String(strategyId || '');
+    if (!isMomentumStrategy(sid)) {
+      cards.innerHTML = '<div class="card"><div class="k">Mode</div><div class="v">Trend Score</div></div>';
+      return;
+    }
+    const h = highlights || {};
+    const buyFiltersText = Array.isArray(h.buy_filters) && h.buy_filters.length ? h.buy_filters.join(', ') : '-';
+    const sellSignalsText = Array.isArray(h.sell_signals) && h.sell_signals.length ? h.sell_signals.join(', ') : '-';
+    const rows = [
+      ['Mode', sid === 'momentum_topn_v3' ? 'Momentum TopN v3' : (sid === 'momentum_topn_v2' ? 'Momentum TopN v2' : 'Momentum TopN v1')],
+      ['Max Holdings', qty(h.max_holdings)],
+      ['Rebalance Days', qty(h.rebalance_day_count)],
+      ['Rebalance Buys', qty(h.rebalance_buy_count)],
+      ['Rebalance Sells', qty(h.rebalance_sell_count)],
+      ['Avg Position Count', num(h.avg_position_count)],
+      ['Buy Filters', buyFiltersText],
+      ['Sell Signals', sellSignalsText],
+    ];
+    cards.innerHTML = rows.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  }
+
+  function buildScatterSeries(points, name, color, marker) {
+    const data = (points || [])
+      .filter(p => p.value !== null && p.value !== undefined)
+      .map(p => ({
+        name,
+        value: [p.date, p.value],
+        symbol_name: formatSymbolDisplay(p.symbol || ''),
+        qty: p.qty || 0,
+        price: p.price || null,
+        amount: p.amount || null,
+        trend_score: p.trend_score,
+        momentum_score: p.momentum_score,
+        hybrid_score: p.hybrid_score,
+      }));
+
+    return {
+      name,
+      type: 'scatter',
+      symbol: marker,
+      symbolSize: 11,
+      itemStyle: { color },
+      data,
+      tooltip: {
+        formatter: (params) => {
+          const d = params.data || {};
+          return [
+            `${d.symbol_name || ''} ${name}`.trim(),
+            `Date: ${params.value[0]}`,
+            `NAV: ${num(params.value[1])}`,
+            `Price: ${num(d.price)}`,
+            `Amount: ${num(d.amount)}`,
+            `Trend Score: ${num(d.trend_score)}`,
+            `Momentum Z: ${num(d.momentum_score)}`,
+            `Hybrid Score: ${num(d.hybrid_score)}`,
+            `Qty: ${qty(d.qty)}`,
+          ].join('<br/>');
+        }
+      },
+    };
+  }
+
+  function buildTrendSignalSeries(points, name, style) {
+    const data = (points || [])
+      .map((p) => {
+        const trendValue = Number(p?.trend_score);
+        if (!Number.isFinite(trendValue)) return null;
+        return {
+          value: [p.date, trendValue],
+          date: p.date,
+          symbol_name: formatSymbolDisplay(p.symbol || ''),
+          trend_score: trendValue,
+          qty: p.qty,
+          price: p.price,
+          amount: p.amount,
+        };
+      })
+      .filter(Boolean);
+
+    return {
+      name,
+      type: 'scatter',
+      symbol: style.marker,
+      symbolSize: 10,
+      symbolOffset: style.symbolOffset,
+      z: 7,
+      itemStyle: {
+        color: style.color,
+        borderColor: '#ffffff',
+        borderWidth: 1.0,
+      },
+      data,
+      tooltip: {
+        formatter: (params) => {
+          const d = params.data || {};
+          return [
+            `${name} ${d.symbol_name || ''}`.trim(),
+            `Date: ${d.date || ''}`,
+            `Trend Score: ${num(d.trend_score)}`,
+            `Price: ${num3(d.price)}`,
+            `Amount: ${num(d.amount)}`,
+            `Qty: ${qty(d.qty)}`,
+          ].join('<br/>');
+        },
+      },
+    };
+  }
+
+  function buildTrendLineSeries(trendSeriesMap) {
+    const map = trendSeriesMap || {};
+    return Object.keys(map).sort().map((symbol) => ({
+      name: formatSymbolDisplay(symbol),
+      type: 'line',
+      data: (map[symbol] || []).map((v) => (v === null || v === undefined ? null : Number(v))),
+      smooth: true,
+      symbol: 'none',
+      lineStyle: { width: 2, color: symbolColorMap[symbol] },
+      itemStyle: { color: symbolColorMap[symbol] },
+    }));
+  }
+
+  function buildHybridLineSeries(hybridSeriesMap) {
+    const map = hybridSeriesMap || {};
+    return Object.keys(map).sort().map((symbol) => ({
+      name: formatSymbolDisplay(symbol),
+      type: 'line',
+      data: (map[symbol] || []).map((v) => (v === null || v === undefined ? null : Number(v))),
+      smooth: true,
+      symbol: 'none',
+      lineStyle: { width: 2, color: symbolColorMap[symbol] },
+      itemStyle: { color: symbolColorMap[symbol] },
+    }));
+  }
+
+  function filterTrendPointsBySymbol(points, symbol) {
+    const target = String(symbol || '').trim();
+    if (!target) return [];
+    return (points || []).filter((p) => {
+      return String(p?.symbol || '').trim() === target;
+    });
+  }
+
+  function buildKlineTradeSeries(points, name, style) {
+    return {
+      name,
+      type: 'scatter',
+      symbol: style.marker,
+      symbolSize: 12,
+      symbolOffset: style.symbolOffset,
+      z: 6,
+      itemStyle: {
+        color: style.color,
+        borderColor: '#ffffff',
+        borderWidth: 1.2,
+        shadowColor: 'rgba(0, 0, 0, 0.18)',
+        shadowBlur: 4,
+      },
+      data: (points || []).map((p) => ({
+        value: [p.date, Number(p.price || 0)],
+        date: p.date,
+        price: Number(p.price || 0),
+        amount: p.amount,
+        qty: p.qty,
+        trend_score: p.trend_score,
+        momentum_score: p.momentum_score,
+        hybrid_score: p.hybrid_score,
+      })),
+      tooltip: {
+        formatter: (params) => {
+          const d = params.data || {};
+          return [
+            `${name}`,
+            `Date: ${d.date || ''}`,
+            `Price: ${num3(d.price)}`,
+            `Amount: ${num(d.amount)}`,
+            `Trend Score: ${num(d.trend_score)}`,
+            `Momentum Z: ${num(d.momentum_score)}`,
+            `Hybrid Score: ${num(d.hybrid_score)}`,
+            `Qty: ${qty(d.qty)}`,
+          ].join('<br/>');
+        }
+      },
+    };
+  }
+
+
+  function computeKlineYAxisRange(candles, startPct, endPct) {
+    const data = candles || [];
+    const n = data.length;
+    if (!n) return { min: null, max: null };
+
+    const sPct = Number.isFinite(startPct) ? startPct : 0;
+    const ePct = Number.isFinite(endPct) ? endPct : 100;
+    const s = Math.max(0, Math.min(n - 1, Math.floor((sPct / 100) * (n - 1))));
+    const e = Math.max(s, Math.min(n - 1, Math.ceil((ePct / 100) * (n - 1))));
+
+    let low = Infinity;
+    let high = -Infinity;
+    for (let i = s; i <= e; i += 1) {
+      const c = data[i];
+      if (!c || c.length < 4) continue;
+      const l = Number(c[2]);
+      const h = Number(c[3]);
+      if (Number.isFinite(l)) low = Math.min(low, l);
+      if (Number.isFinite(h)) high = Math.max(high, h);
+    }
+
+    if (!Number.isFinite(low) || !Number.isFinite(high)) return { min: null, max: null };
+
+    if (high <= low) {
+      const pad = Math.max(low * 0.02, 0.01);
+      return { min: Math.max(0.01, low - pad), max: high + pad };
+    }
+
+    const pad = (high - low) * 0.08;
+    return { min: Math.max(0.01, low - pad), max: high + pad };
+  }
+
+  function updateKlineYAxisByZoom(params) {
+    if (!currentKlineCandles.length) return;
+    const dz = (params && params.batch && params.batch[0]) || params || {};
+    const opt = klineChart.getOption() || {};
+    const zoomCfg = (opt.dataZoom && opt.dataZoom[0]) || {};
+    const start = Number.isFinite(dz.start) ? dz.start : (Number.isFinite(zoomCfg.start) ? zoomCfg.start : 0);
+    const end = Number.isFinite(dz.end) ? dz.end : (Number.isFinite(zoomCfg.end) ? zoomCfg.end : 100);
+    const range = computeKlineYAxisRange(currentKlineCandles, start, end);
+    klineChart.setOption({ yAxis: { min: range.min, max: range.max } }, false);
+  }
+  function renderKlineSymbol(symbol) {
+    const item = klineMap[symbol];
+    if (!item) {
+      klineChart.clear();
+      renderLinkedScoreChartsByKlineSymbol('');
+      return;
+    }
+
+    const dates = item.dates || [];
+    const candles = item.candles || [];
+    const precomputedMaMap = item.ma || {};
+    currentKlineCandles = candles;
+    const yRange = computeKlineYAxisRange(candles, 0, 100);
+    const maSeries = KLINE_MA_PERIODS.map((period) => buildKlineMaSeries(candles, period, precomputedMaMap));
+    const maLegend = KLINE_MA_PERIODS.map((period) => `MA${period}`);
+    const prevOpt = klineChart.getOption() || {};
+    const prevZoom = (prevOpt.dataZoom && prevOpt.dataZoom[0]) || {};
+    const zoomStart = Number.isFinite(prevZoom.start) ? prevZoom.start : 0;
+    const zoomEnd = Number.isFinite(prevZoom.end) ? prevZoom.end : 100;
+
+    klineChart.setOption({
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        formatter: (params) => {
+          if (!params || !params.length) return '-';
+          const date = params[0].axisValue || '';
+          const lines = [String(date)];
+          for (const p of params) {
+            if (p.seriesType === 'candlestick') {
+              const raw = Array.isArray(p.data) ? p.data : (Array.isArray(p.value) ? p.value : []);
+              let openV = null;
+              let closeV = null;
+              let lowV = null;
+              let highV = null;
+
+              if (raw.length >= 5) {
+                openV = Number(raw[1]);
+                closeV = Number(raw[2]);
+                lowV = Number(raw[3]);
+                highV = Number(raw[4]);
+              } else if (raw.length >= 4) {
+                openV = Number(raw[0]);
+                closeV = Number(raw[1]);
+                lowV = Number(raw[2]);
+                highV = Number(raw[3]);
+              }
+
+              const lowShow = Number.isFinite(lowV) && Number.isFinite(highV) ? Math.min(lowV, highV) : lowV;
+              const highShow = Number.isFinite(lowV) && Number.isFinite(highV) ? Math.max(lowV, highV) : highV;
+              lines.push(`Open: ${num3(openV)}`);
+              lines.push(`Close: ${num3(closeV)}`);
+              lines.push(`Low: ${num3(lowShow)}`);
+              lines.push(`High: ${num3(highShow)}`);
+            } else if (p.seriesType === 'scatter') {
+              const d = p.data || {};
+              lines.push(`${p.seriesName}: price ${num3(d.price)}, amount ${num(d.amount)}, trend ${num(d.trend_score)}, qty ${qty(d.qty)}`);
+            }
+          }
+          return lines.join('<br/>');
+        },
+      },
+      legend: { data: ['K', ...maLegend, 'BUY', 'SELL'] },
+      dataZoom: [
+        { type: 'inside', xAxisIndex: 0, start: zoomStart, end: zoomEnd },
+        { type: 'slider', xAxisIndex: 0, start: zoomStart, end: zoomEnd },
+      ],
+      xAxis: {
+        type: 'category',
+        data: dates,
+        boundaryGap: false,
+        axisLine: { onZero: false },
+      },
+      yAxis: {
+        type: 'value',
+        scale: true,
+        min: yRange.min,
+        max: yRange.max,
+        axisLabel: { formatter: (v) => num3(v) },
+      },
+      series: [
+        {
+          name: 'K',
+          type: 'candlestick',
+          data: candles,
+          itemStyle: {
+            color: '#d14343',
+            color0: '#00a76f',
+            borderColor: '#d14343',
+            borderColor0: '#00a76f',
+          },
+        },
+        ...maSeries,
+        buildKlineTradeSeries(item.buy_points, 'BUY', KLINE_TRADE_STYLE.BUY),
+        buildKlineTradeSeries(item.sell_points, 'SELL', KLINE_TRADE_STYLE.SELL),
+      ],
+    }, true);
+    updateKlineYAxisByZoom({ start: zoomStart, end: zoomEnd });
+    renderLinkedScoreChartsByKlineSymbol(symbol);
+  }
+
+  function renderKline(charts) {
+    klineMap = charts.kline || {};
+    const symbols = Object.keys(klineMap).sort();
+
+    if (!symbols.length) {
+      klineSymbolEl.innerHTML = '<option value="">N/A</option>';
+      klineChart.clear();
+      renderLinkedScoreChartsByKlineSymbol('');
+      return;
+    }
+
+    const prev = klineSymbolEl.value;
+    klineSymbolEl.innerHTML = symbols
+      .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(formatSymbolDisplay(s))}</option>`)
+      .join('');
+    klineSymbolEl.value = symbols.includes(prev) ? prev : symbols[0];
+    renderKlineSymbol(klineSymbolEl.value);
+  }
+
+  function renderLinkedScoreChartsByKlineSymbol(symbol) {
+    const selectedSymbol = String(symbol || '').trim();
+    const selectedTrendMap = (
+      selectedSymbol && Object.prototype.hasOwnProperty.call(trendSeriesMapCache, selectedSymbol)
+    ) ? { [selectedSymbol]: trendSeriesMapCache[selectedSymbol] } : {};
+    const selectedTrendSeries = buildTrendLineSeries(selectedTrendMap);
+    const filteredBuyPoints = filterTrendPointsBySymbol(trendBuyPointsCache, selectedSymbol);
+    const filteredSellPoints = filterTrendPointsBySymbol(trendSellPointsCache, selectedSymbol);
+    const trendBuySeries = buildTrendSignalSeries(filteredBuyPoints, 'BUY', TREND_TRADE_STYLE.BUY);
+    const trendSellSeries = buildTrendSignalSeries(filteredSellPoints, 'SELL', TREND_TRADE_STYLE.SELL);
+    const trendGuideSeries = {
+      name: 'Trend Guides',
+      type: 'line',
+      data: [],
+      silent: true,
+      symbol: 'none',
+      lineStyle: { opacity: 0 },
+      tooltip: { show: false },
+      markLine: {
+        silent: true,
+        symbol: ['none', 'none'],
+        label: { show: false },
+        lineStyle: {
+          type: 'dashed',
+          width: 1,
+          color: '#a0a7b4',
+          opacity: 0.75,
+        },
+        data: [
+          { yAxis: -30 },
+          { yAxis: -10 },
+          { yAxis: 10 },
+          { yAxis: 30 },
+        ],
+      },
+    };
+
+    trendChart.setOption({
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: {
+          type: 'cross',
+          snap: false,
+          crossStyle: {
+            type: 'dashed',
+            color: '#7f8795',
+            width: 1,
+          },
+          label: {
+            show: true,
+            backgroundColor: '#2f3640',
+            color: '#ffffff',
+          },
+        },
+        formatter: (items) => {
+          if (!items || !items.length) return '-';
+          const lines = [String(items[0].axisValue || '')];
+          for (const it of items) {
+            const v = Array.isArray(it.value) ? it.value[1] : it.value;
+            lines.push(`${it.marker}${it.seriesName}: ${num(v)}`);
+          }
+          return lines.join('<br/>');
+        },
+      },
+      legend: { show: false },
+      dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
+      xAxis: { type: 'category', data: trendDatesCache },
+      yAxis: {
+        type: 'value',
+        min: -50,
+        max: 50,
+        axisLabel: { formatter: (v) => Number(v).toFixed(2) },
+        axisPointer: {
+          show: true,
+          lineStyle: {
+            type: 'dashed',
+            color: '#7f8795',
+            width: 1,
+          },
+          label: {
+            show: true,
+            formatter: (params) => `Trend: ${num(params.value)}`,
+          },
+        },
+      },
+      series: [...selectedTrendSeries, trendBuySeries, trendSellSeries, trendGuideSeries],
+    }, true);
+
+    if (hybridChartTitleEl) hybridChartTitleEl.style.display = 'none';
+    if (hybridChartEl) hybridChartEl.style.display = 'none';
+    hybridChart.clear();
+  }
+
+  function computeDrawdownFromNav(navValues) {
+    const data = Array.isArray(navValues) ? navValues : [];
+    const out = [];
+    let peak = null;
+    for (const raw of data) {
+      const v = Number(raw);
+      if (!Number.isFinite(v) || v <= 0) {
+        out.push(null);
+        continue;
+      }
+      if (peak === null || v > peak) {
+        peak = v;
+      }
+      if (!Number.isFinite(peak) || peak <= 0) {
+        out.push(0);
+        continue;
+      }
+      out.push(v / peak - 1.0);
+    }
+    return out;
+  }
+
+  function renderCharts(charts, strategyId = '') {
+    const dates = charts.dates || [];
+
+    navChart.setOption({
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['Strategy', 'Benchmark', 'BUY', 'SELL'] },
+      dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
+      xAxis: { type: 'category', data: dates },
+      yAxis: { type: 'value', scale: true, axisLabel: { formatter: (v) => Number(v).toFixed(2) } },
+      series: [
+        {
+          name: 'Strategy',
+          type: 'line',
+          data: charts.nav || [],
+          smooth: true,
+          symbol: 'none',
+          tooltip: { valueFormatter: (v) => num(v) },
+        },
+        {
+          name: 'Benchmark',
+          type: 'line',
+          data: charts.benchmark_nav || [],
+          smooth: true,
+          symbol: 'none',
+          tooltip: { valueFormatter: (v) => num(v) },
+        },
+        buildScatterSeries(charts.buy_points, 'BUY', '#d14343', 'triangle'),
+        buildScatterSeries(charts.sell_points, 'SELL', '#00a76f', 'diamond'),
+      ]
+    });
+
+    renderKline(charts);
+
+    const trend = charts.trend || {};
+    const ranking = charts.ranking || {};
+    const trendDates = trend.dates || dates;
+    const trendSeriesMap = trend.series || {};
+    const hybridDates = ranking.dates || dates;
+    const hybridSeriesMap = ranking.hybrid || {};
+    const trendSymbols = Object.keys(trendSeriesMap);
+    const hybridSymbols = Object.keys(hybridSeriesMap);
+    const holdingsSymbols = Object.keys((charts.holdings && charts.holdings.series) || {}).filter((s) => s !== 'CASH');
+    const klineSymbols = Object.keys(charts.kline || {});
+    const colorSymbols = Array.from(new Set([...trendSymbols, ...hybridSymbols, ...holdingsSymbols, ...klineSymbols])).sort();
+    symbolColorMap = buildSymbolColorMap(colorSymbols);
+    trendDatesCache = trendDates;
+    trendSeriesMapCache = trendSeriesMap;
+    hybridDatesCache = hybridDates;
+    hybridSeriesMapCache = hybridSeriesMap;
+    trendBuyPointsCache = charts.buy_points || [];
+    trendSellPointsCache = charts.sell_points || [];
+    momentumStrategyActive = isMomentumStrategy(strategyId);
+
+    if (trendDistModuleEl) trendDistModuleEl.style.display = momentumStrategyActive ? 'none' : '';
+    if (momentumStrategyActive) {
+      trendDistChart.clear();
+    } else {
+      renderTrendDistribution(trendSeriesMap);
+    }
+    renderHoldings(charts.holdings || {});
+    renderLinkedScoreChartsByKlineSymbol(klineSymbolEl.value);
+
+    const strategyDrawdown = charts.drawdown || [];
+    const benchmarkDrawdown = computeDrawdownFromNav(charts.benchmark_nav || []);
+
+    ddChart.setOption({
+      tooltip: {
+        trigger: 'axis',
+        formatter: (items) => {
+          if (!items || !items.length) return '-';
+          const lines = [String(items[0].axisValue || '')];
+          for (const it of items) {
+            const v = Array.isArray(it.value) ? it.value[1] : it.value;
+            lines.push(`${it.marker}${it.seriesName}: ${pct(v)}`);
+          }
+          return lines.join('<br/>');
+        },
+      },
+      legend: { data: ['Strategy Drawdown', 'Benchmark Drawdown'] },
+      dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
+      xAxis: { type: 'category', data: dates },
+      yAxis: { type: 'value', axisLabel: { formatter: (v) => (v * 100).toFixed(0) + '%' } },
+      series: [
+        {
+          name: 'Strategy Drawdown',
+          type: 'line',
+          data: strategyDrawdown,
+          areaStyle: {},
+          lineStyle: { color: '#d14343' },
+          symbol: 'none',
+        },
+        {
+          name: 'Benchmark Drawdown',
+          type: 'line',
+          data: benchmarkDrawdown,
+          lineStyle: { color: '#2e86de', type: 'dashed', width: 1.5 },
+          symbol: 'none',
+        },
+      ],
+    });
+  }
+
+
+  function renderHoldings(holdings) {
+    const dates = (holdings && holdings.dates) || [];
+    const seriesMap = (holdings && holdings.series) || {};
+    const rawOrder = (holdings && holdings.order) || [];
+
+    const assetOrder = rawOrder.filter((x) => x !== 'CASH');
+    const order = [...assetOrder, 'CASH'];
+
+    if (!dates.length) {
+      holdingsChart.clear();
+      holdingsSeriesKeys = [];
+      if (holdingsSelectorEl) holdingsSelectorEl.innerHTML = '';
+      return;
+    }
+
+    const availableKeys = order.filter((name) => name === 'CASH' || Object.prototype.hasOwnProperty.call(seriesMap, name));
+    holdingsSeriesKeys = availableKeys.slice();
+
+    const stackedSeries = availableKeys
+      .map((name) => {
+        const values = (seriesMap[name] || new Array(dates.length).fill(0)).map((v) => Number(v || 0));
+        const color = name === 'CASH' ? '#9aa1ad' : (symbolColorMap[name] || '#4c78a8');
+        const displayName = holdingsDisplayName(name);
+        return {
+          name: displayName,
+          type: 'bar',
+          stack: 'holdings-stack',
+          barMaxWidth: 14,
+          itemStyle: { color },
+          emphasis: { focus: 'series' },
+          data: values,
+        };
+      });
+
+    // ECharts merges series by default; clear to avoid stale symbols from previous runs.
+    holdingsChart.clear();
+    holdingsChart.setOption({
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (items) => {
+          if (!items || !items.length) return '-';
+          const lines = [String(items[0].axisValue || '')];
+          for (const it of items) {
+            lines.push(`${it.marker}${it.seriesName}: ${num(it.value)}`);
+          }
+          return lines.join('<br/>');
+        },
+      },
+      legend: { type: 'scroll' },
+      dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
+      xAxis: { type: 'category', data: dates },
+      yAxis: { type: 'value', axisLabel: { formatter: (v) => num(v) } },
+      series: stackedSeries,
+    });
+    renderHoldingsSelector(holdingsSeriesKeys);
+    applyHoldingsSelection();
+  }
+  function renderHoldingsSelector(rawKeys) {
+    if (!holdingsSelectorEl) return;
+    const keys = Array.isArray(rawKeys) ? rawKeys : [];
+    holdingsSelectorEl.innerHTML = keys.map((rawKey) => `
+      <label><input type="checkbox" data-holdings-symbol="${escapeHtml(rawKey)}" checked> ${escapeHtml(holdingsDisplayName(rawKey))}</label>
+    `).join('');
+    for (const box of holdingsSelectorEl.querySelectorAll('input[type="checkbox"]')) {
+      box.addEventListener('change', applyHoldingsSelection);
+    }
+  }
+
+  function applyHoldingsSelection() {
+    if (!holdingsSelectorEl) return;
+    const selectedRawKeys = new Set(
+      Array.from(holdingsSelectorEl.querySelectorAll('input[type="checkbox"]:checked'))
+        .map((x) => x.getAttribute('data-holdings-symbol') || '')
+        .filter(Boolean)
+    );
+    const selectedMap = {};
+    for (const rawKey of holdingsSeriesKeys) {
+      selectedMap[holdingsDisplayName(rawKey)] = selectedRawKeys.has(rawKey);
+    }
+    holdingsChart.setOption({ legend: { selected: selectedMap } });
+  }
+
+  function setHoldingsSelection(checked) {
+    if (!holdingsSelectorEl) return;
+    for (const box of holdingsSelectorEl.querySelectorAll('input[type="checkbox"]')) {
+      box.checked = Boolean(checked);
+    }
+    applyHoldingsSelection();
+  }
+
+  function renderHeatmap(monthly) {
+    const years = monthly.years || [];
+    const months = monthly.months || [];
+    const data = monthly.data || [];
+
+    let absMax = 1;
+    for (const row of data) {
+      const v = Number(row[2]);
+      if (!Number.isNaN(v)) {
+        absMax = Math.max(absMax, Math.abs(v));
+      }
+    }
+
+    heatChart.setOption({
+      tooltip: { formatter: p => `${years[p.value[1]]}-${months[p.value[0]]}: ${Number(p.value[2]).toFixed(2)}%` },
+      xAxis: { type: 'category', data: months },
+      yAxis: { type: 'category', data: years.map(String) },
+      visualMap: {
+        min: -absMax,
+        max: absMax,
+        calculable: true,
+        orient: 'horizontal',
+        left: 'center',
+        bottom: 0,
+        inRange: {
+          color: ['#0b8a4a', '#86cfaa', '#f7f7f7', '#f0a0a0', '#c81010']
+        },
+      },
+      series: [{
+        type: 'heatmap',
+        data,
+        label: { show: true, formatter: p => `${Number(p.value[2]).toFixed(1)}%` }
+      }]
+    });
+  }
+
+  function renderAnnual(rows) {
+    const tbody = document.querySelector('#annualTable tbody');
+    const formatExcess = (value, baseline, formatter) => {
+      const v = Number(value);
+      const b = Number(baseline);
+      const baseText = formatter(v);
+      if (!Number.isFinite(v) || !Number.isFinite(b)) return baseText;
+      const excess = v - b;
+      const sign = excess > 0 ? '+' : '';
+      const cls = excess > 0 ? 'pnl-profit' : (excess < 0 ? 'pnl-loss' : '');
+      return `${baseText}<span class="${cls}">(${sign}${formatter(excess)})</span>`;
+    };
+    tbody.innerHTML = (rows || []).map((r) => `
+      <tr>
+        <td>${r.year ?? '-'}</td>
+        <td>${formatExcess(r.return, r.benchmark_return, pct)}</td>
+        <td>${qty(r.trade_count)}</td>
+        <td>${pct(r.win_rate)}</td>
+        <td>${num(r.profit_factor)}</td>
+        <td>${formatExcess(r.sharpe, r.benchmark_sharpe, num)}</td>
+      </tr>
+    `).join('');
+  }
+
+  function renderTradeFilter(rows) {
+    const prev = symbolFilterEl.value;
+    const symbols = Array.from(new Set((rows || []).map(r => String(r.symbol || '').trim()).filter(Boolean))).sort();
+    symbolFilterEl.innerHTML = `<option value="">ALL</option>${symbols
+      .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(formatSymbolDisplay(s))}</option>`)
+      .join('')}`;
+    if (prev && symbols.includes(prev)) {
+      symbolFilterEl.value = prev;
+    }
+  }
+
+  function buildSymbolStats(trades, symbols = []) {
+    const map = {};
+    for (const s of symbols) {
+      const symbol = String(s || '').trim();
+      if (symbol) map[symbol] = [];
+    }
+    for (const t of trades || []) {
+      if (String(t.side || '').toUpperCase() !== 'SELL') continue;
+      const symbol = String(t.symbol || '').trim();
+      if (!symbol) continue;
+      if (!map[symbol]) map[symbol] = [];
+      map[symbol].push(Number(t.pnl || 0));
+    }
+
+    return Object.keys(map).sort().map(symbol => {
+      const pnls = map[symbol];
+      const tradeCount = pnls.length;
+      const wins = pnls.filter(x => x > 0).length;
+      const winRate = tradeCount > 0 ? wins / tradeCount : 0;
+      const gain = pnls.filter(x => x > 0).reduce((a, b) => a + b, 0);
+      const loss = Math.abs(pnls.filter(x => x < 0).reduce((a, b) => a + b, 0));
+      const profitFactor = loss > 0 ? gain / loss : (gain > 0 ? 999 : 0);
+      const contribution = pnls.reduce((a, b) => a + b, 0);
+      return {
+        symbol,
+        trade_count: tradeCount,
+        win_rate: winRate,
+        profit_factor: profitFactor,
+        contribution,
+      };
+    });
+  }
+
+  function getSymbolStatsSortDirection(sortKey) {
+    if (symbolStatsSort.key === sortKey) {
+      return symbolStatsSort.direction;
+    }
+    return sortKey === 'contribution_abs' ? 'desc' : 'asc';
+  }
+
+  function applySymbolStatsSort(sortKey) {
+    if (!sortKey) return;
+    if (symbolStatsSort.key === sortKey) {
+      symbolStatsSort = {
+        key: sortKey,
+        direction: symbolStatsSort.direction === 'asc' ? 'desc' : 'asc',
+      };
+    } else {
+      symbolStatsSort = {
+        key: sortKey,
+        direction: getSymbolStatsSortDirection(sortKey),
+      };
+    }
+    renderSymbolStats();
+  }
+
+  function updateSymbolSortIndicators() {
+    for (const btn of symbolSortBtnEls) {
+      const key = String(btn.getAttribute('data-sort-key') || '');
+      const indicatorEl = btn.querySelector('[data-sort-indicator]');
+      if (!indicatorEl) continue;
+      if (key === symbolStatsSort.key) {
+        indicatorEl.textContent = symbolStatsSort.direction === 'asc' ? '↑' : '↓';
+      } else {
+        indicatorEl.textContent = '↕';
+      }
+    }
+  }
+
+  function sortSymbolStatsRows(rows) {
+    const key = symbolStatsSort.key;
+    const dir = symbolStatsSort.direction === 'asc' ? 1 : -1;
+    return rows.slice().sort((a, b) => {
+      if (key === 'instrument') {
+        const codeA = asNumber(symbolCode(a.symbol), Number.NaN);
+        const codeB = asNumber(symbolCode(b.symbol), Number.NaN);
+        if (Number.isFinite(codeA) && Number.isFinite(codeB) && codeA !== codeB) {
+          return (codeA - codeB) * dir;
+        }
+        return symbolCode(a.symbol).localeCompare(symbolCode(b.symbol)) * dir;
+      }
+      if (key === 'contribution_abs') {
+        const av = Math.abs(asNumber(a.contribution));
+        const bv = Math.abs(asNumber(b.contribution));
+        if (av !== bv) return (av - bv) * dir;
+        return symbolCode(a.symbol).localeCompare(symbolCode(b.symbol));
+      }
+      const av = asNumber(a[key]);
+      const bv = asNumber(b[key]);
+      if (av !== bv) return (av - bv) * dir;
+      return symbolCode(a.symbol).localeCompare(symbolCode(b.symbol));
+    });
+  }
+
+  function renderSymbolStats(rows = null) {
+    if (Array.isArray(rows)) {
+      symbolStatsSort = { key: 'contribution_abs', direction: 'desc' };
+      allSymbolStats = rows
+        .map((r) => ({
+          symbol: String(r.symbol || '').trim(),
+          trade_count: asNumber(r.trade_count),
+          win_rate: asNumber(r.win_rate),
+          profit_factor: asNumber(r.profit_factor),
+          contribution: asNumber(r.contribution),
+        }))
+        .filter((r) => r.symbol);
+    }
+
+    const sortedRows = sortSymbolStatsRows(allSymbolStats);
+    updateSymbolSortIndicators();
+
+    const tbody = document.querySelector('#symbolTable tbody');
+    tbody.innerHTML = sortedRows.map(r => {
+      const c = Number(r.contribution || 0);
+      const cls = c > 0 ? 'pnl-profit' : (c < 0 ? 'pnl-loss' : '');
+      return `
+      <tr>
+        <td>${escapeHtml(formatSymbolDisplay(r.symbol || ''))}</td>
+        <td>${qty(r.trade_count)}</td>
+        <td>${pct(r.win_rate)}</td>
+        <td>${num(r.profit_factor)}</td>
+        <td class="${cls}">${signedAmount(c)}</td>
+      </tr>
+      `;
+    }).join('');
+  }
+
+  function renderTrades(rows, symbol) {
+    const tbody = document.querySelector('#tradeTable tbody');
+    const s = String(symbol || '').trim();
+    const selected = (rows || []).filter(r => !s || String(r.symbol || '') === s).slice().reverse();
+
+    tbody.innerHTML = selected.map(r => {
+      const side = String(r.side || '').toUpperCase();
+      const buyCost = side === 'BUY' ? num(r.total_cost ?? r.gross) : '-';
+      const buyRatio = side === 'BUY' ? pct(r.position_ratio) : '-';
+      const pnlRaw = side === 'SELL' ? Number(r.pnl ?? 0) : null;
+      const pnlClass = pnlRaw === null ? '' : (pnlRaw > 0 ? 'pnl-profit' : (pnlRaw < 0 ? 'pnl-loss' : ''));
+      const pnlText = pnlRaw === null ? '-' : signedAmount(pnlRaw);
+
+      return `
+      <tr>
+        <td>${r.date || ''}</td>
+        <td>${escapeHtml(formatSymbolDisplay(r.symbol || ''))}</td>
+        <td>${side}</td>
+        <td>${num(r.trend_score)}</td>
+        <td>${num(r.momentum_score)}</td>
+        <td>${num(r.hybrid_score)}</td>
+        <td>${qty(r.qty)}</td>
+        <td>${num(r.price)}</td>
+        <td>${num(r.fee)}</td>
+        <td>${buyCost}</td>
+        <td>${buyRatio}</td>
+        <td class="${pnlClass}">${pnlText}</td>
+        <td>${r.reason || ''}</td>
+      </tr>
+    `;
+    }).join('');
+  }
+
+  async function runBacktest() {
+    runBtn.disabled = true;
+    statusEl.textContent = 'Running backtest...';
+    const strategyId = String(strategySelectEl?.value || 'trend_score_v1');
+    let selectedSymbols = [];
+    if (!isMomentumStrategy(strategyId)) {
+      let selection;
+      try {
+        selection = collectBacktestSelection();
+      } catch (err) {
+        statusEl.textContent = `Failed: ${err.message}`;
+        runBtn.disabled = false;
+        return;
+      }
+      selectedSymbols = selection.selectedSymbols || [];
+      if (!selectedSymbols.length) {
+        statusEl.textContent = 'Please select at least one symbol.';
+        runBtn.disabled = false;
+        return;
+      }
+    }
+
+    const benchmarkMode = String(benchmarkModeEl?.value || 'equal_weight_pool');
+    let benchmarkSymbol = String(benchmarkSymbolEl?.value || '').trim().toUpperCase();
+    if (benchmarkMode === 'symbol' && !benchmarkSymbol) {
+      benchmarkSymbol = DEFAULT_BENCHMARK_SYMBOL;
+      if (benchmarkSymbolEl) benchmarkSymbolEl.value = benchmarkSymbol;
+    }
+
+    const strategyParams = {};
+    if (isMomentumStrategy(strategyId)) {
+      const nShort = Number(momentumNShortEl?.value);
+      const nMid = Number(momentumNMidEl?.value);
+      const nLong = Number(momentumNLongEl?.value);
+      const entryThreshold = Number(momentumEntryThresholdEl?.value);
+      const maxHoldings = Number(momentumMaxHoldingsEl?.value);
+      const momShort = Number(momentumShortWindowEl?.value);
+      const momLong = Number(momentumLongWindowEl?.value);
+      const wMomShort = Number(momentumShortWeightEl?.value);
+      const wMomLong = Number(momentumLongWeightEl?.value);
+      const wHybridMom = Number(hybridMomentumWeightEl?.value);
+      const wHybridTrend = Number(hybridTrendWeightEl?.value);
+      const rebalanceWeekday = Number(rebalanceWeekdayEl?.value);
+      const maxEntryTrendScore = Number(maxEntryTrendScoreEl?.value);
+      const buyFilters = [];
+      if (buyFilterMa20El?.checked) buyFilters.push(BUY_FILTER_IDS.MA20);
+      if (buyFilterMa60El?.checked) buyFilters.push(BUY_FILTER_IDS.MA60);
+      if (buyFilterMa200El?.checked) buyFilters.push(BUY_FILTER_IDS.MA200);
+      if (buyFilterTrendMaxEl?.checked) buyFilters.push(BUY_FILTER_IDS.TREND_MAX);
+      const sellSignals = [];
+      if (sellSignalHardStopEl?.checked) sellSignals.push(SELL_SIGNAL_IDS.HARD_STOP);
+      if (sellSignalChandelierEl?.checked) sellSignals.push(SELL_SIGNAL_IDS.CHANDELIER);
+      if (sellSignalMaBreakdownEl?.checked) sellSignals.push(SELL_SIGNAL_IDS.MA_BREAKDOWN);
+
+      if (![nShort, nMid, nLong, entryThreshold, maxHoldings, momShort, momLong, wMomShort, wMomLong, wHybridMom, wHybridTrend, rebalanceWeekday, maxEntryTrendScore].every((x) => Number.isFinite(x))) {
+        statusEl.textContent = 'Please input valid momentum strategy parameters.';
+        runBtn.disabled = false;
+        return;
+      }
+      if (!(nShort < nMid && nMid < nLong)) {
+        statusEl.textContent = 'Require n_short < n_mid < n_long for momentum strategy.';
+        runBtn.disabled = false;
+        return;
+      }
+      if (!(momLong > momShort && momShort > 0)) {
+        statusEl.textContent = 'Require momentum_window_long > momentum_window_short > 0.';
+        runBtn.disabled = false;
+        return;
+      }
+      if (!(entryThreshold > 0)) {
+        statusEl.textContent = 'Require entry_threshold > 0 for momentum strategy.';
+        runBtn.disabled = false;
+        return;
+      }
+      if (maxHoldings <= 0) {
+        statusEl.textContent = 'Require max_holdings > 0.';
+        runBtn.disabled = false;
+        return;
+      }
+      if (!(rebalanceWeekday >= 1 && rebalanceWeekday <= 5)) {
+        statusEl.textContent = 'Require rebalance_weekday in [1, 5].';
+        runBtn.disabled = false;
+        return;
+      }
+      if (buyFilters.includes(BUY_FILTER_IDS.TREND_MAX) && !(maxEntryTrendScore > 0)) {
+        statusEl.textContent = 'Require max_entry_trend_score > 0 when trend_score_max filter is enabled.';
+        runBtn.disabled = false;
+        return;
+      }
+
+      strategyParams.n_short = Math.round(nShort);
+      strategyParams.n_mid = Math.round(nMid);
+      strategyParams.n_long = Math.round(nLong);
+      strategyParams.entry_threshold = entryThreshold;
+      strategyParams.max_holdings = Math.round(maxHoldings);
+      strategyParams.momentum_window_short = Math.round(momShort);
+      strategyParams.momentum_window_long = Math.round(momLong);
+      strategyParams.momentum_weight_short = wMomShort;
+      strategyParams.momentum_weight_long = wMomLong;
+      strategyParams.hybrid_weight_momentum = wHybridMom;
+      strategyParams.hybrid_weight_trend = wHybridTrend;
+      strategyParams.rebalance_weekday = Math.round(rebalanceWeekday);
+      strategyParams.ranking_mode = 'hybrid';
+      strategyParams.rebalance_frequency = 'weekly';
+      strategyParams.buy_filters = buyFilters;
+      strategyParams.sell_signals = sellSignals;
+      strategyParams.max_entry_trend_score = maxEntryTrendScore;
+    } else {
+      const nShort = Number(nShortEl?.value);
+      const nMid = Number(nMidEl?.value);
+      const nLong = Number(nLongEl?.value);
+      const entryThresholdMin = Number(entryThresholdMinEl?.value);
+      const entryThresholdMax = Number(entryThresholdMaxEl?.value);
+      if (![nShort, nMid, nLong, entryThresholdMin, entryThresholdMax].every((x) => Number.isFinite(x))) {
+        statusEl.textContent = 'Please input valid trend strategy parameters.';
+        runBtn.disabled = false;
+        return;
+      }
+      if (!(nShort < nMid && nMid < nLong)) {
+        statusEl.textContent = 'Require n_short < n_mid < n_long.';
+        runBtn.disabled = false;
+        return;
+      }
+      if (!(entryThresholdMin > 0 && entryThresholdMax > 0)) {
+        statusEl.textContent = 'Require entry_threshold_min > 0 and entry_threshold_max > 0.';
+        runBtn.disabled = false;
+        return;
+      }
+      if (entryThresholdMin > entryThresholdMax) {
+        statusEl.textContent = 'Require entry_threshold_min <= entry_threshold_max.';
+        runBtn.disabled = false;
+        return;
+      }
+      strategyParams.n_short = Math.round(nShort);
+      strategyParams.n_mid = Math.round(nMid);
+      strategyParams.n_long = Math.round(nLong);
+      strategyParams.entry_threshold_min = entryThresholdMin;
+      strategyParams.entry_threshold_max = entryThresholdMax;
+    }
+
+    const payload = {
+      start_date: document.getElementById('startDate').value,
+      end_date: document.getElementById('endDate').value,
+      initial_capital: Number(document.getElementById('capital').value || 200000),
+      strategy_id: strategyId,
+      strategy_params: strategyParams,
+      selected_symbols: selectedSymbols,
+      benchmark_mode: benchmarkMode,
+      benchmark_symbol: benchmarkMode === 'symbol' ? benchmarkSymbol : '',
+    };
+
+    try {
+      const resp = await fetch('/backtest/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.status !== 'ok') {
+        throw new Error(data.detail || data.status || 'backtest_failed');
+      }
+
+      statusEl.textContent = `Done. run_id=${data.run_id} | days=${data.meta.timeline_days} | benchmark=${data.meta?.benchmark || '-'}`;
+      renderSummary(data.summary || {});
+      renderBenchmarkSummary(data.benchmark_summary || {});
+      renderStrategyHighlights(data.strategy_highlights || {}, data.meta?.strategy_id || strategyId);
+      renderCharts(data.charts || {}, data.meta?.strategy_id || strategyId);
+      renderHeatmap(data.monthly_heatmap || {});
+      renderAnnual(data.annual_returns || []);
+
+      allTrades = data.trades || [];
+      renderTradeFilter(allTrades);
+      renderTrades(allTrades, symbolFilterEl.value);
+
+      const stats = (data.symbol_stats && data.symbol_stats.length)
+        ? data.symbol_stats
+        : buildSymbolStats(allTrades, (data.meta && data.meta.symbols) || []);
+      renderSymbolStats(stats);
+    } catch (err) {
+      statusEl.textContent = `Failed: ${err.message}`;
+    } finally {
+      runBtn.disabled = false;
+      navChart.resize();
+      klineChart.resize();
+      trendChart.resize();
+      trendDistChart.resize();
+      hybridChart.resize();
+      holdingsChart.resize();
+      ddChart.resize();
+      heatChart.resize();
+    }
+  }
+
+  renderStrategySelector();
+  applyStrategyPanel();
+  applyBenchmarkPanel();
+  applyStrategyParamsFromCatalog(strategySelectEl.value);
+  renderStrategyHighlights({}, strategySelectEl.value);
+
+  strategySelectEl.addEventListener('change', () => {
+    applyStrategyPanel();
+    applyStrategyParamsFromCatalog(strategySelectEl.value);
+    renderStrategyHighlights({}, strategySelectEl.value);
+  });
+  benchmarkModeEl?.addEventListener('change', applyBenchmarkPanel);
+  runBtn.addEventListener('click', runBacktest);
+  renderBacktestSymbolTable(initialInstruments);
+  holdingsSelectAllBtn?.addEventListener('click', () => setHoldingsSelection(true));
+  holdingsSelectNoneBtn?.addEventListener('click', () => setHoldingsSelection(false));
+  for (const btn of symbolSortBtnEls) {
+    btn.addEventListener('click', () => {
+      const key = String(btn.getAttribute('data-sort-key') || '');
+      applySymbolStatsSort(key);
+    });
+  }
+  updateSymbolSortIndicators();
+  goOptimizeBtn?.addEventListener('click', () => {
+    document.getElementById('optimizeSectionTitle')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  symbolFilterEl.addEventListener('change', () => renderTrades(allTrades, symbolFilterEl.value));
+  klineSymbolEl.addEventListener('change', () => renderKlineSymbol(klineSymbolEl.value));
+  klineChart.on('dataZoom', (params) => updateKlineYAxisByZoom(params));
+  window.addEventListener('resize', () => {
+    navChart.resize();
+    klineChart.resize();
+    trendChart.resize();
+    trendDistChart.resize();
+    hybridChart.resize();
+    holdingsChart.resize();
+    ddChart.resize();
+    heatChart.resize();
+  });
+})();
+</script>
+
+<script>
+(() => {
+  const loadParamsBtn = document.getElementById('optLoadParamsBtn');
+  const addWindowBtn = document.getElementById('optAddWindowBtn');
+  const startBtn = document.getElementById('optStartBtn');
+  const cancelBtn = document.getElementById('optCancelBtn');
+  const enableLooEl = document.getElementById('optEnableLoo');
+  const parallelModeEl = document.getElementById('optParallelMode');
+  const manualWorkersEl = document.getElementById('optManualWorkers');
+  const windowTbody = document.querySelector('#optWindowTable tbody');
+  const paramTbody = document.querySelector('#optParamTable tbody');
+  const selectedCountEl = document.getElementById('optSelectedCount');
+  const progressEl = document.getElementById('optProgress');
+  const progressTextEl = document.getElementById('optProgressText');
+  const statusEl = document.getElementById('optStatus');
+  const summaryEl = document.getElementById('optSummary');
+  const resultTbody = document.querySelector('#optResultTable tbody');
+  const capitalEl = document.getElementById('capital');
+
+  if (!loadParamsBtn || !windowTbody || !paramTbody || !startBtn || !cancelBtn) {
+    return;
+  }
+
+  let currentJobId = '';
+  let pollTimer = null;
+  let knownParams = [];
+
+  function fmtNum(v, d = 4) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
+    return Number(v).toFixed(d);
+  }
+
+  function fmtPct(v, d = 2) {
+    if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
+    return `${(Number(v) * 100).toFixed(d)}%`;
+  }
+
+  function escapeHtml(text) {
+    const s = String(text ?? '');
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function setProgress(percent, label) {
+    const p = Math.max(0, Math.min(Number(percent || 0), 1));
+    progressEl.value = p;
+    progressTextEl.textContent = label || `${(p * 100).toFixed(1)}%`;
+  }
+
+  function updateManualWorkersEnabled() {
+    manualWorkersEl.disabled = parallelModeEl.value !== 'manual';
+  }
+
+  function updateSelectedCount() {
+    const checked = paramTbody.querySelectorAll('input[data-role="enable"]:checked').length;
+    selectedCountEl.textContent = String(checked);
+  }
+
+  function addWindowRow(startDate = '', endDate = '') {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><input data-role="start" type="date" value="${escapeHtml(startDate)}"></td>
+      <td><input data-role="end" type="date" value="${escapeHtml(endDate)}"></td>
+      <td><button type="button" data-role="remove-window">Remove</button></td>
+    `;
+    const startInput = tr.querySelector('input[data-role="start"]');
+    const endInput = tr.querySelector('input[data-role="end"]');
+    const removeBtn = tr.querySelector('button[data-role="remove-window"]');
+    const onWindowChanged = () => {
+      persistCustomWindows(collectWindows());
+    };
+    startInput?.addEventListener('change', onWindowChanged);
+    endInput?.addEventListener('change', onWindowChanged);
+    removeBtn.addEventListener('click', () => {
+      tr.remove();
+      if (!windowTbody.querySelector('tr')) {
+        addWindowRow('', '');
+      }
+      persistCustomWindows(collectWindows());
+    });
+    windowTbody.appendChild(tr);
+  }
+
+  function collectWindows() {
+    const rows = Array.from(windowTbody.querySelectorAll('tr'));
+    const windows = rows.map((row) => {
+      const start = row.querySelector('input[data-role="start"]')?.value || '';
+      const end = row.querySelector('input[data-role="end"]')?.value || '';
+      return { start_date: start, end_date: end };
+    }).filter((x) => x.start_date && x.end_date);
+    return windows;
+  }
+
+  function defaultYearWindows() {
+    const now = new Date();
+    const endYear = Math.max(2020, now.getFullYear() - 1);
+    const rows = [];
+    for (let y = 2020; y <= endYear; y += 1) {
+      rows.push({
+        start_date: `${y}-01-01`,
+        end_date: `${y}-12-31`,
+      });
+    }
+    return rows;
+  }
+
+  function windowKey(x) {
+    return `${x.start_date}|${x.end_date}`;
+  }
+
+  function dedupeWindows(windows) {
+    const out = [];
+    const seen = new Set();
+    for (const item of windows || []) {
+      const start = String(item?.start_date || '').trim();
+      const end = String(item?.end_date || '').trim();
+      if (!start || !end) continue;
+      const k = `${start}|${end}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push({ start_date: start, end_date: end });
+    }
+    return out;
+  }
+
+  function loadSavedCustomWindows() {
+    try {
+      const raw = localStorage.getItem('opt_custom_windows_v1');
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return dedupeWindows(parsed);
+    } catch (_err) {
+      return [];
+    }
+  }
+
+  function persistCustomWindows(allWindows) {
+    const defaults = dedupeWindows(defaultYearWindows());
+    const defaultSet = new Set(defaults.map(windowKey));
+    const custom = dedupeWindows(allWindows).filter((x) => !defaultSet.has(windowKey(x)));
+    try {
+      localStorage.setItem('opt_custom_windows_v1', JSON.stringify(custom));
+    } catch (_err) {
+      // ignore localStorage errors
+    }
+  }
+
+  function resetWindowsWithDefaults() {
+    windowTbody.innerHTML = '';
+    const defaults = dedupeWindows(defaultYearWindows());
+    const custom = loadSavedCustomWindows();
+    const merged = dedupeWindows([...defaults, ...custom]);
+    for (const item of merged) {
+      addWindowRow(item.start_date, item.end_date);
+    }
+    if (!merged.length) {
+      addWindowRow('', '');
+    }
+  }
+
+  function collectSelectedParams() {
+    const rows = Array.from(paramTbody.querySelectorAll('tr'));
+    const selected = [];
+
+    for (const row of rows) {
+      const enabled = row.querySelector('input[data-role="enable"]')?.checked;
+      if (!enabled) continue;
+      const key = row.getAttribute('data-key') || '';
+      const minVal = Number(row.querySelector('input[data-role="min"]')?.value);
+      const maxVal = Number(row.querySelector('input[data-role="max"]')?.value);
+      const stepVal = Number(row.querySelector('input[data-role="step"]')?.value);
+      if (!key || Number.isNaN(minVal) || Number.isNaN(maxVal) || Number.isNaN(stepVal)) {
+        continue;
+      }
+      selected.push({ key, min: minVal, max: maxVal, step: stepVal });
+    }
+
+    return selected;
+  }
+
+  function renderParams(items) {
+    knownParams = Array.isArray(items) ? items : [];
+    paramTbody.innerHTML = knownParams.map((p) => {
+      const key = String(p.key || '');
+      const current = p.current;
+      const step = p.step_suggest ?? (p.value_type === 'int' ? 1 : 0.1);
+      const minVal = current ?? 0;
+      const maxVal = current ?? 0;
+      return `
+      <tr data-key="${escapeHtml(key)}">
+        <td><input data-role="enable" type="checkbox"></td>
+        <td>${escapeHtml(key)}</td>
+        <td>${escapeHtml(current)}</td>
+        <td><input data-role="min" type="number" value="${escapeHtml(minVal)}" step="any"></td>
+        <td><input data-role="max" type="number" value="${escapeHtml(maxVal)}" step="any"></td>
+        <td><input data-role="step" type="number" value="${escapeHtml(step)}" step="any"></td>
+        <td>${escapeHtml(p.value_type || 'float')}</td>
+      </tr>
+      `;
+    }).join('');
+
+    for (const box of paramTbody.querySelectorAll('input[data-role="enable"]')) {
+      box.addEventListener('change', updateSelectedCount);
+    }
+    updateSelectedCount();
+  }
+
+  function stopPolling() {
+    if (pollTimer) {
+      clearInterval(pollTimer);
+      pollTimer = null;
+    }
+  }
+
+  async function loadParams() {
+    loadParamsBtn.disabled = true;
+    statusEl.textContent = 'Loading tunable parameters...';
+    try {
+      const resp = await fetch('/backtest/api/optimize/params');
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || 'load_optimize_params_failed');
+      }
+      renderParams(data.items || []);
+      statusEl.textContent = `Loaded ${Number(data.count || 0)} tunable parameters.`;
+    } catch (err) {
+      statusEl.textContent = `Failed to load tunable parameters: ${err.message}`;
+    } finally {
+      loadParamsBtn.disabled = false;
+    }
+  }
+
+  function renderSummary(result) {
+    const summary = result?.summary || {};
+    const hardReasons = summary.hard_filter_reason_counts || {};
+    const output = {
+      status: result?.status || '-',
+      raw_combo_count: summary.raw_combo_count,
+      valid_combo_count: summary.valid_combo_count,
+      invalid_combo_count: summary.invalid_combo_count,
+      invalid_combo_reasons: summary.invalid_combo_reasons || {},
+      evaluated_combo_count: summary.evaluated_combo_count,
+      completed_combo_count: summary.completed_combo_count,
+      partial_combo_count: summary.partial_combo_count,
+      hard_filtered_count: summary.hard_filtered_count,
+      hard_filter_reason_counts: {
+        dd_exceed: hardReasons.dd_exceed || 0,
+        trade_too_few: hardReasons.trade_too_few || 0,
+        min_sharpe_non_positive: hardReasons.min_sharpe_non_positive || 0,
+      },
+      ranked_rows_total: summary.ranked_rows_total,
+      ranked_rows_kept: summary.ranked_rows_kept,
+      workers: summary.workers,
+      enable_loo: summary.enable_loo,
+    };
+    summaryEl.textContent = JSON.stringify(output, null, 2);
+  }
+
+  function renderRows(rows) {
+    const list = Array.isArray(rows) ? rows : [];
+    resultTbody.innerHTML = list.map((row) => {
+      const params = row.params || {};
+      const paramText = Object.keys(params)
+        .sort()
+        .map((k) => `${k}=${params[k]}`)
+        .join(', ');
+      const coverage = `${row.completed_windows || 0}/${row.total_windows || 0}`;
+      return `
+      <tr>
+        <td>${escapeHtml(row.rank)}</td>
+        <td>${fmtNum(row.score, 4)}</td>
+        <td>${row.is_partial ? 'YES' : 'NO'}</td>
+        <td>${escapeHtml(coverage)}</td>
+        <td>${fmtNum(row.median_sharpe, 4)}</td>
+        <td>${fmtNum(row.min_sharpe, 4)}</td>
+        <td>${fmtNum(row.std_sharpe, 4)}</td>
+        <td>${fmtPct(row.max_drawdown_worst, 2)}</td>
+        <td>${escapeHtml(row.trade_count_total)}</td>
+        <td>${fmtPct(row.win_rate, 2)}</td>
+        <td>${fmtNum(row.profit_factor, 4)}</td>
+        <td>${row.hard_filter_passed ? 'YES' : 'NO'}</td>
+        <td>${escapeHtml(paramText)}</td>
+      </tr>
+      `;
+    }).join('');
+  }
+
+  async function fetchResult(jobId) {
+    try {
+      const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(jobId)}/result`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || 'load_optimize_result_failed');
+      }
+      renderSummary(data);
+      renderRows(data.rows || []);
+      const rows = data.rows || [];
+      statusEl.textContent = `${data.status || 'completed'}. rows=${rows.length}`;
+    } catch (err) {
+      statusEl.textContent = `Failed to load result: ${err.message}`;
+    }
+  }
+
+  async function pollStatus() {
+    if (!currentJobId) return;
+    try {
+      const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(currentJobId)}/status`);
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || 'poll_status_failed');
+      }
+
+      const progress = data.progress || {};
+      const percent = Number(progress.percent || 0);
+      const done = Number(progress.done_units || 0);
+      const total = Number(progress.total_units || 1);
+      setProgress(percent, `${(percent * 100).toFixed(1)}% (${done}/${total})`);
+
+      const st = String(data.status || 'running');
+      statusEl.textContent = `Optimization ${st}. ${done}/${total}`;
+
+      if (st === 'completed' || st === 'cancelled' || st === 'failed') {
+        stopPolling();
+        startBtn.disabled = false;
+        cancelBtn.disabled = true;
+        await fetchResult(currentJobId);
+      }
+    } catch (err) {
+      stopPolling();
+      startBtn.disabled = false;
+      cancelBtn.disabled = true;
+      statusEl.textContent = `Status polling failed: ${err.message}`;
+    }
+  }
+
+  async function startOptimization() {
+    const selectedParams = collectSelectedParams();
+    if (!selectedParams.length) {
+      statusEl.textContent = 'Please select at least one parameter for optimization.';
+      return;
+    }
+
+    const windows = collectWindows();
+    if (!windows.length) {
+      statusEl.textContent = 'Please provide at least one valid date window.';
+      return;
+    }
+    persistCustomWindows(windows);
+
+    const payload = {
+      initial_capital: Number(capitalEl?.value || 200000),
+      windows,
+      selected_params: selectedParams,
+      enable_loo: Boolean(enableLooEl.checked),
+      parallel_mode: String(parallelModeEl.value || 'auto'),
+      manual_workers: parallelModeEl.value === 'manual' ? Number(manualWorkersEl.value || 1) : null,
+    };
+
+    startBtn.disabled = true;
+    cancelBtn.disabled = false;
+    statusEl.textContent = 'Starting optimization job...';
+    summaryEl.textContent = 'Running...';
+    resultTbody.innerHTML = '';
+    setProgress(0, '0%');
+
+    try {
+      const resp = await fetch('/backtest/api/optimize/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || 'start_optimize_failed');
+      }
+      currentJobId = String(data.job_id || '');
+      if (!currentJobId) {
+        throw new Error('missing_job_id');
+      }
+
+      stopPolling();
+      pollTimer = setInterval(pollStatus, 1500);
+      await pollStatus();
+    } catch (err) {
+      startBtn.disabled = false;
+      cancelBtn.disabled = true;
+      statusEl.textContent = `Failed to start optimization: ${err.message}`;
+    }
+  }
+
+  async function cancelOptimization() {
+    if (!currentJobId) return;
+    cancelBtn.disabled = true;
+    try {
+      const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(currentJobId)}/cancel`, { method: 'POST' });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || 'cancel_optimize_failed');
+      }
+      statusEl.textContent = `Cancellation requested. status=${data.status || 'cancelling'}`;
+    } catch (err) {
+      statusEl.textContent = `Failed to cancel optimization: ${err.message}`;
+      cancelBtn.disabled = false;
+    }
+  }
+
+  loadParamsBtn.addEventListener('click', loadParams);
+  addWindowBtn.addEventListener('click', () => {
+    addWindowRow('', '');
+    persistCustomWindows(collectWindows());
+  });
+  startBtn.addEventListener('click', startOptimization);
+  cancelBtn.addEventListener('click', cancelOptimization);
+  parallelModeEl.addEventListener('change', updateManualWorkersEnabled);
+
+  updateManualWorkersEnabled();
+  resetWindowsWithDefaults();
+
+  loadParams();
+})();
+</script>
+{% endblock %}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

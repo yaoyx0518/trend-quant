@@ -1,0 +1,209 @@
+﻿:root {
+  --bg: #f6f8fb;
+  --text: #1a1f2c;
+  --panel: #ffffff;
+  --line: #dce3ef;
+  --accent: #0b6e99;
+}
+
+body {
+  margin: 0;
+  background: linear-gradient(180deg, #f4f7fb 0%, #edf2f8 100%);
+  color: var(--text);
+  font-family: "Segoe UI", Tahoma, sans-serif;
+}
+
+.site-header {
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  padding: 14px 20px;
+}
+
+.site-header h1 {
+  margin: 0 0 8px;
+  font-size: 20px;
+}
+
+nav a {
+  margin-right: 14px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+main {
+  padding: 20px;
+}
+
+section {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 16px;
+}
+
+pre {
+  overflow-x: auto;
+  background: #f7f9fc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+th, td {
+  border: 1px solid var(--line);
+  padding: 8px;
+  text-align: left;
+}
+
+.bt-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.bt-form-row label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.bt-form-row input:not([type="checkbox"]) {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 130px;
+}
+
+.bt-form-row input[type="checkbox"] {
+  min-width: auto;
+  width: auto;
+  padding: 0;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.bt-form-row button {
+  padding: 8px 14px;
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #fff;
+  cursor: pointer;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: 10px;
+  margin: 14px 0;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #f9fbff;
+}
+
+.card .k {
+  color: #556;
+  font-size: 12px;
+}
+
+.card .v {
+  margin-top: 6px;
+  font-weight: 600;
+  font-size: 18px;
+}
+
+.chart-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  margin: 14px 0;
+}
+
+.chart-lg {
+  height: 420px;
+}
+
+.chart-kline {
+  height: 630px;
+}
+
+.chart-md {
+  height: 340px;
+}
+
+@media (min-width: 1100px) {
+  .chart-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  .chart-kline {
+    height: 520px;
+  }
+}
+
+.bt-form-row select {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-width: 90px;
+}
+
+
+.pnl-profit {
+  color: #d14343;
+  font-weight: 600;
+}
+
+.pnl-loss {
+  color: #00a76f;
+  font-weight: 600;
+}
+
+.opt-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 10px;
+}
+
+.opt-progress-wrap progress {
+  width: min(560px, 100%);
+  height: 14px;
+}
+
+#optParamTable input,
+#optWindowTable input {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+#backtestSymbolTable input[type="number"] {
+  width: 160px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+#optSummary {
+  max-height: 300px;
+}
+
+#optResultTable td:last-child {
+  max-width: 460px;
+  white-space: normal;
+  word-break: break-word;
+}

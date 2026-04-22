@@ -1,0 +1,26 @@
+﻿<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{{ title }} | Trend ETF System</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <h1>Trend ETF System</h1>
+    <nav>
+      <a href="/">Overview</a>
+      <a href="/config">Config</a>
+      <a href="/backtest">Backtest</a>
+      <a href="/strategy-history">Strategy History</a>
+      <a href="/instruments">Instruments</a>
+      <a href="/trades">Manual Trades</a>
+      <a href="/logs">Logs</a>
+    </nav>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

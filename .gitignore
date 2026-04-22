@@ -1,0 +1,21 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# Runtime data
+logs/app/*.log
+logs/calc/*.jsonl
+data/runtime/**
+
+# OS
+.DS_Store
+Thumbs.db

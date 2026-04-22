@@ -1,0 +1,148 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section>
+  <h2>Manual Trade Entry</h2>
+
+  <div class="bt-form-row">
+    <label>Date <input id="tradeDate" type="date" value="{{ trade_date }}"></label>
+    <label>Symbol <input id="symbol" type="text" placeholder="510330.SS"></label>
+    <label>Side
+      <select id="side">
+        <option value="BUY">BUY</option>
+        <option value="SELL">SELL</option>
+      </select>
+    </label>
+    <label>Qty <input id="qty" type="number" min="100" step="100"></label>
+    <label>Price <input id="price" type="number" min="0" step="0.001"></label>
+    <label>Fee <input id="fee" type="number" min="0" step="0.01" value="5"></label>
+    <label>Time <input id="tradeTime" type="time" step="1" value="14:45:00"></label>
+    <label>Note <input id="note" type="text" placeholder="optional"></label>
+    <button id="saveTradeBtn" type="button">Save Trade</button>
+  </div>
+
+  <p id="tradeStatus">Ready.</p>
+
+  <div id="portfolioCards" class="cards"></div>
+
+  <h3>Portfolio Snapshot</h3>
+  <table id="portfolioTable">
+    <thead><tr><th>Instrument</th><th>Qty</th><th>Sellable</th><th>Avg Price</th><th>Buy Date</th></tr></thead>
+    <tbody></tbody>
+  </table>
+
+  <h3>Manual Trades (Selected Date)</h3>
+  <table id="tradeTable">
+    <thead>
+      <tr><th>Date</th><th>Instrument</th><th>Side</th><th>Qty</th><th>Price</th><th>Fee</th><th>Time</th><th>Note</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+</section>
+
+<script>
+(() => {
+  const dateEl = document.getElementById('tradeDate');
+  const statusEl = document.getElementById('tradeStatus');
+
+  function num(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return Number(v).toLocaleString(undefined, { maximumFractionDigits: 3 });
+  }
+
+  function setRows(selector, html) {
+    const el = document.querySelector(selector);
+    if (el) el.innerHTML = html;
+  }
+
+  async function loadTrades() {
+    const d = dateEl.value;
+    const resp = await fetch(`/trades/api/manual?trade_date=${encodeURIComponent(d)}`);
+    const data = await resp.json();
+    const items = data.items || [];
+
+    setRows('#tradeTable tbody', items.length ? items.map(i => `
+      <tr>
+        <td>${i.trade_date || ''}</td>
+        <td>${i.symbol_display || i.symbol || ''}</td>
+        <td>${i.side || ''}</td>
+        <td>${num(i.qty)}</td>
+        <td>${num(i.price)}</td>
+        <td>${num(i.fee)}</td>
+        <td>${i.trade_time || ''}</td>
+        <td>${i.note || ''}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="8">No records.</td></tr>');
+  }
+
+  async function loadPortfolio() {
+    const d = dateEl.value;
+    const resp = await fetch(`/trades/api/portfolio?as_of_date=${encodeURIComponent(d)}`);
+    const data = await resp.json();
+
+    const cards = [
+      ['As Of', data.as_of_date || '-'],
+      ['Cash', num(data.cash)],
+      ['Open Positions', data.position_count ?? 0],
+      ['Trades Logged', data.trade_count ?? 0],
+    ];
+    document.getElementById('portfolioCards').innerHTML = cards.map(([k,v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+
+    const rows = data.positions || [];
+    setRows('#portfolioTable tbody', rows.length ? rows.map(p => `
+      <tr>
+        <td>${p.symbol_display || p.symbol || ''}</td>
+        <td>${num(p.qty)}</td>
+        <td>${num(p.sellable_qty)}</td>
+        <td>${num(p.avg_price)}</td>
+        <td>${p.buy_date || ''}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="5">No open position.</td></tr>');
+  }
+
+  async function saveTrade() {
+    const payload = {
+      trade_date: dateEl.value,
+      symbol: document.getElementById('symbol').value,
+      side: document.getElementById('side').value,
+      qty: Number(document.getElementById('qty').value),
+      price: Number(document.getElementById('price').value),
+      fee: Number(document.getElementById('fee').value || 0),
+      trade_time: document.getElementById('tradeTime').value,
+      note: document.getElementById('note').value || '',
+    };
+
+    if (!payload.symbol || !payload.trade_date || !payload.trade_time || payload.qty <= 0 || payload.price <= 0) {
+      statusEl.textContent = 'Please fill symbol/date/time/qty/price correctly.';
+      return;
+    }
+
+    statusEl.textContent = 'Saving...';
+    const resp = await fetch('/trades/api/manual', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) {
+      statusEl.textContent = `Save failed: ${data.detail || 'unknown_error'}`;
+      return;
+    }
+
+    statusEl.textContent = `Saved. total records for ${payload.trade_date}: ${data.count}`;
+    await loadTrades();
+    await loadPortfolio();
+  }
+
+  document.getElementById('saveTradeBtn').addEventListener('click', saveTrade);
+  dateEl.addEventListener('change', async () => {
+    await loadTrades();
+    await loadPortfolio();
+  });
+
+  (async () => {
+    await loadTrades();
+    await loadPortfolio();
+  })();
+})();
+</script>
+{% endblock %}

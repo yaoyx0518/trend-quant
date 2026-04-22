@@ -1,0 +1,12 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section>
+  <h2>Config (YAML Preview)</h2>
+  <h3>app.yaml</h3>
+  <pre>{{ app_cfg }}</pre>
+  <h3>strategy.yaml</h3>
+  <pre>{{ strategy_cfg }}</pre>
+  <h3>instruments.yaml</h3>
+  <pre>{{ instruments_cfg }}</pre>
+</section>
+{% endblock %}

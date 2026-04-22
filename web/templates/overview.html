@@ -1,0 +1,284 @@
+﻿{% extends "base.html" %}
+{% block content %}
+<section>
+  <h2>System Overview</h2>
+  <p id="ovStatus">Loading...</p>
+
+  <div id="ovCards" class="cards"></div>
+
+  <div class="chart-grid">
+    <div>
+      <h3>Latest ACTION Signals</h3>
+      <table id="actionTable">
+        <thead><tr><th>Instrument</th><th>Action</th><th>Level</th><th>Trend</th><th>Qty</th><th>Reason</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+    <div>
+      <h3>Current Positions</h3>
+      <table id="positionTable">
+        <thead><tr><th>Instrument</th><th>Qty</th><th>Sellable</th><th>Avg Price</th><th>Buy Date</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="margin: 14px 0;">
+    <h3>Recent Backtests</h3>
+    <div style="overflow-x: auto;">
+      <table id="btTable">
+        <colgroup>
+          <col style="width: 120px;">
+          <col style="width: 220px;">
+          <col style="width: 220px;">
+          <col style="width: 520px;">
+          <col style="width: 120px;">
+          <col style="width: 110px;">
+          <col style="width: 120px;">
+          <col style="width: 100px;">
+          <col style="width: 90px;">
+        </colgroup>
+        <thead><tr><th>Run ID</th><th>Strategy</th><th>Period</th><th>Params</th><th>Total Return</th><th>Win Rate</th><th>Profit Factor</th><th>Sharpe</th><th>Trades</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+<style>
+  #btTable th:nth-child(2),
+  #btTable td:nth-child(2),
+  #btTable th:nth-child(3),
+  #btTable td:nth-child(3) {
+    white-space: nowrap;
+  }
+
+  #btTable details > summary {
+    cursor: pointer;
+  }
+
+  .ov-param-table {
+    margin: 8px 0 0;
+    border-collapse: collapse;
+    width: max-content;
+    max-width: 100%;
+    font-size: 12px;
+  }
+
+  .ov-param-table th,
+  .ov-param-table td {
+    border: 1px solid var(--line);
+    padding: 4px 6px;
+    vertical-align: top;
+  }
+
+  .ov-param-table th {
+    background: #f7f9fc;
+    white-space: nowrap;
+  }
+
+  .ov-param-table code {
+    font-size: 12px;
+  }
+</style>
+
+<script>
+(() => {
+  const statusEl = document.getElementById('ovStatus');
+
+  function num(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return Number(v).toLocaleString(undefined, { maximumFractionDigits: 2 });
+  }
+
+  function pct(v) {
+    if (v === null || v === undefined || Number.isNaN(v)) return '-';
+    return (Number(v) * 100).toFixed(2) + '%';
+  }
+
+  function escapeHtml(text) {
+    const s = String(text ?? '');
+    return s
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function strategyText(v) {
+    const s = String(v || '').trim();
+    if (!s) return '-';
+    if (s === 'momentum_topn_v3') return 'Momentum TopN v3';
+    if (s === 'momentum_topn_v2') return 'Momentum TopN v2';
+    if (s === 'momentum_topn_v1') return 'Momentum TopN v1';
+    if (s === 'trend_score_v1') return 'Trend Score v1';
+    return s;
+  }
+
+  function formatParamValue(v) {
+    if (v === null || v === undefined) return '-';
+    if (typeof v === 'number') {
+      if (!Number.isFinite(v)) return '-';
+      if (Number.isInteger(v)) return String(v);
+      return Number(v.toFixed(6)).toString();
+    }
+    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    return String(v);
+  }
+
+  function buildParamCells(params, fields) {
+    const out = [];
+    for (const [alias, key] of (fields || [])) {
+      if (!Object.prototype.hasOwnProperty.call(params, key)) continue;
+      out.push(`<td><code>${escapeHtml(alias)}</code>: ${escapeHtml(formatParamValue(params[key]))}</td>`);
+    }
+    return out;
+  }
+
+  function buildParamsDetailsHtml(strategyId, rawParams) {
+    const params = (rawParams && typeof rawParams === 'object') ? rawParams : {};
+    const sid = String(strategyId || '').trim();
+    const rows = [];
+    const knownKeys = new Set();
+
+    const pushRow = (groupName, fields) => {
+      const cells = buildParamCells(params, fields);
+      for (const [, key] of fields) knownKeys.add(key);
+      if (!cells.length) return;
+      rows.push(`<tr><th>${escapeHtml(groupName)}</th>${cells.join('')}</tr>`);
+    };
+
+    if (sid === 'momentum_topn_v1' || sid === 'momentum_topn_v2' || sid === 'momentum_topn_v3') {
+      pushRow('TrendScore', [
+        ['n_short', 'n_short'],
+        ['n_mid', 'n_mid'],
+        ['n_long', 'n_long'],
+        ['entry_threshold', 'entry_threshold'],
+      ]);
+      pushRow('Momentum', [
+        ['mom_short', 'momentum_window_short'],
+        ['mom_long', 'momentum_window_long'],
+        ['w_mom_short', 'momentum_weight_short'],
+        ['w_mom_long', 'momentum_weight_long'],
+      ]);
+      pushRow('HybridTrend', [
+        ['w_hybrid_mom', 'hybrid_weight_momentum'],
+        ['w_hybrid_trend', 'hybrid_weight_trend'],
+      ]);
+      pushRow('TopN', [
+        ['max_holdings', 'max_holdings'],
+        ['rebalance_weekday', 'rebalance_weekday'],
+      ]);
+      if (sid === 'momentum_topn_v2' || sid === 'momentum_topn_v3') {
+        pushRow('V2 Extra', [
+          ['buy_above_ma60', 'buy_filter_price_above_ma60'],
+          ['exit_ma_period', 'exit_ma_period'],
+        ]);
+      }
+      if (sid === 'momentum_topn_v3') {
+        pushRow('V3 Extra', [
+          ['max_entry_trend', 'max_entry_trend_score'],
+        ]);
+      }
+    } else {
+      pushRow('TrendScore', [
+        ['n_short', 'n_short'],
+        ['n_mid', 'n_mid'],
+        ['n_long', 'n_long'],
+        ['entry_threshold_min', 'entry_threshold_min'],
+        ['entry_threshold_max', 'entry_threshold_max'],
+      ]);
+    }
+
+    const otherKeys = Object.keys(params)
+      .filter((k) => !knownKeys.has(k))
+      .sort();
+    if (otherKeys.length) {
+      const otherCells = otherKeys.map((k) => `<td><code>${escapeHtml(k)}</code>: ${escapeHtml(formatParamValue(params[k]))}</td>`);
+      rows.push(`<tr><th>Other</th>${otherCells.join('')}</tr>`);
+    }
+
+    if (!rows.length) return '-';
+    return `
+      <details>
+        <summary>View</summary>
+        <table class="ov-param-table"><tbody>${rows.join('')}</tbody></table>
+      </details>
+    `;
+  }
+
+  function setRows(selector, rowsHtml) {
+    const el = document.querySelector(selector);
+    if (el) el.innerHTML = rowsHtml;
+  }
+
+  function render(data) {
+    const cards = [
+      ['Signal Time', data.latest_signal?.ts || '-'],
+      ['Signal Trigger', data.latest_signal?.trigger || '-'],
+      ['Signal Status', data.latest_signal?.status || '-'],
+      ['ACTION Count', data.latest_signal?.action_count ?? 0],
+      ['Cash', num(data.portfolio?.cash)],
+      ['Equity', num(data.portfolio?.equity)],
+      ['Positions', data.portfolio?.position_count ?? 0],
+      ['Trades Logged', data.portfolio?.trade_count ?? 0],
+    ];
+    document.getElementById('ovCards').innerHTML = cards.map(([k,v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+
+    const actions = data.action_signals || [];
+    setRows('#actionTable tbody', actions.length ? actions.map(a => `
+      <tr>
+        <td>${a.symbol_display || a.symbol || ''}</td>
+        <td>${a.action || ''}</td>
+        <td>${a.level || ''}</td>
+        <td>${num(a.trend_score)}</td>
+        <td>${num(a.suggested_qty)}</td>
+        <td>${a.reason || ''}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="6">No actionable signal.</td></tr>');
+
+    const positions = data.portfolio?.positions || [];
+    setRows('#positionTable tbody', positions.length ? positions.map(p => `
+      <tr>
+        <td>${p.symbol_display || p.symbol || ''}</td>
+        <td>${num(p.qty)}</td>
+        <td>${num(p.sellable_qty)}</td>
+        <td>${num(p.avg_price)}</td>
+        <td>${p.buy_date || ''}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="5">No open position.</td></tr>');
+
+    const bts = data.recent_backtests || [];
+    setRows('#btTable tbody', bts.length ? bts.map(b => `
+      <tr>
+        <td>${b.run_id || ''}</td>
+        <td style="white-space: nowrap;">${strategyText(b.strategy)}</td>
+        <td>${b.start_date || ''} ~ ${b.end_date || ''}</td>
+        <td>${buildParamsDetailsHtml(b.strategy, b.params)}</td>
+        <td>${pct(b.total_return)}</td>
+        <td>${pct(b.win_rate)}</td>
+        <td>${num(b.profit_factor)}</td>
+        <td>${num(b.sharpe)}</td>
+        <td>${num(b.trade_count)}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="9">No backtest yet.</td></tr>');
+
+    statusEl.textContent = `Overview ready. as_of=${data.portfolio?.as_of_date || '-'}`;
+  }
+
+  async function loadOverview() {
+    statusEl.textContent = 'Loading overview...';
+    try {
+      const resp = await fetch('/api/overview');
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || 'overview_failed');
+      render(data);
+    } catch (err) {
+      statusEl.textContent = `Failed: ${err.message}`;
+    }
+  }
+
+  loadOverview();
+})();
+</script>
+{% endblock %}

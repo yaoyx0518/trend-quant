@@ -1,0 +1,222 @@
+{
+  "512800.SS": {
+    "symbol": "512800.SS",
+    "code": "512800",
+    "exchange": "SH",
+    "name": "银行",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512800.SS.parquet"
+  },
+  "512000.SS": {
+    "symbol": "512000.SS",
+    "code": "512000",
+    "exchange": "SH",
+    "name": "券商",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512000.SS.parquet"
+  },
+  "512200.SS": {
+    "symbol": "512200.SS",
+    "code": "512200",
+    "exchange": "SH",
+    "name": "房地产",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512200.SS.parquet"
+  },
+  "159928.SZ": {
+    "symbol": "159928.SZ",
+    "code": "159928",
+    "exchange": "SZ",
+    "name": "消费",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\159928.SZ.parquet"
+  },
+  "512690.SS": {
+    "symbol": "512690.SS",
+    "code": "512690",
+    "exchange": "SH",
+    "name": "酒",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512690.SS.parquet"
+  },
+  "512010.SS": {
+    "symbol": "512010.SS",
+    "code": "512010",
+    "exchange": "SH",
+    "name": "医药",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512010.SS.parquet"
+  },
+  "512290.SS": {
+    "symbol": "512290.SS",
+    "code": "512290",
+    "exchange": "SH",
+    "name": "生物医药",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512290.SS.parquet"
+  },
+  "512760.SS": {
+    "symbol": "512760.SS",
+    "code": "512760",
+    "exchange": "SH",
+    "name": "芯片",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512760.SS.parquet"
+  },
+  "515260.SS": {
+    "symbol": "515260.SS",
+    "code": "515260",
+    "exchange": "SH",
+    "name": "电子",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\515260.SS.parquet"
+  },
+  "515050.SS": {
+    "symbol": "515050.SS",
+    "code": "515050",
+    "exchange": "SH",
+    "name": "5G",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\515050.SS.parquet"
+  },
+  "159869.SZ": {
+    "symbol": "159869.SZ",
+    "code": "159869",
+    "exchange": "SZ",
+    "name": "游戏",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\159869.SZ.parquet"
+  },
+  "515030.SS": {
+    "symbol": "515030.SS",
+    "code": "515030",
+    "exchange": "SH",
+    "name": "新能源车",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\515030.SS.parquet"
+  },
+  "515790.SS": {
+    "symbol": "515790.SS",
+    "code": "515790",
+    "exchange": "SH",
+    "name": "光伏",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\515790.SS.parquet"
+  },
+  "159755.SZ": {
+    "symbol": "159755.SZ",
+    "code": "159755",
+    "exchange": "SZ",
+    "name": "电池",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\159755.SZ.parquet"
+  },
+  "515220.SS": {
+    "symbol": "515220.SS",
+    "code": "515220",
+    "exchange": "SH",
+    "name": "煤炭",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\515220.SS.parquet"
+  },
+  "512400.SS": {
+    "symbol": "512400.SS",
+    "code": "512400",
+    "exchange": "SH",
+    "name": "有色金属",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512400.SS.parquet"
+  },
+  "515210.SS": {
+    "symbol": "515210.SS",
+    "code": "515210",
+    "exchange": "SH",
+    "name": "钢铁",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\515210.SS.parquet"
+  },
+  "512660.SS": {
+    "symbol": "512660.SS",
+    "code": "512660",
+    "exchange": "SH",
+    "name": "军工",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\512660.SS.parquet"
+  },
+  "516950.SS": {
+    "symbol": "516950.SS",
+    "code": "516950",
+    "exchange": "SH",
+    "name": "基建50",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\516950.SS.parquet"
+  },
+  "159825.SZ": {
+    "symbol": "159825.SZ",
+    "code": "159825",
+    "exchange": "SZ",
+    "name": "农业",
+    "name_provider": "efinance",
+    "name_updated_at": "2026-03-20T20:19:16.486396",
+    "history_status": "skipped_existing",
+    "history_rows": 534,
+    "history_path": "data\\market\\etf\\159825.SZ.parquet"
+  }
+}

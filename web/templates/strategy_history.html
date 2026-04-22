@@ -1,0 +1,177 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h2>Strategy History</h2>
+  <p>Switch strategy family first, then review each version from newest to oldest.</p>
+
+  <div class="sh-switch" id="familySwitch">
+    {% for family in strategy_families %}
+      <button
+        type="button"
+        class="sh-switch-btn{% if loop.first %} is-active{% endif %}"
+        data-family="{{ family.id }}"
+      >
+        {{ family.name }}
+      </button>
+    {% endfor %}
+  </div>
+
+  {% for family in strategy_families %}
+    <div class="sh-family-panel" data-family-panel="{{ family.id }}"{% if not loop.first %} style="display:none;"{% endif %}>
+      {% for version in family.versions %}
+        <article class="sh-version-card">
+          <h3>{{ version.name }}</h3>
+          <p class="sh-summary">{{ version.summary }}</p>
+
+          <div class="sh-rule-grid">
+            <div class="sh-rule-block">
+              <h4>Buy Signal</h4>
+              <ul>
+                {% for line in version.buy_signal %}
+                  <li>{{ line }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            <div class="sh-rule-block">
+              <h4>Buy Filters</h4>
+              <ul>
+                {% for line in version.buy_filter %}
+                  <li>{{ line }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+            <div class="sh-rule-block">
+              <h4>Sell Signal</h4>
+              <ul>
+                {% for line in version.sell_signal %}
+                  <li>{{ line }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          </div>
+
+          {% if version.improvements_vs_v1 %}
+            <div class="sh-improve">
+              <h4>Improvements vs v1</h4>
+              <ul>
+                {% for line in version.improvements_vs_v1 %}
+                  <li>{{ line }}</li>
+                {% endfor %}
+              </ul>
+            </div>
+          {% endif %}
+        </article>
+      {% endfor %}
+    </div>
+  {% endfor %}
+</section>
+
+<style>
+  .sh-switch {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 14px;
+  }
+
+  .sh-switch-btn {
+    border: 1px solid var(--line);
+    background: #f2f6fb;
+    color: #123;
+    border-radius: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+
+  .sh-switch-btn.is-active {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+
+  .sh-family-panel {
+    display: grid;
+    gap: 12px;
+  }
+
+  .sh-version-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 14px;
+    background: #f9fbff;
+  }
+
+  .sh-version-card h3 {
+    margin: 0 0 8px;
+  }
+
+  .sh-summary {
+    margin: 0 0 10px;
+    color: #3b4a5c;
+  }
+
+  .sh-rule-grid {
+    display: grid;
+    gap: 10px;
+    grid-template-columns: 1fr;
+  }
+
+  .sh-rule-block {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: #fff;
+    padding: 10px;
+  }
+
+  .sh-rule-block h4,
+  .sh-improve h4 {
+    margin: 0 0 8px;
+  }
+
+  .sh-rule-block ul,
+  .sh-improve ul {
+    margin: 0;
+    padding-left: 18px;
+  }
+
+  .sh-improve {
+    margin-top: 10px;
+    border-left: 4px solid #0b6e99;
+    background: #eef7fc;
+    padding: 10px 10px 10px 12px;
+    border-radius: 8px;
+  }
+
+  @media (min-width: 1000px) {
+    .sh-rule-grid {
+      grid-template-columns: repeat(3, 1fr);
+    }
+  }
+</style>
+
+<script>
+(() => {
+  const switchRoot = document.getElementById('familySwitch');
+  if (!switchRoot) return;
+  const btns = Array.from(switchRoot.querySelectorAll('.sh-switch-btn'));
+  const panels = Array.from(document.querySelectorAll('.sh-family-panel'));
+
+  function activate(familyId) {
+    const target = String(familyId || '');
+    for (const btn of btns) {
+      const active = String(btn.getAttribute('data-family') || '') === target;
+      btn.classList.toggle('is-active', active);
+    }
+    for (const panel of panels) {
+      const active = String(panel.getAttribute('data-family-panel') || '') === target;
+      panel.style.display = active ? '' : 'none';
+    }
+  }
+
+  for (const btn of btns) {
+    btn.addEventListener('click', () => activate(btn.getAttribute('data-family')));
+  }
+})();
+</script>
+{% endblock %}

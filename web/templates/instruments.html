@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block content %}
+<section>
+  <h2>Instrument Management</h2>
+  <p id="instStatus">Loading instruments...</p>
+  <div style="overflow-x: auto;">
+    <table id="instTable">
+      <thead>
+        <tr>
+          <th>Code</th>
+          <th>Symbol</th>
+          <th>Name</th>
+          <th>Enabled</th>
+          <th>Rows</th>
+          <th>Date Range</th>
+          <th>Backfill Daily K</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+</section>
+
+<script>
+(() => {
+  const statusEl = document.getElementById('instStatus');
+  const tableBody = document.querySelector('#instTable tbody');
+  const today = new Date().toISOString().slice(0, 10);
+
+  function esc(v) {
+    return String(v ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function dateRangeText(start, end) {
+    if (!start && !end) return '-';
+    return `${start || '-'} ~ ${end || '-'}`;
+  }
+
+  function fmtNum(v) {
+    const n = Number(v || 0);
+    if (!Number.isFinite(n)) return '-';
+    return n.toLocaleString();
+  }
+
+  function render(items) {
+    if (!Array.isArray(items) || !items.length) {
+      tableBody.innerHTML = '<tr><td colspan="7">No local instrument data found.</td></tr>';
+      return;
+    }
+
+    tableBody.innerHTML = items.map((item) => {
+      const symbol = String(item.symbol || '').trim();
+      const startDefault = item.local_start_date || '2020-01-01';
+      return `
+        <tr data-symbol="${esc(symbol)}">
+          <td>${esc(item.code || '')}</td>
+          <td>${esc(symbol)}</td>
+          <td>${esc(item.name || '-')}</td>
+          <td>${item.enabled ? 'Yes' : 'No'}</td>
+          <td data-role="rows">${fmtNum(item.rows)}</td>
+          <td data-role="range">${esc(dateRangeText(item.local_start_date, item.local_end_date))}</td>
+          <td>
+            <div class="bt-form-row" style="margin: 0; gap: 6px;">
+              <input data-role="start" type="date" value="${esc(startDefault)}">
+              <input data-role="end" type="date" value="${esc(today)}">
+              <button data-role="backfill" type="button">Backfill</button>
+            </div>
+            <div data-role="msg" style="font-size: 12px; color: #556; margin-top: 4px;"></div>
+          </td>
+        </tr>
+      `;
+    }).join('');
+  }
+
+  async function loadList() {
+    statusEl.textContent = 'Loading instruments...';
+    try {
+      const resp = await fetch('/instruments/api/list');
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.detail || 'list_failed');
+      }
+      render(data.items || []);
+      statusEl.textContent = `Loaded ${Number(data.count || 0)} instruments.`;
+    } catch (err) {
+      statusEl.textContent = `Failed: ${err.message}`;
+      tableBody.innerHTML = '<tr><td colspan="7">Failed to load data.</td></tr>';
+    }
+  }
+
+  function setRowMessage(row, text, isError = false) {
+    const msgEl = row.querySelector('[data-role="msg"]');
+    if (!msgEl) return;
+    msgEl.textContent = text;
+    msgEl.style.color = isError ? '#b42318' : '#556';
+  }
+
+  async function runBackfill(row) {
+    const symbol = String(row.dataset.symbol || '').trim();
+    if (!symbol) return;
+    const startEl = row.querySelector('[data-role="start"]');
+    const endEl = row.querySelector('[data-role="end"]');
+    const btn = row.querySelector('[data-role="backfill"]');
+    const startDate = String(startEl?.value || '').trim();
+    const endDate = String(endEl?.value || '').trim();
+
+    if (!startDate) {
+      setRowMessage(row, 'Please input start date.', true);
+      return;
+    }
+    if (endDate && endDate < startDate) {
+      setRowMessage(row, 'End date must be >= start date.', true);
+      return;
+    }
+
+    if (btn) btn.disabled = true;
+    setRowMessage(row, 'Backfilling...');
+    try {
+      const resp = await fetch(`/instruments/api/${encodeURIComponent(symbol)}/backfill`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          start_date: startDate,
+          end_date: endDate,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.detail || 'backfill_failed');
+      }
+
+      const result = data.result || {};
+      const rowsEl = row.querySelector('[data-role="rows"]');
+      const rangeEl = row.querySelector('[data-role="range"]');
+      if (rowsEl) rowsEl.textContent = fmtNum(result.rows_after);
+      if (rangeEl) {
+        rangeEl.textContent = dateRangeText(result.local_start_after, result.local_end_after);
+      }
+
+      const adjusted = Boolean(result.request_adjusted_to_earliest_available);
+      const adjustedText = adjusted
+        ? ` Requested start adjusted to earliest available ${result.fetched_start || '-'}.`
+        : '';
+      setRowMessage(
+        row,
+        `Done. +${Number(result.added_rows || 0)} rows, local range ${dateRangeText(result.local_start_after, result.local_end_after)}.${adjustedText}`
+      );
+    } catch (err) {
+      setRowMessage(row, `Failed: ${err.message}`, true);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  tableBody.addEventListener('click', async (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (target.getAttribute('data-role') !== 'backfill') return;
+    const row = target.closest('tr');
+    if (!row) return;
+    await runBackfill(row);
+  });
+
+  loadList();
+})();
+</script>
+{% endblock %}
