@@ -11,6 +11,7 @@ from app.routers import backtest, config, instruments, logs, overview, strategy_
 from audit.app_logger import get_logger, setup_logging
 from core.scheduler import SchedulerManager
 from core.settings import load_settings
+from data.storage.db import init_db
 from engine.signal_engine import SignalEngine
 
 settings = load_settings()
@@ -21,6 +22,7 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Path("data").mkdir(exist_ok=True)
+    init_db()
     signal_engine = SignalEngine(
         provider_priority=settings.app.data_provider_priority,
         initial_capital=settings.runtime.account_equity_default,

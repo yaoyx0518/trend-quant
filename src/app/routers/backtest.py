@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from app.instrument_display import format_symbol_display, strip_etf_suffix
 from backtest.backtest_engine import BacktestEngine
 from backtest.optimization_manager import OptimizationJobManager
+from data.storage.db import get_db
 from data.storage.runtime_store import RuntimeStore
 from strategy.catalog import (
     MOMENTUM_STRATEGY_ID,
@@ -204,26 +205,7 @@ async def run_backtest(payload: BacktestRunRequest) -> dict:
 
 @router.get("/api/list")
 async def list_backtests(limit: int = 40) -> dict:
-    base = Path(store.base_dir) / "backtests"
-    if not base.exists():
-        return {"items": []}
-
-    items = []
-    for p in sorted(base.glob("*/result.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-        run_id = p.parent.name
-        data = store.read_json(str(Path("backtests") / run_id / "result.json"), default={})
-        items.append(
-            {
-                "run_id": run_id,
-                "status": data.get("status"),
-                "start_date": data.get("input", {}).get("start_date"),
-                "end_date": data.get("input", {}).get("end_date"),
-                "total_return": data.get("summary", {}).get("total_return"),
-            }
-        )
-        if len(items) >= max(limit, 1):
-            break
-
+    items = get_db().list_backtests_summary(limit=limit)
     return {"items": items}
 
 
@@ -265,8 +247,7 @@ async def get_optimize_result(job_id: str) -> dict:
     return result_payload
 @router.get("/api/{run_id}")
 async def get_backtest_result(run_id: str) -> dict:
-    path = f"backtests/{run_id}/result.json"
-    result = store.read_json(path, default=None)
+    result = get_db().get_backtest(run_id)
     if result is None:
         raise HTTPException(status_code=404, detail="run_id not found")
     return result

@@ -5,15 +5,23 @@ import time
 from datetime import datetime
 
 from backtest.optimization_engine import OptimizationEngine
+from data.storage.db import get_db
 from data.storage.runtime_store import RuntimeStore
 
 
 class OptimizationJobManager:
     def __init__(self) -> None:
         self.runtime_store = RuntimeStore()
+        self._db = None
         self.engine = OptimizationEngine()
         self._jobs: dict[str, dict] = {}
         self._lock = threading.Lock()
+
+    def _get_db(self):
+        if self._db is None:
+            from data.storage.db import get_db
+            self._db = get_db()
+        return self._db
 
     @staticmethod
     def _new_job_id() -> str:
@@ -48,7 +56,7 @@ class OptimizationJobManager:
             if job is not None:
                 job["status_payload"] = merged
         if write_file:
-            self.runtime_store.write_json(self._status_path(job_id), merged)
+            self._get_db().save_optimization_job(job_id, merged)
         return merged
 
     def _set_result(self, job_id: str, payload: dict) -> dict:
@@ -61,7 +69,8 @@ class OptimizationJobManager:
             job = self._jobs.get(job_id)
             if job is not None:
                 job["result_payload"] = merged
-        self.runtime_store.write_json(self._result_path(job_id), merged)
+        status = self.get_status(job_id) or {}
+        self._get_db().save_optimization_job(job_id, status, merged)
         return merged
 
     def start_job(self, payload: dict) -> dict:
@@ -92,7 +101,7 @@ class OptimizationJobManager:
                 "thread": None,
             }
 
-        self.runtime_store.write_json(self._status_path(job_id), {"job_id": job_id, **initial_status})
+        self._get_db().save_optimization_job(job_id, {"job_id": job_id, **initial_status})
 
         thread = threading.Thread(target=self._run_job, args=(job_id, payload), daemon=True)
         with self._lock:
@@ -184,7 +193,7 @@ class OptimizationJobManager:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
-                existing = self.runtime_store.read_json(self._status_path(job_id), default=None)
+                existing = self._get_db().get_optimization_status(job_id)
                 if existing is None:
                     return {"job_id": job_id, "status": "not_found"}
                 status_text = str(existing.get("status", ""))
@@ -205,11 +214,11 @@ class OptimizationJobManager:
             job = self._jobs.get(job_id)
             if job is not None:
                 return dict(job.get("status_payload") or {})
-        return self.runtime_store.read_json(self._status_path(job_id), default=None)
+        return self._get_db().get_optimization_status(job_id)
 
     def get_result(self, job_id: str) -> dict | None:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is not None and job.get("result_payload") is not None:
                 return dict(job.get("result_payload") or {})
-        return self.runtime_store.read_json(self._result_path(job_id), default=None)
+        return self._get_db().get_optimization_result(job_id)

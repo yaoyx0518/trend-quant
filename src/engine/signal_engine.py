@@ -10,6 +10,7 @@ from audit.app_logger import get_logger
 from audit.calc_logger import CalcLogger
 from core.enums import SignalAction, SignalLevel
 from data.service import DataService
+from data.storage.db import get_db
 from data.storage.runtime_store import RuntimeStore
 from portfolio.risk_sizer import RiskSizer
 from portfolio.service import PortfolioService
@@ -22,6 +23,7 @@ logger = get_logger(__name__)
 class SignalEngine:
     def __init__(self, provider_priority: list[str] | None = None, initial_capital: float = 200000.0) -> None:
         self.runtime_store = RuntimeStore()
+        self.db = get_db()
         self.calc_logger = CalcLogger()
         self.data_service = DataService(provider_priority=provider_priority)
         self.strategy = TrendScoreStrategy()
@@ -182,14 +184,14 @@ class SignalEngine:
                 "signals": [],
                 "status": "skipped_non_trading_day",
             }
-            self.runtime_store.write_json(f"signals/{trade_day.isoformat()}.json", payload)
+            self.db.save_signals(trade_day.isoformat(), payload)
             return payload
 
         instruments, strategy_cfg = self._load_configs()
         lookback_days = int(strategy_cfg.get("lookback_days", 120))
         adjust = str(strategy_cfg.get("adjust", "qfq"))
 
-        prev_state = self.runtime_store.read_json("signals/latest_state.json", default={}) or {}
+        prev_state = self.db.get_all_signal_states() or {}
         current_state: dict = {}
 
         portfolio_snapshot = self.portfolio_service.build_snapshot(
@@ -353,8 +355,8 @@ class SignalEngine:
             "unavailable_symbols": unavailable_symbols,
             "status": status,
         }
-        self.runtime_store.write_json(f"signals/{trade_day.isoformat()}.json", payload)
-        self.runtime_store.write_json("signals/latest_state.json", current_state)
+        self.db.save_signals(trade_day.isoformat(), payload)
+        self.db.save_signal_state(current_state)
 
         logger.info("Signal engine %s finished with %s symbols, status=%s", trigger_name, len(snapshots), status)
         return payload

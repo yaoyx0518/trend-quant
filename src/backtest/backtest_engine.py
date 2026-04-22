@@ -9,6 +9,7 @@ import yaml
 from backtest.benchmark import equal_weight_pool_benchmark, single_symbol_benchmark
 from backtest.metrics import compute_annual_returns, compute_drawdown, compute_metrics, compute_monthly_heatmap, compute_symbol_trade_stats
 from core.enums import SignalAction
+from data.storage.db import get_db
 from data.storage.market_store import MarketStore
 from data.storage.runtime_store import RuntimeStore
 from portfolio.risk_sizer import RiskSizer
@@ -39,6 +40,7 @@ class BacktestEngine:
 
     def __init__(self) -> None:
         self.runtime_store = RuntimeStore()
+        self.db = get_db()
         self.market_store = MarketStore()
         self.strategies = {
             TREND_STRATEGY_ID: TrendScoreStrategy(),
@@ -293,7 +295,7 @@ class BacktestEngine:
                 "input": {**payload, "strategy_id": resolved_strategy_id},
             }
             if persist:
-                self.runtime_store.write_json(f"backtests/{run_id}/result.json", result)
+                self.db.save_backtest(run_id, result)
             return result
 
         def has_min_data(s: date) -> bool:
@@ -326,7 +328,7 @@ class BacktestEngine:
                 "meta": {"start_date": start_date.isoformat(), "end_date": end_date.isoformat()},
             }
             if persist:
-                self.runtime_store.write_json(f"backtests/{run_id}/result.json", result)
+                self.db.save_backtest(run_id, result)
             return result
 
         prev_scores: dict[str, float] = {symbol: 0.0 for symbol in symbols}
@@ -1018,7 +1020,7 @@ class BacktestEngine:
             result["charts"] = {}
 
         if persist:
-            self.runtime_store.write_json(f"backtests/{run_id}/result.json", result)
+            self.db.save_backtest(run_id, result)
         return result
 
 

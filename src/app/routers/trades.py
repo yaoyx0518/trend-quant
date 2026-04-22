@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from app.instrument_display import build_symbol_display, load_instrument_name_map
 from core.settings import load_settings
+from data.storage.db import get_db
 from data.storage.runtime_store import RuntimeStore
 from portfolio.service import PortfolioService
 
@@ -32,20 +33,17 @@ class ManualTradePayload(BaseModel):
 @router.get("", response_class=HTMLResponse)
 async def trades_page(request: Request) -> HTMLResponse:
     today = date.today().isoformat()
-    existing = store.read_json(f"trades/manual_trades_{today}.json", default={"items": []})
+    items = get_db().get_trades_by_date(today)
     return templates.TemplateResponse(
         name="trades.html",
         request=request,
-        context={"title": "Manual Trades", "items": existing.get("items", []), "trade_date": today},
+        context={"title": "Manual Trades", "items": items, "trade_date": today},
     )
 
 
 @router.get("/api/manual")
 async def get_manual_trades(trade_date: str) -> dict:
-    payload = store.read_json(f"trades/manual_trades_{trade_date}.json", default={"items": []})
-    items = payload.get("items", []) if isinstance(payload, dict) else []
-    if not isinstance(items, list):
-        items = []
+    items = get_db().get_trades_by_date(trade_date)
 
     name_map = load_instrument_name_map()
     normalized_items: list[dict] = []
@@ -66,16 +64,14 @@ async def save_manual_trade(payload: ManualTradePayload) -> dict:
     if side not in {"BUY", "SELL"}:
         raise HTTPException(status_code=400, detail="side must be BUY or SELL")
 
-    path = f"trades/manual_trades_{payload.trade_date}.json"
-    existing = store.read_json(path, default={"items": []})
-
     row = payload.model_dump()
     row["side"] = side
     row["symbol"] = payload.symbol.strip().upper()
 
-    existing["items"].append(row)
-    store.write_json(path, existing)
-    return {"ok": True, "count": len(existing["items"])}
+    db = get_db()
+    db.add_trade(row)
+    count = len(db.get_trades_by_date(payload.trade_date))
+    return {"ok": True, "count": count}
 
 
 @router.get("/api/portfolio")

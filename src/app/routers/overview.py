@@ -9,6 +9,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.instrument_display import build_symbol_display, load_instrument_name_map
 from core.settings import load_settings
+from data.storage.db import get_db
 from data.storage.runtime_store import RuntimeStore
 from portfolio.service import PortfolioService
 
@@ -26,55 +27,12 @@ def _normalize_enum_text(value: object) -> str:
 
 
 def _latest_signal_payload() -> dict:
-    signal_dir = Path(store.base_dir) / "signals"
-    if not signal_dir.exists():
-        return {}
-
-    files = [p for p in signal_dir.glob("*.json") if p.name != "latest_state.json"]
-    if not files:
-        return {}
-
-    files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    target = files[0]
-    return store.read_json(str(Path("signals") / target.name), default={}) or {}
+    latest = get_db().get_latest_signals(limit=1)
+    return latest[0] if latest else {}
 
 
 def _recent_backtests(limit: int = 40) -> list[dict]:
-    base = Path(store.base_dir) / "backtests"
-    if not base.exists():
-        return []
-
-    items: list[dict] = []
-    for p in sorted(base.glob("*/result.json"), key=lambda x: x.stat().st_mtime, reverse=True):
-        run_id = p.parent.name
-        data = store.read_json(str(Path("backtests") / run_id / "result.json"), default={}) or {}
-        status = str(data.get("status", ""))
-        summary = data.get("summary", {}) if isinstance(data.get("summary"), dict) else {}
-        input_payload = data.get("input", {}) if isinstance(data.get("input"), dict) else {}
-        meta_payload = data.get("meta", {}) if isinstance(data.get("meta"), dict) else {}
-        strategy_overrides = input_payload.get("strategy_overrides")
-        strategy_params = input_payload.get("strategy_params")
-        params = strategy_overrides if isinstance(strategy_overrides, dict) else (
-            strategy_params if isinstance(strategy_params, dict) else {}
-        )
-        items.append(
-            {
-                "run_id": run_id,
-                "strategy": meta_payload.get("strategy_id") or input_payload.get("strategy_id"),
-                "start_date": input_payload.get("start_date"),
-                "end_date": input_payload.get("end_date"),
-                "params": params,
-                "total_return": summary.get("total_return") if status == "ok" else None,
-                "win_rate": summary.get("win_rate") if status == "ok" else None,
-                "profit_factor": summary.get("profit_factor") if status == "ok" else None,
-                "sharpe": summary.get("sharpe") if status == "ok" else None,
-                "trade_count": summary.get("trade_count") if status == "ok" else None,
-                "timeline_days": meta_payload.get("timeline_days"),
-            }
-        )
-        if len(items) >= max(limit, 1):
-            break
-    return items
+    return get_db().list_backtests(limit=limit)
 
 
 @router.get("/", response_class=HTMLResponse)

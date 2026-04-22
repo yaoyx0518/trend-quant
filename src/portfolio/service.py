@@ -10,9 +10,16 @@ logger = get_logger(__name__)
 
 
 class PortfolioService:
-    def __init__(self, runtime_store: RuntimeStore | None = None) -> None:
+    def __init__(self, runtime_store: RuntimeStore | None = None, db=None) -> None:
         self.runtime_store = runtime_store or RuntimeStore()
+        self._db = db
         self.trade_dir = Path(self.runtime_store.base_dir) / "trades"
+
+    def _get_db(self):
+        if self._db is None:
+            from data.storage.db import get_db
+            self._db = get_db()
+        return self._db
 
     @staticmethod
     def _parse_trade_dt(trade_date: str, trade_time: str) -> datetime:
@@ -26,44 +33,40 @@ class PortfolioService:
         return datetime.fromisoformat(f"{date_text}T15:00:00")
 
     def load_manual_trades(self) -> list[dict]:
-        if not self.trade_dir.exists():
-            return []
+        db = self._get_db()
+        rows = db.get_all_trades()
 
         records: list[dict] = []
-        files = sorted(self.trade_dir.glob("manual_trades_*.json"))
-        for file_path in files:
-            payload = self.runtime_store.read_json(str(Path("trades") / file_path.name), default={"items": []})
-            items = payload.get("items", []) if isinstance(payload, dict) else []
-            for idx, item in enumerate(items):
-                symbol = str(item.get("symbol", "")).strip().upper()
-                side = str(item.get("side", "")).strip().upper()
-                trade_date = str(item.get("trade_date", "")).strip()
-                trade_time = str(item.get("trade_time", "15:00:00")).strip()
+        for idx, item in enumerate(rows):
+            symbol = str(item.get("symbol", "")).strip().upper()
+            side = str(item.get("side", "")).strip().upper()
+            trade_date = str(item.get("trade_date", "")).strip()
+            trade_time = str(item.get("trade_time", "15:00:00")).strip()
 
-                try:
-                    qty = int(item.get("qty", 0))
-                    price = float(item.get("price", 0.0))
-                    fee = float(item.get("fee", 0.0))
-                    trade_dt = self._parse_trade_dt(trade_date, trade_time)
-                except Exception:
-                    continue
+            try:
+                qty = int(item.get("qty", 0))
+                price = float(item.get("price", 0.0))
+                fee = float(item.get("fee", 0.0))
+                trade_dt = self._parse_trade_dt(trade_date, trade_time)
+            except Exception:
+                continue
 
-                if symbol == "" or side not in {"BUY", "SELL"} or qty <= 0 or price <= 0:
-                    continue
+            if symbol == "" or side not in {"BUY", "SELL"} or qty <= 0 or price <= 0:
+                continue
 
-                records.append(
-                    {
-                        "id": f"{file_path.name}:{idx}",
-                        "symbol": symbol,
-                        "side": side,
-                        "trade_date": trade_date,
-                        "trade_time": trade_time,
-                        "qty": qty,
-                        "price": price,
-                        "fee": max(fee, 0.0),
-                        "trade_dt": trade_dt,
-                    }
-                )
+            records.append(
+                {
+                    "id": str(item.get("id", idx)),
+                    "symbol": symbol,
+                    "side": side,
+                    "trade_date": trade_date,
+                    "trade_time": trade_time,
+                    "qty": qty,
+                    "price": price,
+                    "fee": max(fee, 0.0),
+                    "trade_dt": trade_dt,
+                }
+            )
 
         records.sort(key=lambda x: (x["trade_dt"], x["id"]))
         return records
@@ -137,7 +140,7 @@ class PortfolioService:
             "positions": normalized_positions,
             "trade_count": len(trades),
         }
-        self.runtime_store.write_json("positions/current_positions.json", snapshot)
+        self._get_db().save_position_snapshot(snapshot)
         return snapshot
 
     @staticmethod

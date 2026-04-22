@@ -15,6 +15,7 @@ venv/
 logs/app/*.log
 logs/calc/*.jsonl
 data/runtime/**
+data/*.db
 
 # OS
 .DS_Store
