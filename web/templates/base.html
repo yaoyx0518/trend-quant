@@ -4,20 +4,27 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{{ title }} | Trend ETF System</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v={{ request.app.state.asset_version|default('1', true) if request is defined else '1' }}">
 </head>
 <body>
+  {% set path = request.url.path if request is defined else '' %}
   <header class="site-header">
-    <h1>Trend ETF System</h1>
-    <nav>
-      <a href="/">Overview</a>
-      <a href="/config">Config</a>
-      <a href="/backtest">Backtest</a>
-      <a href="/strategy-history">Strategy History</a>
-      <a href="/instruments">Instruments</a>
-      <a href="/trades">Manual Trades</a>
-      <a href="/logs">Logs</a>
-    </nav>
+    <div class="site-header__inner">
+      <div class="site-brand">
+        <p class="site-eyebrow">Trend-following workspace</p>
+        <h1>Trend ETF System</h1>
+        <p class="site-subtitle">Research, signal review, manual execution, and backtest analysis for A-share ETF strategies.</p>
+      </div>
+      <nav class="site-nav">
+        <a href="/" class="{% if path == '/' %}is-active{% endif %}">Overview</a>
+        <a href="/config" class="{% if path.startswith('/config') %}is-active{% endif %}">Config</a>
+        <a href="/backtest" class="{% if path.startswith('/backtest') %}is-active{% endif %}">Backtest</a>
+        <a href="/strategy-history" class="{% if path.startswith('/strategy-history') %}is-active{% endif %}">Strategy History</a>
+        <a href="/instruments" class="{% if path.startswith('/instruments') %}is-active{% endif %}">Instruments</a>
+        <a href="/trades" class="{% if path.startswith('/trades') %}is-active{% endif %}">Manual Trades</a>
+        <a href="/logs" class="{% if path.startswith('/logs') %}is-active{% endif %}">Logs</a>
+      </nav>
+    </div>
   </header>
   <main>
     {% block content %}{% endblock %}

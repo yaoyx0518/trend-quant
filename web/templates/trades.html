@@ -1,6 +1,6 @@
 ﻿{% extends "base.html" %}
 {% block content %}
-<section>
+<section class="page-panel trades-page">
   <h2>Manual Trade Entry</h2>
 
   <div class="bt-form-row">
@@ -20,23 +20,31 @@
     <button id="saveTradeBtn" type="button">Save Trade</button>
   </div>
 
-  <p id="tradeStatus">Ready.</p>
+  <p id="tradeStatus" class="status-banner">Ready.</p>
 
   <div id="portfolioCards" class="cards"></div>
 
-  <h3>Portfolio Snapshot</h3>
-  <table id="portfolioTable">
-    <thead><tr><th>Instrument</th><th>Qty</th><th>Sellable</th><th>Avg Price</th><th>Buy Date</th></tr></thead>
-    <tbody></tbody>
-  </table>
+  <div class="table-panel">
+    <h3>Portfolio Snapshot</h3>
+    <div class="table-shell">
+      <table id="portfolioTable">
+        <thead><tr><th>Instrument</th><th>Qty</th><th>Sellable</th><th>Avg Price</th><th>Buy Date</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
 
-  <h3>Manual Trades (Selected Date)</h3>
-  <table id="tradeTable">
-    <thead>
-      <tr><th>Date</th><th>Instrument</th><th>Side</th><th>Qty</th><th>Price</th><th>Fee</th><th>Time</th><th>Note</th></tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="table-panel">
+    <h3>Manual Trades (Selected Date)</h3>
+    <div class="table-shell">
+      <table id="tradeTable">
+        <thead>
+          <tr><th>Date</th><th>Instrument</th><th>Side</th><th>Qty</th><th>Price</th><th>Fee</th><th>Time</th><th>Note</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
 </section>
 
 <script>

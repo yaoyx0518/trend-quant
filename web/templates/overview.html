@@ -1,31 +1,35 @@
 ﻿{% extends "base.html" %}
 {% block content %}
-<section>
+<section class="page-panel overview-page">
   <h2>System Overview</h2>
-  <p id="ovStatus">Loading...</p>
+  <p id="ovStatus" class="status-banner">Loading...</p>
 
   <div id="ovCards" class="cards"></div>
 
   <div class="chart-grid">
-    <div>
+    <div class="table-panel">
       <h3>Latest ACTION Signals</h3>
-      <table id="actionTable">
-        <thead><tr><th>Instrument</th><th>Action</th><th>Level</th><th>Trend</th><th>Qty</th><th>Reason</th></tr></thead>
-        <tbody></tbody>
-      </table>
+      <div class="table-shell">
+        <table id="actionTable">
+          <thead><tr><th>Instrument</th><th>Action</th><th>Level</th><th>Trend</th><th>Qty</th><th>Reason</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
-    <div>
+    <div class="table-panel">
       <h3>Current Positions</h3>
-      <table id="positionTable">
-        <thead><tr><th>Instrument</th><th>Qty</th><th>Sellable</th><th>Avg Price</th><th>Buy Date</th></tr></thead>
-        <tbody></tbody>
-      </table>
+      <div class="table-shell">
+        <table id="positionTable">
+          <thead><tr><th>Instrument</th><th>Qty</th><th>Sellable</th><th>Avg Price</th><th>Buy Date</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
     </div>
   </div>
 
-  <div style="margin: 14px 0;">
+  <div class="table-panel">
     <h3>Recent Backtests</h3>
-    <div style="overflow-x: auto;">
+    <div class="table-shell">
       <table id="btTable">
         <colgroup>
           <col style="width: 120px;">
@@ -72,7 +76,7 @@
   }
 
   .ov-param-table th {
-    background: #f7f9fc;
+    background: rgba(240, 245, 242, 0.94);
     white-space: nowrap;
   }
 

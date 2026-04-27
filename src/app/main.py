@@ -73,6 +73,8 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Trend ETF System", version="0.1.0", lifespan=lifespan)
 
 static_dir = Path("web/static")
+style_file = static_dir / "style.css"
+app.state.asset_version = str(int(style_file.stat().st_mtime)) if style_file.exists() else "1"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 

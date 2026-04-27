@@ -93,6 +93,7 @@ async def backtest_page(request: Request) -> HTMLResponse:
         copied["display_name"] = format_symbol_display(symbol, name)
         normalized_instruments.append(copied)
     instruments = normalized_instruments
+    enabled_instrument_count = sum(1 for item in instruments if item.get("enabled", True))
 
     strategy_path = Path("config/strategy.yaml")
     strategy_payload = {}
@@ -108,6 +109,8 @@ async def backtest_page(request: Request) -> HTMLResponse:
         context={
             "title": "Backtest",
             "instruments": instruments,
+            "instrument_group_label": "20行业ETF标的组",
+            "enabled_instrument_count": enabled_instrument_count,
             "strategy_catalog": strategy_catalog,
         },
     )
@@ -251,4 +254,3 @@ async def get_backtest_result(run_id: str) -> dict:
     if result is None:
         raise HTTPException(status_code=404, detail="run_id not found")
     return result
-

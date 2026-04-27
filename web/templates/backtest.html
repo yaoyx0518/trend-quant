@@ -1,6 +1,6 @@
 ﻿{% extends "base.html" %}
 {% block content %}
-<section>
+<section class="page-panel backtest-page">
   <h2>Backtest Center</h2>
 
   <div class="bt-form-row">
@@ -13,23 +13,21 @@
     <button id="runBtn" type="button">Run Backtest</button>
     <button id="goOptimizeBtn" type="button">Go To Optimization</button>
   </div>
-  <div>
-    <h3 style="margin: 0 0 8px;">Backtest Symbols</h3>
-    <div id="backtestSymbolTableWrap">
-      <table id="backtestSymbolTable">
-        <thead>
-          <tr>
-            <th>Select</th>
-            <th>Instrument</th>
-          </tr>
-        </thead>
-        <tbody></tbody>
-      </table>
-    </div>
+  <div class="content-panel">
+    <h3 style="margin: 0 0 8px;">Backtest Universe</h3>
+    <p style="margin-bottom: 8px;">
+      Fixed group: <strong>{{ instrument_group_label }}</strong>
+      {% if enabled_instrument_count %}
+      ({{ enabled_instrument_count }} enabled instruments)
+      {% endif %}
+    </p>
+    <p class="context-hint" style="margin-top: 0;">
+      The full group participates in backtests by default. Individual symbol checkboxes are no longer needed.
+    </p>
     <div class="bt-form-row" style="margin-top: 10px;">
       <label>Benchmark
         <select id="benchmarkMode">
-          <option value="equal_weight_pool" selected>Equal-weight selected pool</option>
+          <option value="equal_weight_pool" selected>{{ instrument_group_label }} (equal-weight)</option>
           <option value="symbol">Single symbol (buy & hold)</option>
         </select>
       </label>
@@ -38,9 +36,6 @@
         <input id="benchmarkSymbol" type="text" value="512500.SS" placeholder="e.g. 510300.SH">
       </label>
     </div>
-    <p id="momentumUniverseHint" style="display:none; margin-top: 8px; color: #556070;">
-      Momentum TOPN uses all enabled instruments by default. No manual symbol selection is required.
-    </p>
   </div>
   <div id="trendParamsRow" class="bt-form-row">
     <label>n_short <input id="btNShort" type="number" value="5" min="1" step="1"></label>
@@ -97,7 +92,7 @@
     </div>
   </div>
 
-  <p id="btStatus">Ready.</p>
+  <p id="btStatus" class="status-banner">Ready.</p>
 
   <h3>Strategy Metrics</h3>
   <div id="summaryCards" class="cards"></div>
@@ -107,12 +102,12 @@
   <h3>Strategy Highlights</h3>
   <div id="strategyHighlightCards" class="cards"></div>
 
-  <div>
+  <div class="viz-panel">
     <h3>Net Value (Strategy vs Benchmark)</h3>
     <div id="navChart" class="chart-lg"></div>
   </div>
 
-  <div>
+  <div class="viz-panel">
     <div class="bt-form-row">
       <h3 style="margin: 0;">Asset K-Line</h3>
       <label>Instrument
@@ -122,7 +117,7 @@
     <div id="klineChart" class="chart-lg chart-kline"></div>
   </div>
 
-  <div>
+  <div class="viz-panel">
     <h3>Trend Score (Linked To Asset K-Line)</h3>
     <div id="trendChart" class="chart-md"></div>
     <h3 id="hybridChartTitle" style="display:none;">Hybrid Score (Linked To Asset K-Line)</h3>
@@ -133,7 +128,7 @@
     </div>
   </div>
 
-  <div>
+  <div class="viz-panel">
     <h3>Daily Holdings (Stacked)</h3>
     <div class="bt-form-row" style="margin-bottom: 8px;">
       <button id="holdingsSelectAllBtn" type="button">Select All</button>
@@ -143,26 +138,47 @@
     <div id="holdingsChart" class="chart-md"></div>
   </div>
 
-  <div>
+  <div class="viz-panel">
     <h3>Drawdown</h3>
     <div id="ddChart" class="chart-md"></div>
   </div>
 
   <div class="chart-grid">
-    <div>
+    <div class="viz-panel">
       <h3>Monthly Return Heatmap</h3>
       <div id="heatChart" class="chart-md"></div>
     </div>
-    <div>
+    <div class="table-panel">
       <h3>Symbol Backtest Summary</h3>
-      <table id="symbolTable">
+      <div class="table-shell">
+        <table id="symbolTable">
+          <thead>
+            <tr>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="instrument">Instrument <span data-sort-indicator="instrument">↕</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="trade_count">Trades <span data-sort-indicator="trade_count">↕</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="win_rate">Win Rate <span data-sort-indicator="win_rate">↕</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="profit_factor">Profit Factor <span data-sort-indicator="profit_factor">↕</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="contribution_abs">Contribution <span data-sort-indicator="contribution_abs">↓</span></button></th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="table-panel">
+    <h3>Annual Return Table</h3>
+    <div class="table-shell">
+      <table id="annualTable">
         <thead>
           <tr>
-            <th><button type="button" class="sym-sort-btn" data-sort-key="instrument" style="all:unset;cursor:pointer;">Instrument <span data-sort-indicator="instrument">↕</span></button></th>
-            <th><button type="button" class="sym-sort-btn" data-sort-key="trade_count" style="all:unset;cursor:pointer;">Trades <span data-sort-indicator="trade_count">↕</span></button></th>
-            <th><button type="button" class="sym-sort-btn" data-sort-key="win_rate" style="all:unset;cursor:pointer;">Win Rate <span data-sort-indicator="win_rate">↕</span></button></th>
-            <th><button type="button" class="sym-sort-btn" data-sort-key="profit_factor" style="all:unset;cursor:pointer;">Profit Factor <span data-sort-indicator="profit_factor">↕</span></button></th>
-            <th><button type="button" class="sym-sort-btn" data-sort-key="contribution_abs" style="all:unset;cursor:pointer;">Contribution <span data-sort-indicator="contribution_abs">↓</span></button></th>
+            <th>Year</th>
+            <th>Strategy Return</th>
+            <th>Strategy Trades</th>
+            <th>Strategy Win Rate</th>
+            <th>Strategy Profit Factor</th>
+            <th>Strategy Sharpe</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -170,50 +186,38 @@
     </div>
   </div>
 
-  <h3>Annual Return Table</h3>
-  <table id="annualTable">
-    <thead>
-      <tr>
-        <th>Year</th>
-        <th>Strategy Return</th>
-        <th>Strategy Trades</th>
-        <th>Strategy Win Rate</th>
-        <th>Strategy Profit Factor</th>
-        <th>Strategy Sharpe</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
-
-  <div class="bt-form-row">
-    <h3 style="margin: 0;">Trades</h3>
-    <label>Instrument
-      <select id="tradeSymbolFilter">
-        <option value="">ALL</option>
-      </select>
-    </label>
+  <div class="table-panel">
+    <div class="bt-form-row">
+      <h3 style="margin: 0;">Trades</h3>
+      <label>Instrument
+        <select id="tradeSymbolFilter">
+          <option value="">ALL</option>
+        </select>
+      </label>
+    </div>
+    <div class="table-shell">
+      <table id="tradeTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Instrument</th>
+            <th>Side</th>
+            <th>Trend Score</th>
+            <th>Momentum Z</th>
+            <th>Hybrid Score</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th>Fee</th>
+            <th>Buy Cost</th>
+            <th>Buy Ratio</th>
+            <th>Sell PnL</th>
+            <th>Reason</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
-
-  <table id="tradeTable">
-    <thead>
-      <tr>
-        <th>Date</th>
-        <th>Instrument</th>
-        <th>Side</th>
-        <th>Trend Score</th>
-        <th>Momentum Z</th>
-        <th>Hybrid Score</th>
-        <th>Qty</th>
-        <th>Price</th>
-        <th>Fee</th>
-        <th>Buy Cost</th>
-        <th>Buy Ratio</th>
-        <th>Sell PnL</th>
-        <th>Reason</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
 
   <hr>
   <h2 id="optimizeSectionTitle">Parameter Optimization</h2>
@@ -236,32 +240,36 @@
     <span id="optWindowHint">Use custom date ranges for optimization.</span>
   </div>
 
-  <table id="optWindowTable">
-    <thead>
-      <tr>
-        <th>Start Date</th>
-        <th>End Date</th>
-        <th>Action</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="table-shell">
+    <table id="optWindowTable">
+      <thead>
+        <tr>
+          <th>Start Date</th>
+          <th>End Date</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
   <h3>Tunable Parameters</h3>
-  <table id="optParamTable">
-    <thead>
-      <tr>
-        <th>Use</th>
-        <th>Param Key</th>
-        <th>Current</th>
-        <th>Min</th>
-        <th>Max</th>
-        <th>Step</th>
-        <th>Type</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="table-shell">
+    <table id="optParamTable">
+      <thead>
+        <tr>
+          <th>Use</th>
+          <th>Param Key</th>
+          <th>Current</th>
+          <th>Min</th>
+          <th>Max</th>
+          <th>Step</th>
+          <th>Type</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 
   <div class="bt-form-row">
     <span>Selected Params: <strong id="optSelectedCount">0</strong></span>
@@ -273,32 +281,34 @@
     <progress id="optProgress" max="1" value="0"></progress>
     <span id="optProgressText">0%</span>
   </div>
-  <p id="optStatus">Optimization idle.</p>
+  <p id="optStatus" class="status-banner">Optimization idle.</p>
 
   <h3>Optimization Summary</h3>
   <pre id="optSummary">No result yet.</pre>
 
   <h3>Optimization Results (Top 50 by Score)</h3>
-  <table id="optResultTable">
-    <thead>
-      <tr>
-        <th>Rank</th>
-        <th>Score</th>
-        <th>Partial</th>
-        <th>Coverage</th>
-        <th>Median Sharpe</th>
-        <th>Min Sharpe</th>
-        <th>Std Sharpe</th>
-        <th>Worst DD</th>
-        <th>Trade Count</th>
-        <th>Win Rate</th>
-        <th>Profit Factor</th>
-        <th>Hard Pass</th>
-        <th>Params</th>
-      </tr>
-    </thead>
-    <tbody></tbody>
-  </table>
+  <div class="table-shell">
+    <table id="optResultTable">
+      <thead>
+        <tr>
+          <th>Rank</th>
+          <th>Score</th>
+          <th>Partial</th>
+          <th>Coverage</th>
+          <th>Median Sharpe</th>
+          <th>Min Sharpe</th>
+          <th>Std Sharpe</th>
+          <th>Worst DD</th>
+          <th>Trade Count</th>
+          <th>Win Rate</th>
+          <th>Profit Factor</th>
+          <th>Hard Pass</th>
+          <th>Params</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
@@ -314,13 +324,10 @@
   const momentumHybridParamsRowEl = document.getElementById('momentumHybridParamsRow');
   const momentumTopNParamsRowEl = document.getElementById('momentumTopNParamsRow');
   const momentumSignalModulesRowEl = document.getElementById('momentumSignalModulesRow');
-  const backtestSymbolTableWrapEl = document.getElementById('backtestSymbolTableWrap');
-  const momentumUniverseHintEl = document.getElementById('momentumUniverseHint');
   const benchmarkModeEl = document.getElementById('benchmarkMode');
   const benchmarkSymbolWrapEl = document.getElementById('benchmarkSymbolWrap');
   const benchmarkSymbolEl = document.getElementById('benchmarkSymbol');
   const DEFAULT_BENCHMARK_SYMBOL = '512500.SS';
-  const backtestSymbolTableBodyEl = document.querySelector('#backtestSymbolTable tbody');
   const symbolFilterEl = document.getElementById('tradeSymbolFilter');
   const klineSymbolEl = document.getElementById('klineSymbolSelect');
   const holdingsSelectorEl = document.getElementById('holdingsSymbolSelector');
@@ -353,6 +360,10 @@
   const sellSignalChandelierEl = document.getElementById('btSellSignalChandelier');
   const sellSignalMaBreakdownEl = document.getElementById('btSellSignalMaBreakdown');
   const initialInstruments = {{ instruments | tojson }};
+  const fixedBacktestSymbols = initialInstruments
+    .filter((item) => item && item.enabled !== false)
+    .map((item) => String(item.symbol || '').trim())
+    .filter(Boolean);
   const initialStrategyCatalog = {{ strategy_catalog | tojson }};
 
   const navChart = echarts.init(document.getElementById('navChart'));
@@ -643,8 +654,6 @@
     momentumHybridParamsRowEl.style.display = isMomentum ? '' : 'none';
     momentumTopNParamsRowEl.style.display = isMomentum ? '' : 'none';
     momentumSignalModulesRowEl.style.display = isMomentum ? '' : 'none';
-    backtestSymbolTableWrapEl.style.display = isMomentum ? 'none' : '';
-    momentumUniverseHintEl.style.display = isMomentum ? '' : 'none';
   }
 
   function applyBenchmarkPanel() {
@@ -654,44 +663,6 @@
     if (isSymbolMode && benchmarkSymbolEl && String(benchmarkSymbolEl.value || '').trim() === '') {
       benchmarkSymbolEl.value = DEFAULT_BENCHMARK_SYMBOL;
     }
-  }
-
-  function renderBacktestSymbolTable(instruments) {
-    const items = Array.isArray(instruments) ? instruments : [];
-    const rows = items
-      .map((item) => ({
-        symbol: String(item?.symbol || '').trim(),
-        checked: item?.enabled !== false,
-      }))
-      .filter((x) => x.symbol);
-
-    if (!rows.length) {
-      backtestSymbolTableBodyEl.innerHTML = '<tr><td colspan="2">No industry ETF instruments configured.</td></tr>';
-      return;
-    }
-
-    backtestSymbolTableBodyEl.innerHTML = rows.map((row) => `
-      <tr data-symbol="${escapeHtml(row.symbol)}">
-        <td><input type="checkbox" data-role="bt-symbol" ${row.checked ? 'checked' : ''}></td>
-        <td>${escapeHtml(formatSymbolDisplay(row.symbol))}</td>
-      </tr>
-    `).join('');
-  }
-
-  function collectBacktestSelection() {
-    const rows = Array.from(backtestSymbolTableBodyEl.querySelectorAll('tr[data-symbol]'));
-    const selectedSymbols = [];
-
-    for (const row of rows) {
-      const symbol = String(row.getAttribute('data-symbol') || '').trim();
-      if (!symbol) continue;
-      const checked = Boolean(row.querySelector('input[data-role="bt-symbol"]')?.checked);
-      if (!checked) continue;
-
-      selectedSymbols.push(symbol);
-    }
-
-    return { selectedSymbols };
   }
 
   function calcKlineMaValues(candles, period) {
@@ -1707,22 +1678,10 @@
     runBtn.disabled = true;
     statusEl.textContent = 'Running backtest...';
     const strategyId = String(strategySelectEl?.value || 'trend_score_v1');
-    let selectedSymbols = [];
-    if (!isMomentumStrategy(strategyId)) {
-      let selection;
-      try {
-        selection = collectBacktestSelection();
-      } catch (err) {
-        statusEl.textContent = `Failed: ${err.message}`;
-        runBtn.disabled = false;
-        return;
-      }
-      selectedSymbols = selection.selectedSymbols || [];
-      if (!selectedSymbols.length) {
-        statusEl.textContent = 'Please select at least one symbol.';
-        runBtn.disabled = false;
-        return;
-      }
+    if (!fixedBacktestSymbols.length) {
+      statusEl.textContent = 'No enabled instruments configured for the 20-industry ETF group.';
+      runBtn.disabled = false;
+      return;
     }
 
     const benchmarkMode = String(benchmarkModeEl?.value || 'equal_weight_pool');
@@ -1849,7 +1808,6 @@
       initial_capital: Number(document.getElementById('capital').value || 200000),
       strategy_id: strategyId,
       strategy_params: strategyParams,
-      selected_symbols: selectedSymbols,
       benchmark_mode: benchmarkMode,
       benchmark_symbol: benchmarkMode === 'symbol' ? benchmarkSymbol : '',
     };
@@ -1909,7 +1867,6 @@
   });
   benchmarkModeEl?.addEventListener('change', applyBenchmarkPanel);
   runBtn.addEventListener('click', runBacktest);
-  renderBacktestSymbolTable(initialInstruments);
   holdingsSelectAllBtn?.addEventListener('click', () => setHoldingsSelection(true));
   holdingsSelectNoneBtn?.addEventListener('click', () => setHoldingsSelection(false));
   for (const btn of symbolSortBtnEls) {

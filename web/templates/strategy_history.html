@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<section>
+<section class="page-panel history-page">
   <h2>Strategy History</h2>
   <p>Switch strategy family first, then review each version from newest to oldest.</p>
 
@@ -69,37 +69,39 @@
 <style>
   .sh-switch {
     display: flex;
-    gap: 8px;
+    gap: 10px;
     flex-wrap: wrap;
-    margin-bottom: 14px;
+    margin-bottom: 18px;
   }
 
   .sh-switch-btn {
     border: 1px solid var(--line);
-    background: #f2f6fb;
-    color: #123;
-    border-radius: 8px;
-    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.9);
+    color: var(--text-soft);
+    border-radius: 999px;
+    padding: 10px 16px;
     cursor: pointer;
-    font-weight: 600;
+    font-weight: 700;
+    box-shadow: var(--shadow-sm);
   }
 
   .sh-switch-btn.is-active {
-    background: var(--accent);
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
     color: #fff;
-    border-color: var(--accent);
+    border-color: transparent;
   }
 
   .sh-family-panel {
     display: grid;
-    gap: 12px;
+    gap: 16px;
   }
 
   .sh-version-card {
     border: 1px solid var(--line);
-    border-radius: 10px;
-    padding: 14px;
-    background: #f9fbff;
+    border-radius: 20px;
+    padding: 18px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 249, 247, 0.9));
+    box-shadow: var(--shadow-md);
   }
 
   .sh-version-card h3 {
@@ -107,21 +109,21 @@
   }
 
   .sh-summary {
-    margin: 0 0 10px;
-    color: #3b4a5c;
+    margin: 0 0 14px;
+    color: var(--text-soft);
   }
 
   .sh-rule-grid {
     display: grid;
-    gap: 10px;
+    gap: 12px;
     grid-template-columns: 1fr;
   }
 
   .sh-rule-block {
     border: 1px solid var(--line);
-    border-radius: 8px;
-    background: #fff;
-    padding: 10px;
+    border-radius: 16px;
+    background: rgba(255, 255, 255, 0.84);
+    padding: 14px;
   }
 
   .sh-rule-block h4,
@@ -136,11 +138,11 @@
   }
 
   .sh-improve {
-    margin-top: 10px;
-    border-left: 4px solid #0b6e99;
-    background: #eef7fc;
-    padding: 10px 10px 10px 12px;
-    border-radius: 8px;
+    margin-top: 14px;
+    border-left: 4px solid var(--accent-warm);
+    background: rgba(215, 240, 234, 0.58);
+    padding: 12px 12px 12px 14px;
+    border-radius: 14px;
   }
 
   @media (min-width: 1000px) {
