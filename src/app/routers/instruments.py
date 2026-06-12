@@ -147,7 +147,7 @@ async def list_instruments() -> dict:
                 "rows": rows,
                 "local_start_date": local_start,
                 "local_end_date": local_end,
-                "path": str(path),
+                "path": f"sqlite/{symbol}",
             }
         )
 

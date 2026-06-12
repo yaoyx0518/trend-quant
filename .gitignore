@@ -12,10 +12,14 @@ venv/
 .idea/
 
 # Runtime data
+logs/*.log
 logs/app/*.log
 logs/calc/*.jsonl
 data/runtime/**
 data/*.db
+
+# Local Codex app state
+.codex/config.toml
 
 # OS
 .DS_Store
