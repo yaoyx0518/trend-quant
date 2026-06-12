@@ -107,7 +107,7 @@ async def backtest_page(request: Request) -> HTMLResponse:
         name="backtest.html",
         request=request,
         context={
-            "title": "Backtest",
+            "title": "回测",
             "instruments": instruments,
             "instrument_group_label": "20行业ETF标的组",
             "enabled_instrument_count": enabled_instrument_count,
@@ -147,11 +147,11 @@ async def run_backtest(payload: BacktestRunRequest) -> dict:
         )
         entry_threshold_max = float(strategy_overrides.get("entry_threshold_max", payload.entry_threshold_max))
         if not (n_short < n_mid < n_long):
-            raise HTTPException(status_code=400, detail="require n_short < n_mid < n_long")
+            raise HTTPException(status_code=400, detail="要求 n_short < n_mid < n_long")
         if not (entry_threshold_min > 0 and entry_threshold_max > 0):
-            raise HTTPException(status_code=400, detail="require entry_threshold_min > 0 and entry_threshold_max > 0")
+            raise HTTPException(status_code=400, detail="要求 entry_threshold_min > 0 且 entry_threshold_max > 0")
         if entry_threshold_min > entry_threshold_max:
-            raise HTTPException(status_code=400, detail="require entry_threshold_min <= entry_threshold_max")
+            raise HTTPException(status_code=400, detail="要求 entry_threshold_min <= entry_threshold_max")
     elif strategy_id in MOMENTUM_STRATEGY_IDS:
         if "buy_filters" in strategy_overrides:
             buy_filters = normalize_signal_modules(strategy_overrides.get("buy_filters"), default=[])
@@ -159,7 +159,7 @@ async def run_backtest(payload: BacktestRunRequest) -> dict:
             if unsupported_buy_filters:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"unsupported buy_filters: {','.join(unsupported_buy_filters)}",
+                    detail=f"不支持的买入过滤：{','.join(unsupported_buy_filters)}",
                 )
             strategy_overrides["buy_filters"] = buy_filters
 
@@ -169,7 +169,7 @@ async def run_backtest(payload: BacktestRunRequest) -> dict:
             if unsupported_sell_signals:
                 raise HTTPException(
                     status_code=400,
-                    detail=f"unsupported sell_signals: {','.join(unsupported_sell_signals)}",
+                    detail=f"不支持的卖出信号：{','.join(unsupported_sell_signals)}",
                 )
             strategy_overrides["sell_signals"] = sell_signals
 
@@ -182,15 +182,15 @@ async def run_backtest(payload: BacktestRunRequest) -> dict:
         mom_long = int(strategy_overrides.get("momentum_window_long", 20))
         rebalance_weekday = int(strategy_overrides.get("rebalance_weekday", 1))
         if not (n_short < n_mid < n_long):
-            raise HTTPException(status_code=400, detail="require n_short < n_mid < n_long")
+            raise HTTPException(status_code=400, detail="要求 n_short < n_mid < n_long")
         if not (entry_threshold > 0):
-            raise HTTPException(status_code=400, detail="require entry_threshold > 0")
+            raise HTTPException(status_code=400, detail="要求 entry_threshold > 0")
         if max_holdings <= 0:
-            raise HTTPException(status_code=400, detail="require max_holdings > 0")
+            raise HTTPException(status_code=400, detail="要求 max_holdings > 0")
         if not (mom_short > 0 and mom_long > mom_short):
-            raise HTTPException(status_code=400, detail="require momentum_window_long > momentum_window_short > 0")
+            raise HTTPException(status_code=400, detail="要求 momentum_window_long > momentum_window_short > 0")
         if not (1 <= rebalance_weekday <= 5):
-            raise HTTPException(status_code=400, detail="require rebalance_weekday in [1, 5]")
+            raise HTTPException(status_code=400, detail="要求 rebalance_weekday 在 [1, 5] 范围内")
 
     engine = BacktestEngine()
     body = payload.model_dump()
@@ -230,7 +230,7 @@ async def start_optimize(payload: OptimizeStartRequest) -> dict:
 async def get_optimize_status(job_id: str) -> dict:
     status_payload = optimizer_job_manager.get_status(job_id)
     if status_payload is None:
-        raise HTTPException(status_code=404, detail="job_id not found")
+        raise HTTPException(status_code=404, detail="未找到任务 ID")
     return status_payload
 
 
@@ -238,7 +238,7 @@ async def get_optimize_status(job_id: str) -> dict:
 async def cancel_optimize(job_id: str) -> dict:
     result = optimizer_job_manager.cancel_job(job_id)
     if result.get("status") == "not_found":
-        raise HTTPException(status_code=404, detail="job_id not found")
+        raise HTTPException(status_code=404, detail="未找到任务 ID")
     return result
 
 
@@ -246,11 +246,11 @@ async def cancel_optimize(job_id: str) -> dict:
 async def get_optimize_result(job_id: str) -> dict:
     result_payload = optimizer_job_manager.get_result(job_id)
     if result_payload is None:
-        raise HTTPException(status_code=404, detail="job_id not found")
+        raise HTTPException(status_code=404, detail="未找到任务 ID")
     return result_payload
 @router.get("/api/{run_id}")
 async def get_backtest_result(run_id: str) -> dict:
     result = get_db().get_backtest(run_id)
     if result is None:
-        raise HTTPException(status_code=404, detail="run_id not found")
+        raise HTTPException(status_code=404, detail="未找到运行 ID")
     return result

@@ -99,7 +99,7 @@ async def instruments_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         name="instruments.html",
         request=request,
-        context={"title": "Instruments"},
+        context={"title": "标的管理"},
     )
 
 
@@ -159,16 +159,16 @@ async def list_instruments() -> dict:
 async def backfill_instrument(symbol: str, payload: InstrumentBackfillRequest, request: Request) -> dict:
     normalized_symbol = _normalize_symbol(symbol)
     if normalized_symbol == "":
-        raise HTTPException(status_code=400, detail="invalid symbol")
+        raise HTTPException(status_code=400, detail="标的无效")
 
     if str(payload.start_date or "").strip() == "":
-        raise HTTPException(status_code=400, detail="start_date is required")
+        raise HTTPException(status_code=400, detail="开始日期必填")
 
     try:
         start_date = _to_date(payload.start_date, date(2020, 1, 1))
         end_date = _to_date(payload.end_date, date.today())
     except ValueError:
-        raise HTTPException(status_code=400, detail="date format must be YYYY-MM-DD")
+        raise HTTPException(status_code=400, detail="日期格式必须是 YYYY-MM-DD")
 
     strategy_payload = _load_yaml("config/strategy.yaml")
     strategy_cfg = strategy_payload.get("strategy", {}) if isinstance(strategy_payload, dict) else {}

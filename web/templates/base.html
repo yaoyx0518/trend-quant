@@ -1,9 +1,9 @@
 ﻿<!doctype html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{{ title }} | Trend ETF System</title>
+  <title>{{ title }} | 趋势 ETF 系统</title>
   <link rel="stylesheet" href="/static/style.css?v={{ request.app.state.asset_version|default('1', true) if request is defined else '1' }}">
 </head>
 <body>
@@ -11,18 +11,18 @@
   <header class="site-header">
     <div class="site-header__inner">
       <div class="site-brand">
-        <p class="site-eyebrow">Trend-following workspace</p>
-        <h1>Trend ETF System</h1>
-        <p class="site-subtitle">Research, signal review, manual execution, and backtest analysis for A-share ETF strategies.</p>
+        <p class="site-eyebrow">趋势跟踪工作台</p>
+        <h1>趋势 ETF 系统</h1>
+        <p class="site-subtitle">面向 A 股 ETF 策略的研究、信号复盘、手工执行与回测分析。</p>
       </div>
       <nav class="site-nav">
-        <a href="/" class="{% if path == '/' %}is-active{% endif %}">Overview</a>
-        <a href="/config" class="{% if path.startswith('/config') %}is-active{% endif %}">Config</a>
-        <a href="/backtest" class="{% if path.startswith('/backtest') %}is-active{% endif %}">Backtest</a>
-        <a href="/strategy-history" class="{% if path.startswith('/strategy-history') %}is-active{% endif %}">Strategy History</a>
-        <a href="/instruments" class="{% if path.startswith('/instruments') %}is-active{% endif %}">Instruments</a>
-        <a href="/trades" class="{% if path.startswith('/trades') %}is-active{% endif %}">Manual Trades</a>
-        <a href="/logs" class="{% if path.startswith('/logs') %}is-active{% endif %}">Logs</a>
+        <a href="/" class="{% if path == '/' %}is-active{% endif %}">概览</a>
+        <a href="/config" class="{% if path.startswith('/config') %}is-active{% endif %}">配置</a>
+        <a href="/backtest" class="{% if path.startswith('/backtest') %}is-active{% endif %}">回测</a>
+        <a href="/strategy-history" class="{% if path.startswith('/strategy-history') %}is-active{% endif %}">策略历史</a>
+        <a href="/instruments" class="{% if path.startswith('/instruments') %}is-active{% endif %}">标的管理</a>
+        <a href="/trades" class="{% if path.startswith('/trades') %}is-active{% endif %}">手工交易</a>
+        <a href="/logs" class="{% if path.startswith('/logs') %}is-active{% endif %}">日志</a>
       </nav>
     </div>
   </header>

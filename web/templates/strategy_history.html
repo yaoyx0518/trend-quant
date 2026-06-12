@@ -1,8 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="page-panel history-page">
-  <h2>Strategy History</h2>
-  <p>Switch strategy family first, then review each version from newest to oldest.</p>
+  <h2>策略历史</h2>
+  <p>先切换策略族，再按从新到旧的顺序查看各版本。</p>
 
   <div class="sh-switch" id="familySwitch">
     {% for family in strategy_families %}
@@ -25,7 +25,7 @@
 
           <div class="sh-rule-grid">
             <div class="sh-rule-block">
-              <h4>Buy Signal</h4>
+              <h4>买入信号</h4>
               <ul>
                 {% for line in version.buy_signal %}
                   <li>{{ line }}</li>
@@ -33,7 +33,7 @@
               </ul>
             </div>
             <div class="sh-rule-block">
-              <h4>Buy Filters</h4>
+              <h4>买入过滤</h4>
               <ul>
                 {% for line in version.buy_filter %}
                   <li>{{ line }}</li>
@@ -41,7 +41,7 @@
               </ul>
             </div>
             <div class="sh-rule-block">
-              <h4>Sell Signal</h4>
+              <h4>卖出信号</h4>
               <ul>
                 {% for line in version.sell_signal %}
                   <li>{{ line }}</li>
@@ -52,7 +52,7 @@
 
           {% if version.improvements_vs_v1 %}
             <div class="sh-improve">
-              <h4>Improvements vs v1</h4>
+              <h4>相对 v1 的改进</h4>
               <ul>
                 {% for line in version.improvements_vs_v1 %}
                   <li>{{ line }}</li>

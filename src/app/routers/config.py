@@ -27,7 +27,7 @@ async def config_page(request: Request) -> HTMLResponse:
         name="config.html",
         request=request,
         context={
-            "title": "Config",
+            "title": "配置",
             "app_cfg": app_cfg,
             "strategy_cfg": strategy_cfg,
             "instruments_cfg": instruments_cfg,
@@ -55,4 +55,4 @@ async def update_config_raw(payload: RawConfigUpdate) -> dict:
             yaml.safe_dump({"instruments": payload.instruments}, sort_keys=False, allow_unicode=True),
             encoding="utf-8",
         )
-    return {"ok": True, "message": "Config saved. Changes apply immediately."}
+    return {"ok": True, "message": "配置已保存，变更立即生效。"}

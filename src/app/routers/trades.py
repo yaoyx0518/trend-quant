@@ -37,7 +37,7 @@ async def trades_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         name="trades.html",
         request=request,
-        context={"title": "Manual Trades", "items": items, "trade_date": today},
+        context={"title": "手工交易", "items": items, "trade_date": today},
     )
 
 
@@ -62,7 +62,7 @@ async def get_manual_trades(trade_date: str) -> dict:
 async def save_manual_trade(payload: ManualTradePayload) -> dict:
     side = payload.side.strip().upper()
     if side not in {"BUY", "SELL"}:
-        raise HTTPException(status_code=400, detail="side must be BUY or SELL")
+        raise HTTPException(status_code=400, detail="方向必须是 BUY 或 SELL")
 
     row = payload.model_dump()
     row["side"] = side

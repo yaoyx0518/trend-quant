@@ -1,26 +1,26 @@
 ﻿{% extends "base.html" %}
 {% block content %}
 <section class="page-panel overview-page">
-  <h2>System Overview</h2>
-  <p id="ovStatus" class="status-banner">Loading...</p>
+  <h2>系统概览</h2>
+  <p id="ovStatus" class="status-banner">正在加载...</p>
 
   <div id="ovCards" class="cards"></div>
 
   <div class="chart-grid">
     <div class="table-panel">
-      <h3>Latest ACTION Signals</h3>
+      <h3>最新操作信号</h3>
       <div class="table-shell">
         <table id="actionTable">
-          <thead><tr><th>Instrument</th><th>Action</th><th>Level</th><th>Trend</th><th>Qty</th><th>Reason</th></tr></thead>
+          <thead><tr><th>标的</th><th>动作</th><th>级别</th><th>趋势值</th><th>数量</th><th>原因</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
     </div>
     <div class="table-panel">
-      <h3>Current Positions</h3>
+      <h3>当前持仓</h3>
       <div class="table-shell">
         <table id="positionTable">
-          <thead><tr><th>Instrument</th><th>Qty</th><th>Sellable</th><th>Avg Price</th><th>Buy Date</th></tr></thead>
+          <thead><tr><th>标的</th><th>数量</th><th>可卖数量</th><th>均价</th><th>买入日期</th></tr></thead>
           <tbody></tbody>
         </table>
       </div>
@@ -28,7 +28,7 @@
   </div>
 
   <div class="table-panel">
-    <h3>Recent Backtests</h3>
+    <h3>近期回测</h3>
     <div class="table-shell">
       <table id="btTable">
         <colgroup>
@@ -42,7 +42,7 @@
           <col style="width: 100px;">
           <col style="width: 90px;">
         </colgroup>
-        <thead><tr><th>Run ID</th><th>Strategy</th><th>Period</th><th>Params</th><th>Total Return</th><th>Win Rate</th><th>Profit Factor</th><th>Sharpe</th><th>Trades</th></tr></thead>
+        <thead><tr><th>运行编号</th><th>策略</th><th>区间</th><th>参数</th><th>总收益</th><th>胜率</th><th>盈亏比</th><th>夏普</th><th>交易数</th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -109,13 +109,29 @@
       .replace(/'/g, '&#39;');
   }
 
+  function translateAction(value) {
+    const text = String(value || '').toUpperCase();
+    if (text === 'BUY') return '买入';
+    if (text === 'SELL') return '卖出';
+    if (text === 'HOLD') return '持有';
+    return value || '';
+  }
+
+  function translateLevel(value) {
+    const text = String(value || '').toUpperCase();
+    if (text === 'ACTION') return '操作';
+    if (text === 'INFO') return '提示';
+    if (text === 'WARN' || text === 'WARNING') return '警告';
+    return value || '';
+  }
+
   function strategyText(v) {
     const s = String(v || '').trim();
     if (!s) return '-';
-    if (s === 'momentum_topn_v3') return 'Momentum TopN v3';
-    if (s === 'momentum_topn_v2') return 'Momentum TopN v2';
-    if (s === 'momentum_topn_v1') return 'Momentum TopN v1';
-    if (s === 'trend_score_v1') return 'Trend Score v1';
+    if (s === 'momentum_topn_v3') return '动量前 N v3';
+    if (s === 'momentum_topn_v2') return '动量前 N v2';
+    if (s === 'momentum_topn_v1') return '动量前 N v1';
+    if (s === 'trend_score_v1') return '趋势评分 v1';
     return s;
   }
 
@@ -126,7 +142,7 @@
       if (Number.isInteger(v)) return String(v);
       return Number(v.toFixed(6)).toString();
     }
-    if (typeof v === 'boolean') return v ? 'true' : 'false';
+    if (typeof v === 'boolean') return v ? '是' : '否';
     return String(v);
   }
 
@@ -153,39 +169,39 @@
     };
 
     if (sid === 'momentum_topn_v1' || sid === 'momentum_topn_v2' || sid === 'momentum_topn_v3') {
-      pushRow('TrendScore', [
+      pushRow('趋势评分', [
         ['n_short', 'n_short'],
         ['n_mid', 'n_mid'],
         ['n_long', 'n_long'],
         ['entry_threshold', 'entry_threshold'],
       ]);
-      pushRow('Momentum', [
+      pushRow('动量', [
         ['mom_short', 'momentum_window_short'],
         ['mom_long', 'momentum_window_long'],
         ['w_mom_short', 'momentum_weight_short'],
         ['w_mom_long', 'momentum_weight_long'],
       ]);
-      pushRow('HybridTrend', [
+      pushRow('混合趋势', [
         ['w_hybrid_mom', 'hybrid_weight_momentum'],
         ['w_hybrid_trend', 'hybrid_weight_trend'],
       ]);
-      pushRow('TopN', [
+      pushRow('前 N', [
         ['max_holdings', 'max_holdings'],
         ['rebalance_weekday', 'rebalance_weekday'],
       ]);
       if (sid === 'momentum_topn_v2' || sid === 'momentum_topn_v3') {
-        pushRow('V2 Extra', [
+      pushRow('V2 扩展', [
           ['buy_above_ma60', 'buy_filter_price_above_ma60'],
           ['exit_ma_period', 'exit_ma_period'],
         ]);
       }
       if (sid === 'momentum_topn_v3') {
-        pushRow('V3 Extra', [
+        pushRow('V3 扩展', [
           ['max_entry_trend', 'max_entry_trend_score'],
         ]);
       }
     } else {
-      pushRow('TrendScore', [
+      pushRow('趋势评分', [
         ['n_short', 'n_short'],
         ['n_mid', 'n_mid'],
         ['n_long', 'n_long'],
@@ -199,13 +215,13 @@
       .sort();
     if (otherKeys.length) {
       const otherCells = otherKeys.map((k) => `<td><code>${escapeHtml(k)}</code>: ${escapeHtml(formatParamValue(params[k]))}</td>`);
-      rows.push(`<tr><th>Other</th>${otherCells.join('')}</tr>`);
+      rows.push(`<tr><th>其他</th>${otherCells.join('')}</tr>`);
     }
 
     if (!rows.length) return '-';
     return `
       <details>
-        <summary>View</summary>
+        <summary>查看</summary>
         <table class="ov-param-table"><tbody>${rows.join('')}</tbody></table>
       </details>
     `;
@@ -218,14 +234,14 @@
 
   function render(data) {
     const cards = [
-      ['Signal Time', data.latest_signal?.ts || '-'],
-      ['Signal Trigger', data.latest_signal?.trigger || '-'],
-      ['Signal Status', data.latest_signal?.status || '-'],
-      ['ACTION Count', data.latest_signal?.action_count ?? 0],
-      ['Cash', num(data.portfolio?.cash)],
-      ['Equity', num(data.portfolio?.equity)],
-      ['Positions', data.portfolio?.position_count ?? 0],
-      ['Trades Logged', data.portfolio?.trade_count ?? 0],
+      ['信号时间', data.latest_signal?.ts || '-'],
+      ['触发方式', data.latest_signal?.trigger || '-'],
+      ['信号状态', data.latest_signal?.status || '-'],
+      ['操作信号数', data.latest_signal?.action_count ?? 0],
+      ['现金', num(data.portfolio?.cash)],
+      ['权益', num(data.portfolio?.equity)],
+      ['持仓数', data.portfolio?.position_count ?? 0],
+      ['已记录交易', data.portfolio?.trade_count ?? 0],
     ];
     document.getElementById('ovCards').innerHTML = cards.map(([k,v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
 
@@ -233,13 +249,13 @@
     setRows('#actionTable tbody', actions.length ? actions.map(a => `
       <tr>
         <td>${a.symbol_display || a.symbol || ''}</td>
-        <td>${a.action || ''}</td>
-        <td>${a.level || ''}</td>
+        <td>${translateAction(a.action)}</td>
+        <td>${translateLevel(a.level)}</td>
         <td>${num(a.trend_score)}</td>
         <td>${num(a.suggested_qty)}</td>
         <td>${a.reason || ''}</td>
       </tr>
-    `).join('') : '<tr><td colspan="6">No actionable signal.</td></tr>');
+    `).join('') : '<tr><td colspan="6">暂无可操作信号。</td></tr>');
 
     const positions = data.portfolio?.positions || [];
     setRows('#positionTable tbody', positions.length ? positions.map(p => `
@@ -250,7 +266,7 @@
         <td>${num(p.avg_price)}</td>
         <td>${p.buy_date || ''}</td>
       </tr>
-    `).join('') : '<tr><td colspan="5">No open position.</td></tr>');
+    `).join('') : '<tr><td colspan="5">暂无持仓。</td></tr>');
 
     const bts = data.recent_backtests || [];
     setRows('#btTable tbody', bts.length ? bts.map(b => `
@@ -265,20 +281,20 @@
         <td>${num(b.sharpe)}</td>
         <td>${num(b.trade_count)}</td>
       </tr>
-    `).join('') : '<tr><td colspan="9">No backtest yet.</td></tr>');
+    `).join('') : '<tr><td colspan="9">暂无回测记录。</td></tr>');
 
-    statusEl.textContent = `Overview ready. as_of=${data.portfolio?.as_of_date || '-'}`;
+    statusEl.textContent = `概览已就绪，日期=${data.portfolio?.as_of_date || '-'}`;
   }
 
   async function loadOverview() {
-    statusEl.textContent = 'Loading overview...';
+    statusEl.textContent = '正在加载概览...';
     try {
       const resp = await fetch('/api/overview');
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || 'overview_failed');
+      if (!resp.ok) throw new Error(data.detail || '概览加载失败');
       render(data);
     } catch (err) {
-      statusEl.textContent = `Failed: ${err.message}`;
+      statusEl.textContent = `加载失败：${err.message}`;
     }
   }
 

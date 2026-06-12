@@ -41,7 +41,7 @@ async def overview_page(request: Request) -> HTMLResponse:
         name="overview.html",
         request=request,
         context={
-            "title": "System Overview",
+            "title": "系统概览",
         },
     )
 

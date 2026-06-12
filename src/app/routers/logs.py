@@ -12,7 +12,7 @@ templates = Jinja2Templates(directory="web/templates")
 
 @router.get("", response_class=HTMLResponse)
 async def logs_page(request: Request) -> HTMLResponse:
-    return templates.TemplateResponse(name="logs.html", request=request, context={"title": "Logs"})
+    return templates.TemplateResponse(name="logs.html", request=request, context={"title": "日志"})
 
 
 @router.get("/api/calc")

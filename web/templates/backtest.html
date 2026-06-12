@@ -1,39 +1,39 @@
 ﻿{% extends "base.html" %}
 {% block content %}
 <section class="page-panel backtest-page">
-  <h2>Backtest Center</h2>
+  <h2>回测中心</h2>
 
   <div class="bt-form-row">
-    <label>Start Date <input id="startDate" type="date" value="2025-01-01"></label>
-    <label>End Date <input id="endDate" type="date"></label>
-    <label>Initial Capital <input id="capital" type="number" value="200000" min="10000" step="1000"></label>
-    <label>Strategy
+    <label>开始日期 <input id="startDate" type="date" value="2025-01-01"></label>
+    <label>结束日期 <input id="endDate" type="date"></label>
+    <label>初始资金 <input id="capital" type="number" value="200000" min="10000" step="1000"></label>
+    <label>策略
       <select id="strategySelect"></select>
     </label>
-    <button id="runBtn" type="button">Run Backtest</button>
-    <button id="goOptimizeBtn" type="button">Go To Optimization</button>
+    <button id="runBtn" type="button">运行回测</button>
+    <button id="goOptimizeBtn" type="button">跳转到参数优化</button>
   </div>
   <div class="content-panel">
-    <h3 style="margin: 0 0 8px;">Backtest Universe</h3>
+    <h3 style="margin: 0 0 8px;">回测标的范围</h3>
     <p style="margin-bottom: 8px;">
-      Fixed group: <strong>{{ instrument_group_label }}</strong>
+      固定分组：<strong>{{ instrument_group_label }}</strong>
       {% if enabled_instrument_count %}
-      ({{ enabled_instrument_count }} enabled instruments)
+      （已启用 {{ enabled_instrument_count }} 个标的）
       {% endif %}
     </p>
     <p class="context-hint" style="margin-top: 0;">
-      The full group participates in backtests by default. Individual symbol checkboxes are no longer needed.
+      默认使用完整分组参与回测，不再需要逐个勾选标的。
     </p>
     <div class="bt-form-row" style="margin-top: 10px;">
-      <label>Benchmark
+      <label>基准
         <select id="benchmarkMode">
-          <option value="equal_weight_pool" selected>{{ instrument_group_label }} (equal-weight)</option>
-          <option value="symbol">Single symbol (buy & hold)</option>
+          <option value="equal_weight_pool" selected>{{ instrument_group_label }}（等权）</option>
+          <option value="symbol">单标的（买入并持有）</option>
         </select>
       </label>
       <label id="benchmarkSymbolWrap" style="display:none;">
-        Benchmark Symbol
-        <input id="benchmarkSymbol" type="text" value="512500.SS" placeholder="e.g. 510300.SH">
+        基准标的
+        <input id="benchmarkSymbol" type="text" value="512500.SS" placeholder="例如 510300.SH">
       </label>
     </div>
   </div>
@@ -45,72 +45,72 @@
     <label>entry_threshold_max <input id="btEntryThresholdMax" type="number" value="20" step="0.1"></label>
   </div>
   <div id="momentumTrendParamsRow" class="bt-form-row" style="display:none;">
-    <strong>TrendScore Param:</strong>
+    <strong>趋势评分参数：</strong>
     <label>n_short <input id="btMomentumNShort" type="number" value="5" min="1" step="1"></label>
     <label>n_mid <input id="btMomentumNMid" type="number" value="20" min="1" step="1"></label>
     <label>n_long <input id="btMomentumNLong" type="number" value="40" min="1" step="1"></label>
     <label>entry_threshold <input id="btMomentumEntryThreshold" type="number" value="10" step="0.1"></label>
   </div>
   <div id="momentumParamsRow" class="bt-form-row" style="display:none;">
-    <strong>Momentum Param:</strong>
+    <strong>动量参数：</strong>
     <label>mom_short <input id="btMomentumShortWindow" type="number" value="10" min="2" step="1"></label>
     <label>mom_long <input id="btMomentumLongWindow" type="number" value="20" min="3" step="1"></label>
     <label>w_mom_short <input id="btMomentumShortWeight" type="number" value="0.6" min="0" max="1" step="0.05"></label>
     <label>w_mom_long <input id="btMomentumLongWeight" type="number" value="0.4" min="0" max="1" step="0.05"></label>
   </div>
   <div id="momentumHybridParamsRow" class="bt-form-row" style="display:none;">
-    <strong>HybridTrend Param:</strong>
+    <strong>混合趋势参数：</strong>
     <label>w_hybrid_mom <input id="btHybridMomentumWeight" type="number" value="1.0" min="0" max="1" step="0.05"></label>
     <label>w_hybrid_trend <input id="btHybridTrendWeight" type="number" value="0.0" min="0" max="1" step="0.05"></label>
   </div>
   <div id="momentumTopNParamsRow" class="bt-form-row" style="display:none;">
-    <strong>TopN Strategy Param:</strong>
+    <strong>前 N 策略参数：</strong>
     <label>max_holdings <input id="btMomentumMaxHoldings" type="number" value="5" min="1" step="1"></label>
     <label>rebalance_weekday <input id="btRebalanceWeekday" type="number" value="1" min="1" max="5" step="1"></label>
   </div>
   <div id="momentumSignalModulesRow" style="display:none;">
-    <strong>Signal Modules:</strong>
+    <strong>信号模块：</strong>
     <div class="bt-form-row" style="margin-top: 6px;">
-      <span><strong>Buy:</strong></span>
-      <label><input id="btBuyFilterMa20" type="checkbox" checked> price_above_ma20</label>
-      <span>AND</span>
-      <label><input id="btBuyFilterMa60" type="checkbox"> price_above_ma60</label>
-      <span>AND</span>
-      <label><input id="btBuyFilterMa200" type="checkbox"> price_above_ma200</label>
-      <span>AND</span>
-      <label><input id="btBuyFilterTrendMax" type="checkbox"> trend_score_max</label>
-      <span>AND</span>
+      <span><strong>买入：</strong></span>
+      <label><input id="btBuyFilterMa20" type="checkbox" checked> 价格高于 MA20</label>
+      <span>且</span>
+      <label><input id="btBuyFilterMa60" type="checkbox"> 价格高于 MA60</label>
+      <span>且</span>
+      <label><input id="btBuyFilterMa200" type="checkbox"> 价格高于 MA200</label>
+      <span>且</span>
+      <label><input id="btBuyFilterTrendMax" type="checkbox"> 趋势评分上限</label>
+      <span>且</span>
       <label>max_entry_trend_score <input id="btMaxEntryTrendScore" type="number" value="20" step="0.1"></label>
     </div>
     <div class="bt-form-row" style="margin-top: 4px;">
-      <span><strong>Sell:</strong></span>
-      <label><input id="btSellSignalHardStop" type="checkbox" checked> hard_stop</label>
-      <span>OR</span>
-      <label><input id="btSellSignalChandelier" type="checkbox" checked> chandelier_stop</label>
-      <span>OR</span>
-      <label><input id="btSellSignalMaBreakdown" type="checkbox"> ma_breakdown_max</label>
+      <span><strong>卖出：</strong></span>
+      <label><input id="btSellSignalHardStop" type="checkbox" checked> 硬止损</label>
+      <span>或</span>
+      <label><input id="btSellSignalChandelier" type="checkbox" checked> 吊灯止损</label>
+      <span>或</span>
+      <label><input id="btSellSignalMaBreakdown" type="checkbox"> 均线破位</label>
     </div>
   </div>
 
-  <p id="btStatus" class="status-banner">Ready.</p>
+  <p id="btStatus" class="status-banner">就绪。</p>
 
-  <h3>Strategy Metrics</h3>
+  <h3>策略指标</h3>
   <div id="summaryCards" class="cards"></div>
 
-  <h3>Benchmark Metrics</h3>
+  <h3>基准指标</h3>
   <div id="benchmarkCards" class="cards"></div>
-  <h3>Strategy Highlights</h3>
+  <h3>策略要点</h3>
   <div id="strategyHighlightCards" class="cards"></div>
 
   <div class="viz-panel">
-    <h3>Net Value (Strategy vs Benchmark)</h3>
+    <h3>净值（策略对比基准）</h3>
     <div id="navChart" class="chart-lg"></div>
   </div>
 
   <div class="viz-panel">
     <div class="bt-form-row">
-      <h3 style="margin: 0;">Asset K-Line</h3>
-      <label>Instrument
+      <h3 style="margin: 0;">资产 K 线</h3>
+      <label>标的
         <select id="klineSymbolSelect"></select>
       </label>
     </div>
@@ -118,47 +118,47 @@
   </div>
 
   <div class="viz-panel">
-    <h3>Trend Score (Linked To Asset K-Line)</h3>
+    <h3>趋势评分（联动资产 K 线）</h3>
     <div id="trendChart" class="chart-md"></div>
-    <h3 id="hybridChartTitle" style="display:none;">Hybrid Score (Linked To Asset K-Line)</h3>
+    <h3 id="hybridChartTitle" style="display:none;">混合评分（联动资产 K 线）</h3>
     <div id="hybridChart" class="chart-md" style="display:none;"></div>
     <div id="trendDistModule">
-      <h3>Trend Score Distribution (All Symbols)</h3>
+      <h3>趋势评分分布（全部标的）</h3>
       <div id="trendDistChart" class="chart-md"></div>
     </div>
   </div>
 
   <div class="viz-panel">
-    <h3>Daily Holdings (Stacked)</h3>
+    <h3>每日持仓（堆叠）</h3>
     <div class="bt-form-row" style="margin-bottom: 8px;">
-      <button id="holdingsSelectAllBtn" type="button">Select All</button>
-      <button id="holdingsSelectNoneBtn" type="button">Select None</button>
+      <button id="holdingsSelectAllBtn" type="button">全选</button>
+      <button id="holdingsSelectNoneBtn" type="button">全不选</button>
     </div>
     <div id="holdingsSymbolSelector" class="bt-form-row"></div>
     <div id="holdingsChart" class="chart-md"></div>
   </div>
 
   <div class="viz-panel">
-    <h3>Drawdown</h3>
+    <h3>回撤</h3>
     <div id="ddChart" class="chart-md"></div>
   </div>
 
   <div class="chart-grid">
     <div class="viz-panel">
-      <h3>Monthly Return Heatmap</h3>
+      <h3>月度收益热力图</h3>
       <div id="heatChart" class="chart-md"></div>
     </div>
     <div class="table-panel">
-      <h3>Symbol Backtest Summary</h3>
+      <h3>标的回测汇总</h3>
       <div class="table-shell">
         <table id="symbolTable">
           <thead>
             <tr>
-              <th><button type="button" class="sym-sort-btn" data-sort-key="instrument">Instrument <span data-sort-indicator="instrument">↕</span></button></th>
-              <th><button type="button" class="sym-sort-btn" data-sort-key="trade_count">Trades <span data-sort-indicator="trade_count">↕</span></button></th>
-              <th><button type="button" class="sym-sort-btn" data-sort-key="win_rate">Win Rate <span data-sort-indicator="win_rate">↕</span></button></th>
-              <th><button type="button" class="sym-sort-btn" data-sort-key="profit_factor">Profit Factor <span data-sort-indicator="profit_factor">↕</span></button></th>
-              <th><button type="button" class="sym-sort-btn" data-sort-key="contribution_abs">Contribution <span data-sort-indicator="contribution_abs">↓</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="instrument">标的 <span data-sort-indicator="instrument">↕</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="trade_count">交易数 <span data-sort-indicator="trade_count">↕</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="win_rate">胜率 <span data-sort-indicator="win_rate">↕</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="profit_factor">盈亏比 <span data-sort-indicator="profit_factor">↕</span></button></th>
+              <th><button type="button" class="sym-sort-btn" data-sort-key="contribution_abs">贡献 <span data-sort-indicator="contribution_abs">↓</span></button></th>
             </tr>
           </thead>
           <tbody></tbody>
@@ -168,17 +168,17 @@
   </div>
 
   <div class="table-panel">
-    <h3>Annual Return Table</h3>
+    <h3>年度收益表</h3>
     <div class="table-shell">
       <table id="annualTable">
         <thead>
           <tr>
-            <th>Year</th>
-            <th>Strategy Return</th>
-            <th>Strategy Trades</th>
-            <th>Strategy Win Rate</th>
-            <th>Strategy Profit Factor</th>
-            <th>Strategy Sharpe</th>
+            <th>年份</th>
+            <th>策略收益</th>
+            <th>策略交易数</th>
+            <th>策略胜率</th>
+            <th>策略盈亏比</th>
+            <th>策略夏普</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -188,10 +188,10 @@
 
   <div class="table-panel">
     <div class="bt-form-row">
-      <h3 style="margin: 0;">Trades</h3>
-      <label>Instrument
+      <h3 style="margin: 0;">交易明细</h3>
+      <label>标的
         <select id="tradeSymbolFilter">
-          <option value="">ALL</option>
+          <option value="">全部</option>
         </select>
       </label>
     </div>
@@ -199,19 +199,19 @@
       <table id="tradeTable">
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Instrument</th>
-            <th>Side</th>
-            <th>Trend Score</th>
-            <th>Momentum Z</th>
-            <th>Hybrid Score</th>
-            <th>Qty</th>
-            <th>Price</th>
-            <th>Fee</th>
-            <th>Buy Cost</th>
-            <th>Buy Ratio</th>
-            <th>Sell PnL</th>
-            <th>Reason</th>
+            <th>日期</th>
+            <th>标的</th>
+            <th>方向</th>
+            <th>趋势评分</th>
+            <th>动量 Z</th>
+            <th>混合评分</th>
+            <th>数量</th>
+            <th>价格</th>
+            <th>费用</th>
+            <th>买入成本</th>
+            <th>买入占比</th>
+            <th>卖出盈亏</th>
+            <th>原因</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -220,51 +220,51 @@
   </div>
 
   <hr>
-  <h2 id="optimizeSectionTitle">Parameter Optimization</h2>
+  <h2 id="optimizeSectionTitle">参数优化</h2>
 
   <div class="bt-form-row">
-    <button id="optLoadParamsBtn" type="button">Load Tunable Params</button>
-    <label><input id="optEnableLoo" type="checkbox"> Enable LOO</label>
-    <label>Parallel
+    <button id="optLoadParamsBtn" type="button">加载可调参数</button>
+    <label><input id="optEnableLoo" type="checkbox"> 启用 LOO</label>
+    <label>并行模式
       <select id="optParallelMode">
-        <option value="auto" selected>auto</option>
-        <option value="single">single</option>
-        <option value="manual">manual</option>
+        <option value="auto" selected>自动</option>
+        <option value="single">单进程</option>
+        <option value="manual">手动</option>
       </select>
     </label>
-    <label>Manual Workers <input id="optManualWorkers" type="number" min="1" max="32" value="4" disabled></label>
+    <label>手动进程数 <input id="optManualWorkers" type="number" min="1" max="32" value="4" disabled></label>
   </div>
 
   <div class="bt-form-row">
-    <button id="optAddWindowBtn" type="button">Add Window</button>
-    <span id="optWindowHint">Use custom date ranges for optimization.</span>
+    <button id="optAddWindowBtn" type="button">添加窗口</button>
+    <span id="optWindowHint">使用自定义日期区间进行优化。</span>
   </div>
 
   <div class="table-shell">
     <table id="optWindowTable">
       <thead>
         <tr>
-          <th>Start Date</th>
-          <th>End Date</th>
-          <th>Action</th>
+          <th>开始日期</th>
+          <th>结束日期</th>
+          <th>操作</th>
         </tr>
       </thead>
       <tbody></tbody>
     </table>
   </div>
 
-  <h3>Tunable Parameters</h3>
+  <h3>可调参数</h3>
   <div class="table-shell">
     <table id="optParamTable">
       <thead>
         <tr>
-          <th>Use</th>
-          <th>Param Key</th>
-          <th>Current</th>
-          <th>Min</th>
-          <th>Max</th>
-          <th>Step</th>
-          <th>Type</th>
+          <th>使用</th>
+          <th>参数键</th>
+          <th>当前值</th>
+          <th>最小值</th>
+          <th>最大值</th>
+          <th>步长</th>
+          <th>类型</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -272,38 +272,38 @@
   </div>
 
   <div class="bt-form-row">
-    <span>Selected Params: <strong id="optSelectedCount">0</strong></span>
-    <button id="optStartBtn" type="button">Start Optimization</button>
-    <button id="optCancelBtn" type="button" disabled>Cancel Optimization</button>
+    <span>已选参数：<strong id="optSelectedCount">0</strong></span>
+    <button id="optStartBtn" type="button">开始优化</button>
+    <button id="optCancelBtn" type="button" disabled>取消优化</button>
   </div>
 
   <div class="opt-progress-wrap">
     <progress id="optProgress" max="1" value="0"></progress>
     <span id="optProgressText">0%</span>
   </div>
-  <p id="optStatus" class="status-banner">Optimization idle.</p>
+  <p id="optStatus" class="status-banner">优化空闲。</p>
 
-  <h3>Optimization Summary</h3>
-  <pre id="optSummary">No result yet.</pre>
+  <h3>优化摘要</h3>
+  <pre id="optSummary">暂无结果。</pre>
 
-  <h3>Optimization Results (Top 50 by Score)</h3>
+  <h3>优化结果（按评分前 50）</h3>
   <div class="table-shell">
     <table id="optResultTable">
       <thead>
         <tr>
-          <th>Rank</th>
-          <th>Score</th>
-          <th>Partial</th>
-          <th>Coverage</th>
-          <th>Median Sharpe</th>
-          <th>Min Sharpe</th>
-          <th>Std Sharpe</th>
-          <th>Worst DD</th>
-          <th>Trade Count</th>
-          <th>Win Rate</th>
-          <th>Profit Factor</th>
-          <th>Hard Pass</th>
-          <th>Params</th>
+          <th>排名</th>
+          <th>评分</th>
+          <th>部分完成</th>
+          <th>覆盖</th>
+          <th>夏普中位数</th>
+          <th>最低夏普</th>
+          <th>夏普标准差</th>
+          <th>最差回撤</th>
+          <th>交易数</th>
+          <th>胜率</th>
+          <th>盈亏比</th>
+          <th>硬过滤通过</th>
+          <th>参数</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -475,7 +475,31 @@
   }
 
   function holdingsDisplayName(rawKey) {
-    return rawKey === 'CASH' ? 'CASH' : formatSymbolDisplay(rawKey);
+    return rawKey === 'CASH' ? '现金' : formatSymbolDisplay(rawKey);
+  }
+
+  function translateSide(value) {
+    const side = String(value || '').toUpperCase();
+    if (side === 'BUY') return '买入';
+    if (side === 'SELL') return '卖出';
+    if (side === 'HOLD') return '持有';
+    return value || '';
+  }
+
+  function signalModuleText(value) {
+    const key = String(value || '');
+    if (key === 'price_above_ma20') return '价格高于 MA20';
+    if (key === 'price_above_ma60') return '价格高于 MA60';
+    if (key === 'price_above_ma200') return '价格高于 MA200';
+    if (key === 'trend_score_max') return '趋势评分上限';
+    if (key === 'hard_stop') return '硬止损';
+    if (key === 'chandelier_stop') return '吊灯止损';
+    if (key === 'ma_breakdown_max') return '均线破位';
+    return key;
+  }
+
+  function formatSignalModuleList(items) {
+    return Array.isArray(items) && items.length ? items.map(signalModuleText).join('，') : '-';
   }
 
 
@@ -722,9 +746,9 @@
           const c = dist.counts[i] || 0;
           const p = dist.total > 0 ? (percent[i] * 100).toFixed(2) : '0.00';
           return [
-            `Range: ${dist.labels[i] || '-'}`,
-            `Count: ${c}`,
-            `Share: ${p}%`,
+            `区间：${dist.labels[i] || '-'}`,
+            `数量：${c}`,
+            `占比：${p}%`,
           ].join('<br/>');
         },
       },
@@ -739,7 +763,7 @@
         minInterval: 1,
       },
       series: [{
-        name: 'Count',
+        name: '数量',
         type: 'bar',
         barMaxWidth: 20,
         itemStyle: { color: '#0b6e99' },
@@ -749,23 +773,23 @@
         type: 'text',
         left: 'center',
         top: 'middle',
-        style: { text: 'No trend data', fill: '#6b7280', fontSize: 14 },
+        style: { text: '暂无趋势数据', fill: '#6b7280', fontSize: 14 },
       }],
     }, true);
   }
   function renderSummary(summary) {
     const cards = document.getElementById('summaryCards');
     const rows = [
-      ['Total Return', pct(summary.total_return)],
-      ['Annual Return', pct(summary.annual_return)],
-      ['Max Drawdown', pct(summary.max_drawdown)],
-      ['Sharpe', num(summary.sharpe)],
-      ['Sortino', num(summary.sortino)],
-      ['Calmar', num(summary.calmar)],
-      ['Win Rate', pct(summary.win_rate)],
-      ['Profit Factor', num(summary.profit_factor)],
-      ['Turnover', num(summary.turnover)],
-      ['Trade Count', qty(summary.trade_count)],
+      ['总收益', pct(summary.total_return)],
+      ['年化收益', pct(summary.annual_return)],
+      ['最大回撤', pct(summary.max_drawdown)],
+      ['夏普', num(summary.sharpe)],
+      ['索提诺', num(summary.sortino)],
+      ['卡玛', num(summary.calmar)],
+      ['胜率', pct(summary.win_rate)],
+      ['盈亏比', num(summary.profit_factor)],
+      ['换手率', num(summary.turnover)],
+      ['交易数', qty(summary.trade_count)],
     ];
     cards.innerHTML = rows.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   }
@@ -773,12 +797,12 @@
   function renderBenchmarkSummary(summary) {
     const cards = document.getElementById('benchmarkCards');
     const rows = [
-      ['BM Total Return', pct(summary.total_return)],
-      ['BM Annual Return', pct(summary.annual_return)],
-      ['BM Max Drawdown', pct(summary.max_drawdown)],
-      ['BM Sharpe', num(summary.sharpe)],
-      ['BM Sortino', num(summary.sortino)],
-      ['BM Calmar', num(summary.calmar)],
+      ['基准总收益', pct(summary.total_return)],
+      ['基准年化收益', pct(summary.annual_return)],
+      ['基准最大回撤', pct(summary.max_drawdown)],
+      ['基准夏普', num(summary.sharpe)],
+      ['基准索提诺', num(summary.sortino)],
+      ['基准卡玛', num(summary.calmar)],
     ];
     cards.innerHTML = rows.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   }
@@ -788,21 +812,21 @@
     if (!cards) return;
     const sid = String(strategyId || '');
     if (!isMomentumStrategy(sid)) {
-      cards.innerHTML = '<div class="card"><div class="k">Mode</div><div class="v">Trend Score</div></div>';
+      cards.innerHTML = '<div class="card"><div class="k">模式</div><div class="v">趋势评分</div></div>';
       return;
     }
     const h = highlights || {};
-    const buyFiltersText = Array.isArray(h.buy_filters) && h.buy_filters.length ? h.buy_filters.join(', ') : '-';
-    const sellSignalsText = Array.isArray(h.sell_signals) && h.sell_signals.length ? h.sell_signals.join(', ') : '-';
+    const buyFiltersText = formatSignalModuleList(h.buy_filters);
+    const sellSignalsText = formatSignalModuleList(h.sell_signals);
     const rows = [
-      ['Mode', sid === 'momentum_topn_v3' ? 'Momentum TopN v3' : (sid === 'momentum_topn_v2' ? 'Momentum TopN v2' : 'Momentum TopN v1')],
-      ['Max Holdings', qty(h.max_holdings)],
-      ['Rebalance Days', qty(h.rebalance_day_count)],
-      ['Rebalance Buys', qty(h.rebalance_buy_count)],
-      ['Rebalance Sells', qty(h.rebalance_sell_count)],
-      ['Avg Position Count', num(h.avg_position_count)],
-      ['Buy Filters', buyFiltersText],
-      ['Sell Signals', sellSignalsText],
+      ['模式', sid === 'momentum_topn_v3' ? '动量前 N v3' : (sid === 'momentum_topn_v2' ? '动量前 N v2' : '动量前 N v1')],
+      ['最大持仓数', qty(h.max_holdings)],
+      ['调仓天数', qty(h.rebalance_day_count)],
+      ['调仓买入', qty(h.rebalance_buy_count)],
+      ['调仓卖出', qty(h.rebalance_sell_count)],
+      ['平均持仓数', num(h.avg_position_count)],
+      ['买入过滤', buyFiltersText],
+      ['卖出信号', sellSignalsText],
     ];
     cards.innerHTML = rows.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
   }
@@ -834,14 +858,14 @@
           const d = params.data || {};
           return [
             `${d.symbol_name || ''} ${name}`.trim(),
-            `Date: ${params.value[0]}`,
-            `NAV: ${num(params.value[1])}`,
-            `Price: ${num(d.price)}`,
-            `Amount: ${num(d.amount)}`,
-            `Trend Score: ${num(d.trend_score)}`,
-            `Momentum Z: ${num(d.momentum_score)}`,
-            `Hybrid Score: ${num(d.hybrid_score)}`,
-            `Qty: ${qty(d.qty)}`,
+            `日期：${params.value[0]}`,
+            `净值：${num(params.value[1])}`,
+            `价格：${num(d.price)}`,
+            `金额：${num(d.amount)}`,
+            `趋势评分：${num(d.trend_score)}`,
+            `动量 Z：${num(d.momentum_score)}`,
+            `混合评分：${num(d.hybrid_score)}`,
+            `数量：${qty(d.qty)}`,
           ].join('<br/>');
         }
       },
@@ -883,11 +907,11 @@
           const d = params.data || {};
           return [
             `${name} ${d.symbol_name || ''}`.trim(),
-            `Date: ${d.date || ''}`,
-            `Trend Score: ${num(d.trend_score)}`,
-            `Price: ${num3(d.price)}`,
-            `Amount: ${num(d.amount)}`,
-            `Qty: ${qty(d.qty)}`,
+            `日期：${d.date || ''}`,
+            `趋势评分：${num(d.trend_score)}`,
+            `价格：${num3(d.price)}`,
+            `金额：${num(d.amount)}`,
+            `数量：${qty(d.qty)}`,
           ].join('<br/>');
         },
       },
@@ -958,13 +982,13 @@
           const d = params.data || {};
           return [
             `${name}`,
-            `Date: ${d.date || ''}`,
-            `Price: ${num3(d.price)}`,
-            `Amount: ${num(d.amount)}`,
-            `Trend Score: ${num(d.trend_score)}`,
-            `Momentum Z: ${num(d.momentum_score)}`,
-            `Hybrid Score: ${num(d.hybrid_score)}`,
-            `Qty: ${qty(d.qty)}`,
+            `日期：${d.date || ''}`,
+            `价格：${num3(d.price)}`,
+            `金额：${num(d.amount)}`,
+            `趋势评分：${num(d.trend_score)}`,
+            `动量 Z：${num(d.momentum_score)}`,
+            `混合评分：${num(d.hybrid_score)}`,
+            `数量：${qty(d.qty)}`,
           ].join('<br/>');
         }
       },
@@ -1064,19 +1088,19 @@
 
               const lowShow = Number.isFinite(lowV) && Number.isFinite(highV) ? Math.min(lowV, highV) : lowV;
               const highShow = Number.isFinite(lowV) && Number.isFinite(highV) ? Math.max(lowV, highV) : highV;
-              lines.push(`Open: ${num3(openV)}`);
-              lines.push(`Close: ${num3(closeV)}`);
-              lines.push(`Low: ${num3(lowShow)}`);
-              lines.push(`High: ${num3(highShow)}`);
+              lines.push(`开盘：${num3(openV)}`);
+              lines.push(`收盘：${num3(closeV)}`);
+              lines.push(`最低：${num3(lowShow)}`);
+              lines.push(`最高：${num3(highShow)}`);
             } else if (p.seriesType === 'scatter') {
               const d = p.data || {};
-              lines.push(`${p.seriesName}: price ${num3(d.price)}, amount ${num(d.amount)}, trend ${num(d.trend_score)}, qty ${qty(d.qty)}`);
+              lines.push(`${p.seriesName}：价格 ${num3(d.price)}，金额 ${num(d.amount)}，趋势 ${num(d.trend_score)}，数量 ${qty(d.qty)}`);
             }
           }
           return lines.join('<br/>');
         },
       },
-      legend: { data: ['K', ...maLegend, 'BUY', 'SELL'] },
+      legend: { data: ['K', ...maLegend, '买入', '卖出'] },
       dataZoom: [
         { type: 'inside', xAxisIndex: 0, start: zoomStart, end: zoomEnd },
         { type: 'slider', xAxisIndex: 0, start: zoomStart, end: zoomEnd },
@@ -1107,8 +1131,8 @@
           },
         },
         ...maSeries,
-        buildKlineTradeSeries(item.buy_points, 'BUY', KLINE_TRADE_STYLE.BUY),
-        buildKlineTradeSeries(item.sell_points, 'SELL', KLINE_TRADE_STYLE.SELL),
+        buildKlineTradeSeries(item.buy_points, '买入', KLINE_TRADE_STYLE.BUY),
+        buildKlineTradeSeries(item.sell_points, '卖出', KLINE_TRADE_STYLE.SELL),
       ],
     }, true);
     updateKlineYAxisByZoom({ start: zoomStart, end: zoomEnd });
@@ -1120,7 +1144,7 @@
     const symbols = Object.keys(klineMap).sort();
 
     if (!symbols.length) {
-      klineSymbolEl.innerHTML = '<option value="">N/A</option>';
+      klineSymbolEl.innerHTML = '<option value="">暂无</option>';
       klineChart.clear();
       renderLinkedScoreChartsByKlineSymbol('');
       return;
@@ -1142,10 +1166,10 @@
     const selectedTrendSeries = buildTrendLineSeries(selectedTrendMap);
     const filteredBuyPoints = filterTrendPointsBySymbol(trendBuyPointsCache, selectedSymbol);
     const filteredSellPoints = filterTrendPointsBySymbol(trendSellPointsCache, selectedSymbol);
-    const trendBuySeries = buildTrendSignalSeries(filteredBuyPoints, 'BUY', TREND_TRADE_STYLE.BUY);
-    const trendSellSeries = buildTrendSignalSeries(filteredSellPoints, 'SELL', TREND_TRADE_STYLE.SELL);
+    const trendBuySeries = buildTrendSignalSeries(filteredBuyPoints, '买入', TREND_TRADE_STYLE.BUY);
+    const trendSellSeries = buildTrendSignalSeries(filteredSellPoints, '卖出', TREND_TRADE_STYLE.SELL);
     const trendGuideSeries = {
-      name: 'Trend Guides',
+      name: '趋势参考线',
       type: 'line',
       data: [],
       silent: true,
@@ -1215,7 +1239,7 @@
           },
           label: {
             show: true,
-            formatter: (params) => `Trend: ${num(params.value)}`,
+            formatter: (params) => `趋势：${num(params.value)}`,
           },
         },
       },
@@ -1254,13 +1278,13 @@
 
     navChart.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: ['Strategy', 'Benchmark', 'BUY', 'SELL'] },
+      legend: { data: ['策略', '基准', '买入', '卖出'] },
       dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
       xAxis: { type: 'category', data: dates },
       yAxis: { type: 'value', scale: true, axisLabel: { formatter: (v) => Number(v).toFixed(2) } },
       series: [
         {
-          name: 'Strategy',
+          name: '策略',
           type: 'line',
           data: charts.nav || [],
           smooth: true,
@@ -1268,15 +1292,15 @@
           tooltip: { valueFormatter: (v) => num(v) },
         },
         {
-          name: 'Benchmark',
+          name: '基准',
           type: 'line',
           data: charts.benchmark_nav || [],
           smooth: true,
           symbol: 'none',
           tooltip: { valueFormatter: (v) => num(v) },
         },
-        buildScatterSeries(charts.buy_points, 'BUY', '#d14343', 'triangle'),
-        buildScatterSeries(charts.sell_points, 'SELL', '#00a76f', 'diamond'),
+        buildScatterSeries(charts.buy_points, '买入', '#d14343', 'triangle'),
+        buildScatterSeries(charts.sell_points, '卖出', '#00a76f', 'diamond'),
       ]
     });
 
@@ -1327,13 +1351,13 @@
           return lines.join('<br/>');
         },
       },
-      legend: { data: ['Strategy Drawdown', 'Benchmark Drawdown'] },
+      legend: { data: ['策略回撤', '基准回撤'] },
       dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
       xAxis: { type: 'category', data: dates },
       yAxis: { type: 'value', axisLabel: { formatter: (v) => (v * 100).toFixed(0) + '%' } },
       series: [
         {
-          name: 'Strategy Drawdown',
+          name: '策略回撤',
           type: 'line',
           data: strategyDrawdown,
           areaStyle: {},
@@ -1341,7 +1365,7 @@
           symbol: 'none',
         },
         {
-          name: 'Benchmark Drawdown',
+          name: '基准回撤',
           type: 'line',
           data: benchmarkDrawdown,
           lineStyle: { color: '#2e86de', type: 'dashed', width: 1.5 },
@@ -1506,7 +1530,7 @@
   function renderTradeFilter(rows) {
     const prev = symbolFilterEl.value;
     const symbols = Array.from(new Set((rows || []).map(r => String(r.symbol || '').trim()).filter(Boolean))).sort();
-    symbolFilterEl.innerHTML = `<option value="">ALL</option>${symbols
+    symbolFilterEl.innerHTML = `<option value="">全部</option>${symbols
       .map((s) => `<option value="${escapeHtml(s)}">${escapeHtml(formatSymbolDisplay(s))}</option>`)
       .join('')}`;
     if (prev && symbols.includes(prev)) {
@@ -1658,7 +1682,7 @@
       <tr>
         <td>${r.date || ''}</td>
         <td>${escapeHtml(formatSymbolDisplay(r.symbol || ''))}</td>
-        <td>${side}</td>
+        <td>${translateSide(side)}</td>
         <td>${num(r.trend_score)}</td>
         <td>${num(r.momentum_score)}</td>
         <td>${num(r.hybrid_score)}</td>
@@ -1676,10 +1700,10 @@
 
   async function runBacktest() {
     runBtn.disabled = true;
-    statusEl.textContent = 'Running backtest...';
+    statusEl.textContent = '正在运行回测...';
     const strategyId = String(strategySelectEl?.value || 'trend_score_v1');
     if (!fixedBacktestSymbols.length) {
-      statusEl.textContent = 'No enabled instruments configured for the 20-industry ETF group.';
+      statusEl.textContent = '20 行业 ETF 标的组中没有已启用标的。';
       runBtn.disabled = false;
       return;
     }
@@ -1717,37 +1741,37 @@
       if (sellSignalMaBreakdownEl?.checked) sellSignals.push(SELL_SIGNAL_IDS.MA_BREAKDOWN);
 
       if (![nShort, nMid, nLong, entryThreshold, maxHoldings, momShort, momLong, wMomShort, wMomLong, wHybridMom, wHybridTrend, rebalanceWeekday, maxEntryTrendScore].every((x) => Number.isFinite(x))) {
-        statusEl.textContent = 'Please input valid momentum strategy parameters.';
+        statusEl.textContent = '请输入有效的动量策略参数。';
         runBtn.disabled = false;
         return;
       }
       if (!(nShort < nMid && nMid < nLong)) {
-        statusEl.textContent = 'Require n_short < n_mid < n_long for momentum strategy.';
+        statusEl.textContent = '动量策略要求 n_short < n_mid < n_long。';
         runBtn.disabled = false;
         return;
       }
       if (!(momLong > momShort && momShort > 0)) {
-        statusEl.textContent = 'Require momentum_window_long > momentum_window_short > 0.';
+        statusEl.textContent = '要求 momentum_window_long > momentum_window_short > 0。';
         runBtn.disabled = false;
         return;
       }
       if (!(entryThreshold > 0)) {
-        statusEl.textContent = 'Require entry_threshold > 0 for momentum strategy.';
+        statusEl.textContent = '动量策略要求 entry_threshold > 0。';
         runBtn.disabled = false;
         return;
       }
       if (maxHoldings <= 0) {
-        statusEl.textContent = 'Require max_holdings > 0.';
+        statusEl.textContent = '要求 max_holdings > 0。';
         runBtn.disabled = false;
         return;
       }
       if (!(rebalanceWeekday >= 1 && rebalanceWeekday <= 5)) {
-        statusEl.textContent = 'Require rebalance_weekday in [1, 5].';
+        statusEl.textContent = '要求 rebalance_weekday 在 [1, 5] 范围内。';
         runBtn.disabled = false;
         return;
       }
       if (buyFilters.includes(BUY_FILTER_IDS.TREND_MAX) && !(maxEntryTrendScore > 0)) {
-        statusEl.textContent = 'Require max_entry_trend_score > 0 when trend_score_max filter is enabled.';
+        statusEl.textContent = '启用 trend_score_max 过滤时，要求 max_entry_trend_score > 0。';
         runBtn.disabled = false;
         return;
       }
@@ -1776,22 +1800,22 @@
       const entryThresholdMin = Number(entryThresholdMinEl?.value);
       const entryThresholdMax = Number(entryThresholdMaxEl?.value);
       if (![nShort, nMid, nLong, entryThresholdMin, entryThresholdMax].every((x) => Number.isFinite(x))) {
-        statusEl.textContent = 'Please input valid trend strategy parameters.';
+        statusEl.textContent = '请输入有效的趋势策略参数。';
         runBtn.disabled = false;
         return;
       }
       if (!(nShort < nMid && nMid < nLong)) {
-        statusEl.textContent = 'Require n_short < n_mid < n_long.';
+        statusEl.textContent = '要求 n_short < n_mid < n_long。';
         runBtn.disabled = false;
         return;
       }
       if (!(entryThresholdMin > 0 && entryThresholdMax > 0)) {
-        statusEl.textContent = 'Require entry_threshold_min > 0 and entry_threshold_max > 0.';
+        statusEl.textContent = '要求 entry_threshold_min > 0 且 entry_threshold_max > 0。';
         runBtn.disabled = false;
         return;
       }
       if (entryThresholdMin > entryThresholdMax) {
-        statusEl.textContent = 'Require entry_threshold_min <= entry_threshold_max.';
+        statusEl.textContent = '要求 entry_threshold_min <= entry_threshold_max。';
         runBtn.disabled = false;
         return;
       }
@@ -1820,10 +1844,10 @@
       });
       const data = await resp.json();
       if (!resp.ok || data.status !== 'ok') {
-        throw new Error(data.detail || data.status || 'backtest_failed');
+        throw new Error(data.detail || data.status || '回测失败');
       }
 
-      statusEl.textContent = `Done. run_id=${data.run_id} | days=${data.meta.timeline_days} | benchmark=${data.meta?.benchmark || '-'}`;
+      statusEl.textContent = `完成。运行 ID=${data.run_id} | 天数=${data.meta.timeline_days} | 基准=${data.meta?.benchmark || '-'}`;
       renderSummary(data.summary || {});
       renderBenchmarkSummary(data.benchmark_summary || {});
       renderStrategyHighlights(data.strategy_highlights || {}, data.meta?.strategy_id || strategyId);
@@ -1840,7 +1864,7 @@
         : buildSymbolStats(allTrades, (data.meta && data.meta.symbols) || []);
       renderSymbolStats(stats);
     } catch (err) {
-      statusEl.textContent = `Failed: ${err.message}`;
+      statusEl.textContent = `失败：${err.message}`;
     } finally {
       runBtn.disabled = false;
       navChart.resize();
@@ -1942,6 +1966,49 @@
       .replace(/'/g, '&#39;');
   }
 
+  function translateJobStatus(status) {
+    const text = String(status || '');
+    if (text === 'running') return '运行中';
+    if (text === 'completed') return '已完成';
+    if (text === 'cancelled') return '已取消';
+    if (text === 'cancelling') return '取消中';
+    if (text === 'failed') return '失败';
+    if (text === 'queued') return '排队中';
+    return text || '-';
+  }
+
+  function valueTypeText(value) {
+    const text = String(value || '');
+    if (text === 'int') return '整数';
+    if (text === 'float') return '小数';
+    if (text === 'bool') return '布尔';
+    if (text === 'str' || text === 'string') return '文本';
+    return text || '-';
+  }
+
+  function yesNo(value) {
+    return value ? '是' : '否';
+  }
+
+  function translateReasonKey(key) {
+    const text = String(key || '');
+    if (text === 'dd_exceed') return '回撤超限';
+    if (text === 'trade_too_few') return '交易过少';
+    if (text === 'min_sharpe_non_positive') return '最低夏普非正';
+    if (text === 'invalid_range') return '参数范围无效';
+    if (text === 'invalid_step') return '步长无效';
+    return text || '-';
+  }
+
+  function translateReasonMap(raw) {
+    const out = {};
+    const src = raw && typeof raw === 'object' ? raw : {};
+    for (const [key, value] of Object.entries(src)) {
+      out[translateReasonKey(key)] = value;
+    }
+    return out;
+  }
+
   function setProgress(percent, label) {
     const p = Math.max(0, Math.min(Number(percent || 0), 1));
     progressEl.value = p;
@@ -1962,7 +2029,7 @@
     tr.innerHTML = `
       <td><input data-role="start" type="date" value="${escapeHtml(startDate)}"></td>
       <td><input data-role="end" type="date" value="${escapeHtml(endDate)}"></td>
-      <td><button type="button" data-role="remove-window">Remove</button></td>
+      <td><button type="button" data-role="remove-window">移除</button></td>
     `;
     const startInput = tr.querySelector('input[data-role="start"]');
     const endInput = tr.querySelector('input[data-role="end"]');
@@ -2096,7 +2163,7 @@
         <td><input data-role="min" type="number" value="${escapeHtml(minVal)}" step="any"></td>
         <td><input data-role="max" type="number" value="${escapeHtml(maxVal)}" step="any"></td>
         <td><input data-role="step" type="number" value="${escapeHtml(step)}" step="any"></td>
-        <td>${escapeHtml(p.value_type || 'float')}</td>
+        <td>${escapeHtml(valueTypeText(p.value_type || 'float'))}</td>
       </tr>
       `;
     }).join('');
@@ -2116,17 +2183,17 @@
 
   async function loadParams() {
     loadParamsBtn.disabled = true;
-    statusEl.textContent = 'Loading tunable parameters...';
+    statusEl.textContent = '正在加载可调参数...';
     try {
       const resp = await fetch('/backtest/api/optimize/params');
       const data = await resp.json();
       if (!resp.ok) {
-        throw new Error(data.detail || 'load_optimize_params_failed');
+        throw new Error(data.detail || '可调参数加载失败');
       }
       renderParams(data.items || []);
-      statusEl.textContent = `Loaded ${Number(data.count || 0)} tunable parameters.`;
+      statusEl.textContent = `已加载 ${Number(data.count || 0)} 个可调参数。`;
     } catch (err) {
-      statusEl.textContent = `Failed to load tunable parameters: ${err.message}`;
+      statusEl.textContent = `加载可调参数失败：${err.message}`;
     } finally {
       loadParamsBtn.disabled = false;
     }
@@ -2136,24 +2203,24 @@
     const summary = result?.summary || {};
     const hardReasons = summary.hard_filter_reason_counts || {};
     const output = {
-      status: result?.status || '-',
-      raw_combo_count: summary.raw_combo_count,
-      valid_combo_count: summary.valid_combo_count,
-      invalid_combo_count: summary.invalid_combo_count,
-      invalid_combo_reasons: summary.invalid_combo_reasons || {},
-      evaluated_combo_count: summary.evaluated_combo_count,
-      completed_combo_count: summary.completed_combo_count,
-      partial_combo_count: summary.partial_combo_count,
-      hard_filtered_count: summary.hard_filtered_count,
-      hard_filter_reason_counts: {
-        dd_exceed: hardReasons.dd_exceed || 0,
-        trade_too_few: hardReasons.trade_too_few || 0,
-        min_sharpe_non_positive: hardReasons.min_sharpe_non_positive || 0,
+      状态: translateJobStatus(result?.status || '-'),
+      原始组合数: summary.raw_combo_count,
+      有效组合数: summary.valid_combo_count,
+      无效组合数: summary.invalid_combo_count,
+      无效原因: translateReasonMap(summary.invalid_combo_reasons),
+      已评估组合数: summary.evaluated_combo_count,
+      已完成组合数: summary.completed_combo_count,
+      部分完成组合数: summary.partial_combo_count,
+      硬过滤数量: summary.hard_filtered_count,
+      硬过滤原因统计: {
+        回撤超限: hardReasons.dd_exceed || 0,
+        交易过少: hardReasons.trade_too_few || 0,
+        最低夏普非正: hardReasons.min_sharpe_non_positive || 0,
       },
-      ranked_rows_total: summary.ranked_rows_total,
-      ranked_rows_kept: summary.ranked_rows_kept,
-      workers: summary.workers,
-      enable_loo: summary.enable_loo,
+      排名结果总数: summary.ranked_rows_total,
+      保留排名结果数: summary.ranked_rows_kept,
+      进程数: summary.workers,
+      启用LOO: yesNo(summary.enable_loo),
     };
     summaryEl.textContent = JSON.stringify(output, null, 2);
   }
@@ -2171,7 +2238,7 @@
       <tr>
         <td>${escapeHtml(row.rank)}</td>
         <td>${fmtNum(row.score, 4)}</td>
-        <td>${row.is_partial ? 'YES' : 'NO'}</td>
+        <td>${row.is_partial ? '是' : '否'}</td>
         <td>${escapeHtml(coverage)}</td>
         <td>${fmtNum(row.median_sharpe, 4)}</td>
         <td>${fmtNum(row.min_sharpe, 4)}</td>
@@ -2180,7 +2247,7 @@
         <td>${escapeHtml(row.trade_count_total)}</td>
         <td>${fmtPct(row.win_rate, 2)}</td>
         <td>${fmtNum(row.profit_factor, 4)}</td>
-        <td>${row.hard_filter_passed ? 'YES' : 'NO'}</td>
+        <td>${row.hard_filter_passed ? '是' : '否'}</td>
         <td>${escapeHtml(paramText)}</td>
       </tr>
       `;
@@ -2192,14 +2259,14 @@
       const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(jobId)}/result`);
       const data = await resp.json();
       if (!resp.ok) {
-        throw new Error(data.detail || 'load_optimize_result_failed');
+        throw new Error(data.detail || '优化结果加载失败');
       }
       renderSummary(data);
       renderRows(data.rows || []);
       const rows = data.rows || [];
-      statusEl.textContent = `${data.status || 'completed'}. rows=${rows.length}`;
+      statusEl.textContent = `${translateJobStatus(data.status || 'completed')}，结果行数=${rows.length}`;
     } catch (err) {
-      statusEl.textContent = `Failed to load result: ${err.message}`;
+      statusEl.textContent = `加载结果失败：${err.message}`;
     }
   }
 
@@ -2209,7 +2276,7 @@
       const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(currentJobId)}/status`);
       const data = await resp.json();
       if (!resp.ok) {
-        throw new Error(data.detail || 'poll_status_failed');
+        throw new Error(data.detail || '状态轮询失败');
       }
 
       const progress = data.progress || {};
@@ -2219,7 +2286,7 @@
       setProgress(percent, `${(percent * 100).toFixed(1)}% (${done}/${total})`);
 
       const st = String(data.status || 'running');
-      statusEl.textContent = `Optimization ${st}. ${done}/${total}`;
+      statusEl.textContent = `优化${translateJobStatus(st)}，${done}/${total}`;
 
       if (st === 'completed' || st === 'cancelled' || st === 'failed') {
         stopPolling();
@@ -2231,20 +2298,20 @@
       stopPolling();
       startBtn.disabled = false;
       cancelBtn.disabled = true;
-      statusEl.textContent = `Status polling failed: ${err.message}`;
+      statusEl.textContent = `状态轮询失败：${err.message}`;
     }
   }
 
   async function startOptimization() {
     const selectedParams = collectSelectedParams();
     if (!selectedParams.length) {
-      statusEl.textContent = 'Please select at least one parameter for optimization.';
+      statusEl.textContent = '请至少选择一个参数进行优化。';
       return;
     }
 
     const windows = collectWindows();
     if (!windows.length) {
-      statusEl.textContent = 'Please provide at least one valid date window.';
+      statusEl.textContent = '请至少提供一个有效日期窗口。';
       return;
     }
     persistCustomWindows(windows);
@@ -2260,8 +2327,8 @@
 
     startBtn.disabled = true;
     cancelBtn.disabled = false;
-    statusEl.textContent = 'Starting optimization job...';
-    summaryEl.textContent = 'Running...';
+    statusEl.textContent = '正在启动优化任务...';
+    summaryEl.textContent = '运行中...';
     resultTbody.innerHTML = '';
     setProgress(0, '0%');
 
@@ -2273,11 +2340,11 @@
       });
       const data = await resp.json();
       if (!resp.ok) {
-        throw new Error(data.detail || 'start_optimize_failed');
+        throw new Error(data.detail || '优化启动失败');
       }
       currentJobId = String(data.job_id || '');
       if (!currentJobId) {
-        throw new Error('missing_job_id');
+        throw new Error('缺少任务 ID');
       }
 
       stopPolling();
@@ -2286,7 +2353,7 @@
     } catch (err) {
       startBtn.disabled = false;
       cancelBtn.disabled = true;
-      statusEl.textContent = `Failed to start optimization: ${err.message}`;
+      statusEl.textContent = `启动优化失败：${err.message}`;
     }
   }
 
@@ -2297,11 +2364,11 @@
       const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(currentJobId)}/cancel`, { method: 'POST' });
       const data = await resp.json();
       if (!resp.ok) {
-        throw new Error(data.detail || 'cancel_optimize_failed');
+        throw new Error(data.detail || '取消优化失败');
       }
-      statusEl.textContent = `Cancellation requested. status=${data.status || 'cancelling'}`;
+      statusEl.textContent = `已请求取消，状态=${translateJobStatus(data.status || 'cancelling')}`;
     } catch (err) {
-      statusEl.textContent = `Failed to cancel optimization: ${err.message}`;
+      statusEl.textContent = `取消优化失败：${err.message}`;
       cancelBtn.disabled = false;
     }
   }

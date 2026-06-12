@@ -1,19 +1,19 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="page-panel instruments-page">
-  <h2>Instrument Management</h2>
-  <p id="instStatus" class="status-banner">Loading instruments...</p>
+  <h2>标的管理</h2>
+  <p id="instStatus" class="status-banner">正在加载标的...</p>
   <div class="table-shell">
     <table id="instTable">
       <thead>
         <tr>
-          <th>Code</th>
-          <th>Symbol</th>
-          <th>Name</th>
-          <th>Enabled</th>
-          <th>Rows</th>
-          <th>Date Range</th>
-          <th>Backfill Daily K</th>
+          <th>代码</th>
+          <th>标识</th>
+          <th>名称</th>
+          <th>启用</th>
+          <th>数据行数</th>
+          <th>日期范围</th>
+          <th>补齐日 K</th>
         </tr>
       </thead>
       <tbody></tbody>
@@ -49,7 +49,7 @@
 
   function render(items) {
     if (!Array.isArray(items) || !items.length) {
-      tableBody.innerHTML = '<tr><td colspan="7">No local instrument data found.</td></tr>';
+      tableBody.innerHTML = '<tr><td colspan="7">未找到本地标的数据。</td></tr>';
       return;
     }
 
@@ -61,14 +61,14 @@
           <td>${esc(item.code || '')}</td>
           <td>${esc(symbol)}</td>
           <td>${esc(item.name || '-')}</td>
-          <td>${item.enabled ? 'Yes' : 'No'}</td>
+          <td>${item.enabled ? '是' : '否'}</td>
           <td data-role="rows">${fmtNum(item.rows)}</td>
           <td data-role="range">${esc(dateRangeText(item.local_start_date, item.local_end_date))}</td>
           <td>
             <div class="bt-form-row" style="margin: 0; gap: 6px;">
               <input data-role="start" type="date" value="${esc(startDefault)}">
               <input data-role="end" type="date" value="${esc(today)}">
-              <button data-role="backfill" type="button">Backfill</button>
+              <button data-role="backfill" type="button">补齐</button>
             </div>
             <div data-role="msg" style="font-size: 12px; color: #556; margin-top: 4px;"></div>
           </td>
@@ -78,18 +78,18 @@
   }
 
   async function loadList() {
-    statusEl.textContent = 'Loading instruments...';
+    statusEl.textContent = '正在加载标的...';
     try {
       const resp = await fetch('/instruments/api/list');
       const data = await resp.json();
       if (!resp.ok) {
-        throw new Error(data.detail || 'list_failed');
+        throw new Error(data.detail || '列表加载失败');
       }
       render(data.items || []);
-      statusEl.textContent = `Loaded ${Number(data.count || 0)} instruments.`;
+      statusEl.textContent = `已加载 ${Number(data.count || 0)} 个标的。`;
     } catch (err) {
-      statusEl.textContent = `Failed: ${err.message}`;
-      tableBody.innerHTML = '<tr><td colspan="7">Failed to load data.</td></tr>';
+      statusEl.textContent = `加载失败：${err.message}`;
+      tableBody.innerHTML = '<tr><td colspan="7">数据加载失败。</td></tr>';
     }
   }
 
@@ -110,16 +110,16 @@
     const endDate = String(endEl?.value || '').trim();
 
     if (!startDate) {
-      setRowMessage(row, 'Please input start date.', true);
+      setRowMessage(row, '请输入开始日期。', true);
       return;
     }
     if (endDate && endDate < startDate) {
-      setRowMessage(row, 'End date must be >= start date.', true);
+      setRowMessage(row, '结束日期必须大于等于开始日期。', true);
       return;
     }
 
     if (btn) btn.disabled = true;
-    setRowMessage(row, 'Backfilling...');
+    setRowMessage(row, '正在补齐...');
     try {
       const resp = await fetch(`/instruments/api/${encodeURIComponent(symbol)}/backfill`, {
         method: 'POST',
@@ -131,7 +131,7 @@
       });
       const data = await resp.json();
       if (!resp.ok || !data.ok) {
-        throw new Error(data.detail || 'backfill_failed');
+        throw new Error(data.detail || '补齐失败');
       }
 
       const result = data.result || {};
@@ -144,14 +144,14 @@
 
       const adjusted = Boolean(result.request_adjusted_to_earliest_available);
       const adjustedText = adjusted
-        ? ` Requested start adjusted to earliest available ${result.fetched_start || '-'}.`
+        ? ` 请求开始日期已调整为最早可用日期 ${result.fetched_start || '-'}。`
         : '';
       setRowMessage(
         row,
-        `Done. +${Number(result.added_rows || 0)} rows, local range ${dateRangeText(result.local_start_after, result.local_end_after)}.${adjustedText}`
+        `完成。新增 ${Number(result.added_rows || 0)} 行，本地范围 ${dateRangeText(result.local_start_after, result.local_end_after)}。${adjustedText}`
       );
     } catch (err) {
-      setRowMessage(row, `Failed: ${err.message}`, true);
+      setRowMessage(row, `失败：${err.message}`, true);
     } finally {
       if (btn) btn.disabled = false;
     }
