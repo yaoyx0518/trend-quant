@@ -1,5 +1,8 @@
 ﻿from __future__ import annotations
 
+import logging
+import threading
+from datetime import datetime
 from pathlib import Path
 from typing import Literal
 
@@ -12,6 +15,10 @@ from pydantic import BaseModel, Field
 from app.instrument_display import format_symbol_display, strip_etf_suffix
 from backtest.backtest_engine import BacktestEngine
 from backtest.optimization_manager import OptimizationJobManager
+from core.benchmarks import (
+    COMPARISON_BENCHMARKS,
+    DEFAULT_BENCHMARK_SYMBOL,
+)
 from data.storage.db import get_db
 from data.storage.runtime_store import RuntimeStore
 from strategy.catalog import (
@@ -23,11 +30,15 @@ from strategy.catalog import (
 )
 from strategy.momentum_signal_modules import BUY_FILTER_REGISTRY, SELL_SIGNAL_REGISTRY, normalize_signal_modules
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/backtest", tags=["backtest"])
 templates = Jinja2Templates(directory="web/templates")
 store = RuntimeStore()
 optimizer_job_manager = OptimizationJobManager()
-DEFAULT_BENCHMARK_SYMBOL = "512500.SS"
+
+_backtest_jobs: dict[str, dict] = {}
+_backtest_lock = threading.Lock()
 
 
 class BacktestRunRequest(BaseModel):
@@ -37,7 +48,7 @@ class BacktestRunRequest(BaseModel):
     strategy_id: str = Field(default=TREND_STRATEGY_ID)
     strategy_params: dict[str, float | int | str | bool | list[str]] = Field(default_factory=dict)
     selected_symbols: list[str] = Field(default_factory=list)
-    benchmark_mode: Literal["equal_weight_pool", "symbol"] = Field(default="equal_weight_pool")
+    benchmark_mode: Literal["equal_weight_pool", "csi500", "chinext", "symbol"] = Field(default="equal_weight_pool")
     benchmark_symbol: str = Field(default=DEFAULT_BENCHMARK_SYMBOL)
     symbol_param_overrides: dict[str, dict[str, float]] = Field(default_factory=dict)
     n_short: int = Field(default=5)
@@ -112,6 +123,7 @@ async def backtest_page(request: Request) -> HTMLResponse:
             "instrument_group_label": "20行业ETF标的组",
             "enabled_instrument_count": enabled_instrument_count,
             "strategy_catalog": strategy_catalog,
+            "comparison_benchmarks": [item.__dict__ for item in COMPARISON_BENCHMARKS],
         },
     )
 
@@ -119,10 +131,6 @@ async def backtest_page(request: Request) -> HTMLResponse:
 @router.post("/api/run")
 async def run_backtest(payload: BacktestRunRequest) -> dict:
     strategy_id = normalize_strategy_id(payload.strategy_id, fallback=TREND_STRATEGY_ID)
-    benchmark_mode = str(payload.benchmark_mode or "equal_weight_pool").strip().lower()
-    benchmark_symbol = str(payload.benchmark_symbol or "").strip().upper()
-    if benchmark_mode == "symbol" and benchmark_symbol == "":
-        benchmark_symbol = DEFAULT_BENCHMARK_SYMBOL
 
     strategy_params = payload.strategy_params if isinstance(payload.strategy_params, dict) else {}
     strategy_overrides: dict[str, float | int | str] = dict(strategy_params)
@@ -192,27 +200,100 @@ async def run_backtest(payload: BacktestRunRequest) -> dict:
         if not (1 <= rebalance_weekday <= 5):
             raise HTTPException(status_code=400, detail="要求 rebalance_weekday 在 [1, 5] 范围内")
 
-    engine = BacktestEngine()
+    run_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    with _backtest_lock:
+        _backtest_jobs[run_id] = {
+            "run_id": run_id,
+            "status": "running",
+            "progress_current": 0,
+            "progress_total": 1,
+        }
+
     body = payload.model_dump()
-    body["benchmark_mode"] = benchmark_mode
-    body["benchmark_symbol"] = benchmark_symbol
-    try:
-        return engine.run(
-            body,
-            strategy_id=strategy_id,
-            strategy_overrides=strategy_overrides,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    def _progress_callback(current: int, total: int) -> None:
+        with _backtest_lock:
+            job = _backtest_jobs.get(run_id)
+            if job:
+                job["progress_current"] = current
+                job["progress_total"] = total
+
+    def _run() -> None:
+        try:
+            engine = BacktestEngine()
+            result = engine.run(
+                body,
+                strategy_id=strategy_id,
+                strategy_overrides=strategy_overrides,
+                progress_callback=_progress_callback,
+                run_id=run_id,
+            )
+            with _backtest_lock:
+                job = _backtest_jobs.get(run_id)
+                if job:
+                    job["status"] = result.get("status", "ok")
+                    job["progress_current"] = job.get("progress_total", 1)
+                    job["result"] = result
+        except Exception as exc:
+            logger.exception("Backtest run_id=%s failed", run_id)
+            with _backtest_lock:
+                job = _backtest_jobs.get(run_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(exc)
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+
+    return {"run_id": run_id, "status": "running"}
+
+
+@router.get("/api/progress/{run_id}")
+async def get_backtest_progress(run_id: str) -> dict:
+    with _backtest_lock:
+        job = _backtest_jobs.get(run_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="未找到运行 ID")
+    resp: dict = {
+        "run_id": job["run_id"],
+        "status": job["status"],
+        "progress_current": job.get("progress_current", 0),
+        "progress_total": job.get("progress_total", 1),
+        "error": job.get("error"),
+    }
+    if job["status"] not in ("running",) and job.get("result"):
+        resp["result"] = job["result"]
+    return resp
 
 
 @router.get("/api/list")
-async def list_backtests(limit: int = 40) -> dict:
+async def list_backtests(limit: int = 40, favorite_only: bool = False) -> dict:
     items = get_db().list_backtests_summary(limit=limit)
+    if favorite_only:
+        items = [item for item in items if item.get("is_favorite")]
     return {"items": items}
 
 
+class FavoriteToggle(BaseModel):
+    is_favorite: bool
 
+
+@router.post("/api/{run_id}/favorite")
+async def toggle_favorite(run_id: str, payload: FavoriteToggle) -> dict:
+    ok = get_db().set_backtest_favorite(run_id, payload.is_favorite)
+    if not ok:
+        raise HTTPException(status_code=404, detail="未找到运行 ID")
+    return {"run_id": run_id, "is_favorite": payload.is_favorite}
+
+
+@router.delete("/api/{run_id}")
+async def delete_backtest(run_id: str) -> dict:
+    ok = get_db().delete_backtest(run_id)
+    if not ok:
+        raise HTTPException(status_code=404, detail="未找到运行 ID")
+    with _backtest_lock:
+        _backtest_jobs.pop(run_id, None)
+    return {"run_id": run_id, "deleted": True}
 
 
 @router.get("/api/optimize/params")
@@ -248,8 +329,14 @@ async def get_optimize_result(job_id: str) -> dict:
     if result_payload is None:
         raise HTTPException(status_code=404, detail="未找到任务 ID")
     return result_payload
+
+
 @router.get("/api/{run_id}")
 async def get_backtest_result(run_id: str) -> dict:
+    with _backtest_lock:
+        job = _backtest_jobs.get(run_id)
+        if job and job.get("result"):
+            return job["result"]
     result = get_db().get_backtest(run_id)
     if result is None:
         raise HTTPException(status_code=404, detail="未找到运行 ID")

@@ -182,6 +182,7 @@ def compute_annual_returns(
     daily_nav: list[dict],
     trades: list[dict] | None = None,
     benchmark_daily_nav: list[dict] | None = None,
+    benchmark_daily_navs: dict[str, list[dict]] | None = None,
 ) -> list[dict]:
     strategy_rows = _annual_return_rows(daily_nav)
     if not strategy_rows:
@@ -192,21 +193,40 @@ def compute_annual_returns(
     benchmark_rows = _annual_return_rows(benchmark_daily_nav or [])
     benchmark_return_map = {int(r["year"]): float(r["return"]) for r in benchmark_rows}
     benchmark_sharpe_map = _annual_sharpe_map(benchmark_daily_nav or [])
+    benchmark_maps: dict[str, dict] = {}
+    for key, series in (benchmark_daily_navs or {}).items():
+        rows = _annual_return_rows(series or [])
+        returns = {int(r["year"]): float(r["return"]) for r in rows}
+        sharpes = _annual_sharpe_map(series or [])
+        benchmark_maps[str(key)] = {"returns": returns, "sharpes": sharpes}
 
     out: list[dict] = []
     for row in strategy_rows:
         year = int(row["year"])
         tstats = trade_stats.get(year, {})
+        strategy_return = float(row["return"])
+        strategy_sharpe_value = float(strategy_sharpe.get(year, 0.0))
+        benchmark_items: dict[str, dict] = {}
+        for key, maps in benchmark_maps.items():
+            bm_return = maps["returns"].get(year)
+            bm_sharpe = maps["sharpes"].get(year)
+            benchmark_items[key] = {
+                "return": bm_return,
+                "sharpe": bm_sharpe,
+                "return_excess": (strategy_return - bm_return) if bm_return is not None else None,
+                "sharpe_excess": (strategy_sharpe_value - bm_sharpe) if bm_sharpe is not None else None,
+            }
         out.append(
             {
                 "year": year,
-                "return": float(row["return"]),
+                "return": strategy_return,
                 "trade_count": int(tstats.get("trade_count", 0)),
                 "win_rate": float(tstats.get("win_rate", 0.0)),
                 "profit_factor": float(tstats.get("profit_factor", 0.0)),
-                "sharpe": float(strategy_sharpe.get(year, 0.0)),
+                "sharpe": strategy_sharpe_value,
                 "benchmark_return": benchmark_return_map.get(year),
                 "benchmark_sharpe": benchmark_sharpe_map.get(year),
+                "benchmarks": benchmark_items,
             }
         )
     return out

@@ -24,18 +24,7 @@
     <p class="context-hint" style="margin-top: 0;">
       默认使用完整分组参与回测，不再需要逐个勾选标的。
     </p>
-    <div class="bt-form-row" style="margin-top: 10px;">
-      <label>基准
-        <select id="benchmarkMode">
-          <option value="equal_weight_pool" selected>{{ instrument_group_label }}（等权）</option>
-          <option value="symbol">单标的（买入并持有）</option>
-        </select>
-      </label>
-      <label id="benchmarkSymbolWrap" style="display:none;">
-        基准标的
-        <input id="benchmarkSymbol" type="text" value="512500.SS" placeholder="例如 510300.SH">
-      </label>
-    </div>
+    <p class="context-hint" style="margin: 10px 0 0;">比较基准：{% for option in comparison_benchmarks %}{% if option.mode == 'equal_weight_pool' %}{{ instrument_group_label }}（等权）{% else %}{{ option.label }}（{{ option.symbol }}）{% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</p>
   </div>
   <div id="trendParamsRow" class="bt-form-row">
     <label>n_short <input id="btNShort" type="number" value="5" min="1" step="1"></label>
@@ -92,13 +81,35 @@
     </div>
   </div>
 
-  <p id="btStatus" class="status-banner">就绪。</p>
+  <p id="btStatus" class="status-banner">就绪。 <span style="color:var(--accent);font-weight:700;">[v2]</span></p>
+  <div class="bt-progress-wrap" id="btProgressWrap" style="display:none;">
+    <progress id="btProgress" max="1" value="0"></progress>
+    <span id="btProgressText">0%</span>
+  </div>
 
-  <h3>策略指标</h3>
-  <div id="summaryCards" class="cards"></div>
-
-  <h3>基准指标</h3>
-  <div id="benchmarkCards" class="cards"></div>
+  <div class="table-panel metric-table-panel">
+    <h3>指标对比表</h3>
+    <div class="table-shell metric-table-shell">
+      <table id="metricTable" class="metric-table">
+        <thead>
+          <tr>
+            <th>对象</th>
+            <th>总收益</th>
+            <th>年化收益</th>
+            <th>最大回撤</th>
+            <th>夏普</th>
+            <th>索提诺</th>
+            <th>卡玛</th>
+            <th>胜率</th>
+            <th>盈亏比</th>
+            <th>换手率</th>
+            <th>交易数</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
   <h3>策略要点</h3>
   <div id="strategyHighlightCards" class="cards"></div>
 
@@ -171,16 +182,7 @@
     <h3>年度收益表</h3>
     <div class="table-shell">
       <table id="annualTable">
-        <thead>
-          <tr>
-            <th>年份</th>
-            <th>策略收益</th>
-            <th>策略交易数</th>
-            <th>策略胜率</th>
-            <th>策略盈亏比</th>
-            <th>策略夏普</th>
-          </tr>
-        </thead>
+        <thead></thead>
         <tbody></tbody>
       </table>
     </div>
@@ -317,6 +319,9 @@
   const runBtn = document.getElementById('runBtn');
   const goOptimizeBtn = document.getElementById('goOptimizeBtn');
   const statusEl = document.getElementById('btStatus');
+  const progressWrapEl = document.getElementById('btProgressWrap');
+  const progressEl = document.getElementById('btProgress');
+  const progressTextEl = document.getElementById('btProgressText');
   const strategySelectEl = document.getElementById('strategySelect');
   const trendParamsRowEl = document.getElementById('trendParamsRow');
   const momentumTrendParamsRowEl = document.getElementById('momentumTrendParamsRow');
@@ -324,10 +329,6 @@
   const momentumHybridParamsRowEl = document.getElementById('momentumHybridParamsRow');
   const momentumTopNParamsRowEl = document.getElementById('momentumTopNParamsRow');
   const momentumSignalModulesRowEl = document.getElementById('momentumSignalModulesRow');
-  const benchmarkModeEl = document.getElementById('benchmarkMode');
-  const benchmarkSymbolWrapEl = document.getElementById('benchmarkSymbolWrap');
-  const benchmarkSymbolEl = document.getElementById('benchmarkSymbol');
-  const DEFAULT_BENCHMARK_SYMBOL = '512500.SS';
   const symbolFilterEl = document.getElementById('tradeSymbolFilter');
   const klineSymbolEl = document.getElementById('klineSymbolSelect');
   const holdingsSelectorEl = document.getElementById('holdingsSymbolSelector');
@@ -400,6 +401,9 @@
   let currentKlineCandles = [];
   let momentumStrategyActive = false;
   let symbolStatsSort = { key: 'contribution_abs', direction: 'desc' };
+  let latestSummary = {};
+  let latestBenchmarks = {};
+  let latestFallbackBenchmarkSummary = null;
 
   function pct(v) {
     if (v === null || v === undefined || Number.isNaN(v)) return '-';
@@ -680,15 +684,6 @@
     momentumSignalModulesRowEl.style.display = isMomentum ? '' : 'none';
   }
 
-  function applyBenchmarkPanel() {
-    const mode = String(benchmarkModeEl?.value || 'equal_weight_pool');
-    const isSymbolMode = mode === 'symbol';
-    benchmarkSymbolWrapEl.style.display = isSymbolMode ? '' : 'none';
-    if (isSymbolMode && benchmarkSymbolEl && String(benchmarkSymbolEl.value || '').trim() === '') {
-      benchmarkSymbolEl.value = DEFAULT_BENCHMARK_SYMBOL;
-    }
-  }
-
   function calcKlineMaValues(candles, period) {
     const closes = (candles || []).map((c) => Number(c?.[1]));
     const out = [];
@@ -777,34 +772,86 @@
       }],
     }, true);
   }
-  function renderSummary(summary) {
-    const cards = document.getElementById('summaryCards');
-    const rows = [
-      ['总收益', pct(summary.total_return)],
-      ['年化收益', pct(summary.annual_return)],
-      ['最大回撤', pct(summary.max_drawdown)],
-      ['夏普', num(summary.sharpe)],
-      ['索提诺', num(summary.sortino)],
-      ['卡玛', num(summary.calmar)],
-      ['胜率', pct(summary.win_rate)],
-      ['盈亏比', num(summary.profit_factor)],
-      ['换手率', num(summary.turnover)],
-      ['交易数', qty(summary.trade_count)],
-    ];
-    cards.innerHTML = rows.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+  function benchmarkDisplayName(item, fallbackKey = '') {
+    const label = String(item?.label || item?.name || fallbackKey || '').trim();
+    const symbol = String(item?.symbol || '').trim();
+    if (symbol && label && !label.includes(symbol)) return `${label}（${symbol}）`;
+    return label || symbol || fallbackKey || '基准';
   }
 
-  function renderBenchmarkSummary(summary) {
-    const cards = document.getElementById('benchmarkCards');
+  function benchmarkListFromPayload(benchmarks, fallbackSummary = null, fallbackNav = null) {
+    const src = benchmarks && typeof benchmarks === 'object' ? benchmarks : {};
+    const items = Object.entries(src).map(([key, value]) => ({ key, ...(value || {}) }));
+    if (items.length) return items;
+    if (fallbackSummary || fallbackNav) {
+      return [{
+        key: 'equal_weight_pool',
+        label: '等权基准',
+        summary: fallbackSummary || {},
+        nav: fallbackNav || [],
+      }];
+    }
+    return [];
+  }
+
+  const metricColumns = [
+    { key: 'total_return', format: pct, tone: 'return' },
+    { key: 'annual_return', format: pct, tone: 'return' },
+    { key: 'max_drawdown', format: pct, tone: 'risk' },
+    { key: 'sharpe', format: num, tone: 'score' },
+    { key: 'sortino', format: num, tone: 'score' },
+    { key: 'calmar', format: num, tone: 'score' },
+    { key: 'win_rate', format: pct, tone: 'score' },
+    { key: 'profit_factor', format: num, tone: 'score' },
+    { key: 'turnover', format: num, tone: 'neutral' },
+    { key: 'trade_count', format: qty, tone: 'neutral' },
+  ];
+
+  function metricToneClass(value, tone = 'neutral') {
+    const n = Number(value);
+    if (!Number.isFinite(n) || tone === 'neutral') return '';
+    if (tone === 'risk') return n < 0 ? 'metric-risk' : '';
+    if (n > 0) return 'metric-positive';
+    if (n < 0) return 'metric-negative';
+    return '';
+  }
+
+  function renderMetricCell(row, col) {
+    const raw = row?.[col.key];
+    const cls = metricToneClass(raw, col.tone);
+    return `<td class="num-cell ${cls}">${col.format(raw)}</td>`;
+  }
+
+  function renderMetricTable() {
+    const tbody = document.querySelector('#metricTable tbody');
+    if (!tbody) return;
+    const benchmarkItems = benchmarkListFromPayload(latestBenchmarks, latestFallbackBenchmarkSummary);
     const rows = [
-      ['基准总收益', pct(summary.total_return)],
-      ['基准年化收益', pct(summary.annual_return)],
-      ['基准最大回撤', pct(summary.max_drawdown)],
-      ['基准夏普', num(summary.sharpe)],
-      ['基准索提诺', num(summary.sortino)],
-      ['基准卡玛', num(summary.calmar)],
+      { type: 'strategy', label: '策略', summary: latestSummary || {} },
+      ...benchmarkItems.map((item) => ({
+        type: 'benchmark',
+        label: benchmarkDisplayName(item, item.key),
+        summary: item.summary || {},
+      })),
     ];
-    cards.innerHTML = rows.map(([k, v]) => `<div class="card"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('');
+
+    tbody.innerHTML = rows.map((item) => `
+      <tr class="${item.type === 'strategy' ? 'metric-row-primary' : ''}">
+        <th scope="row">${escapeHtml(item.label)}</th>
+        ${metricColumns.map((col) => renderMetricCell(item.summary, col)).join('')}
+      </tr>
+    `).join('');
+  }
+
+  function renderSummary(summary) {
+    latestSummary = summary || {};
+    renderMetricTable();
+  }
+
+  function renderBenchmarkSummary(benchmarks, fallbackSummary = null) {
+    latestBenchmarks = benchmarks && typeof benchmarks === 'object' ? benchmarks : {};
+    latestFallbackBenchmarkSummary = fallbackSummary || null;
+    renderMetricTable();
   }
 
   function renderStrategyHighlights(highlights, strategyId) {
@@ -1275,10 +1322,18 @@
 
   function renderCharts(charts, strategyId = '') {
     const dates = charts.dates || [];
+    const benchmarkItems = benchmarkListFromPayload(charts.benchmarks, null, charts.benchmark_nav)
+      .map((item) => ({
+        ...item,
+        displayName: benchmarkDisplayName(item, item.key),
+        nav: Array.isArray(item.nav) ? item.nav : [],
+      }));
+    const benchmarkLegend = benchmarkItems.map((item) => item.displayName);
 
+    navChart.clear();
     navChart.setOption({
       tooltip: { trigger: 'axis' },
-      legend: { data: ['策略', '基准', '买入', '卖出'] },
+      legend: { data: ['策略', ...benchmarkLegend, '买入', '卖出'] },
       dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
       xAxis: { type: 'category', data: dates },
       yAxis: { type: 'value', scale: true, axisLabel: { formatter: (v) => Number(v).toFixed(2) } },
@@ -1291,14 +1346,15 @@
           symbol: 'none',
           tooltip: { valueFormatter: (v) => num(v) },
         },
-        {
-          name: '基准',
+        ...benchmarkItems.map((item) => ({
+          name: item.displayName,
           type: 'line',
-          data: charts.benchmark_nav || [],
+          data: item.nav,
           smooth: true,
           symbol: 'none',
+          lineStyle: { type: item.key === 'equal_weight_pool' ? 'solid' : 'dashed', width: 1.8 },
           tooltip: { valueFormatter: (v) => num(v) },
-        },
+        })),
         buildScatterSeries(charts.buy_points, '买入', '#d14343', 'triangle'),
         buildScatterSeries(charts.sell_points, '卖出', '#00a76f', 'diamond'),
       ]
@@ -1336,8 +1392,13 @@
     renderLinkedScoreChartsByKlineSymbol(klineSymbolEl.value);
 
     const strategyDrawdown = charts.drawdown || [];
-    const benchmarkDrawdown = computeDrawdownFromNav(charts.benchmark_nav || []);
+    const benchmarkDrawdowns = benchmarkItems.map((item) => ({
+      name: `${item.displayName}回撤`,
+      key: item.key,
+      data: computeDrawdownFromNav(item.nav || []),
+    }));
 
+    ddChart.clear();
     ddChart.setOption({
       tooltip: {
         trigger: 'axis',
@@ -1351,7 +1412,7 @@
           return lines.join('<br/>');
         },
       },
-      legend: { data: ['策略回撤', '基准回撤'] },
+      legend: { data: ['策略回撤', ...benchmarkDrawdowns.map((item) => item.name)] },
       dataZoom: [{ type: 'inside', xAxisIndex: 0 }, { type: 'slider', xAxisIndex: 0 }],
       xAxis: { type: 'category', data: dates },
       yAxis: { type: 'value', axisLabel: { formatter: (v) => (v * 100).toFixed(0) + '%' } },
@@ -1364,13 +1425,13 @@
           lineStyle: { color: '#d14343' },
           symbol: 'none',
         },
-        {
-          name: '基准回撤',
+        ...benchmarkDrawdowns.map((item) => ({
+          name: item.name,
           type: 'line',
-          data: benchmarkDrawdown,
-          lineStyle: { color: '#2e86de', type: 'dashed', width: 1.5 },
+          data: item.data,
+          lineStyle: { type: item.key === 'equal_weight_pool' ? 'solid' : 'dashed', width: 1.4 },
           symbol: 'none',
-        },
+        })),
       ],
     });
   }
@@ -1503,26 +1564,92 @@
     });
   }
 
-  function renderAnnual(rows) {
+  function renderAnnual(rows, benchmarks = {}) {
+    const thead = document.querySelector('#annualTable thead');
     const tbody = document.querySelector('#annualTable tbody');
-    const formatExcess = (value, baseline, formatter) => {
-      const v = Number(value);
-      const b = Number(baseline);
-      const baseText = formatter(v);
-      if (!Number.isFinite(v) || !Number.isFinite(b)) return baseText;
-      const excess = v - b;
-      const sign = excess > 0 ? '+' : '';
-      const cls = excess > 0 ? 'pnl-profit' : (excess < 0 ? 'pnl-loss' : '');
-      return `${baseText}<span class="${cls}">(${sign}${formatter(excess)})</span>`;
+    const benchmarkMeta = benchmarks && typeof benchmarks === 'object' ? benchmarks : {};
+    const formatDiff = (value, formatter) => {
+      if (value === null || value === undefined || value === '') return '<span>-</span>';
+      const n = Number(value);
+      if (!Number.isFinite(n)) return '<span>-</span>';
+      const sign = n > 0 ? '+' : '';
+      const cls = n > 0 ? 'pnl-profit' : (n < 0 ? 'pnl-loss' : '');
+      return `<span class="${cls}">${sign}${formatter(n)}</span>`;
+    };
+
+    const explicitItems = benchmarkListFromPayload(benchmarkMeta);
+    const rowBenchmarkKeys = Array.from(new Set((rows || []).flatMap((row) => (
+      row?.benchmarks && typeof row.benchmarks === 'object' ? Object.keys(row.benchmarks) : []
+    ))));
+    const benchmarkItems = explicitItems.length
+      ? explicitItems
+      : rowBenchmarkKeys.map((key) => ({ key, label: key }));
+    const hasLegacyBenchmark = !benchmarkItems.length && (rows || []).some((row) => (
+      row?.benchmark_return !== null
+      && row?.benchmark_return !== undefined
+      || row?.benchmark_sharpe !== null
+      && row?.benchmark_sharpe !== undefined
+    ));
+    const annualBenchmarks = hasLegacyBenchmark ? [{ key: '__legacy__', label: '基准' }] : benchmarkItems;
+
+    thead.innerHTML = `
+      <tr>
+        <th rowspan="2">年份</th>
+        <th colspan="5" class="table-group-head">策略</th>
+        ${annualBenchmarks.map((item) => `<th colspan="4" class="table-group-head">${escapeHtml(benchmarkDisplayName(item, item.key))}</th>`).join('')}
+      </tr>
+      <tr>
+        <th>收益</th>
+        <th>夏普</th>
+        <th>交易数</th>
+        <th>胜率</th>
+        <th>盈亏比</th>
+        ${annualBenchmarks.map(() => `
+          <th>收益</th>
+          <th>收益超额</th>
+          <th>夏普</th>
+          <th>夏普差值</th>
+        `).join('')}
+      </tr>
+    `;
+
+    const benchmarkCells = (row) => annualBenchmarks.map((item) => {
+      if (item.key === '__legacy__') {
+        const returnExcess = Number.isFinite(Number(row?.return)) && Number.isFinite(Number(row?.benchmark_return))
+          ? Number(row.return) - Number(row.benchmark_return)
+          : null;
+        const sharpeExcess = Number.isFinite(Number(row?.sharpe)) && Number.isFinite(Number(row?.benchmark_sharpe))
+          ? Number(row.sharpe) - Number(row.benchmark_sharpe)
+          : null;
+        return `
+          <td class="num-cell ${metricToneClass(row?.benchmark_return, 'return')}">${pct(row?.benchmark_return)}</td>
+          <td class="num-cell">${formatDiff(returnExcess, pct)}</td>
+          <td class="num-cell ${metricToneClass(row?.benchmark_sharpe, 'score')}">${num(row?.benchmark_sharpe)}</td>
+          <td class="num-cell">${formatDiff(sharpeExcess, num)}</td>
+        `;
+      }
+      const benchmarkRow = row?.benchmarks && typeof row.benchmarks === 'object' ? row.benchmarks[item.key] || {} : {};
+      return `
+        <td class="num-cell ${metricToneClass(benchmarkRow.return, 'return')}">${pct(benchmarkRow.return)}</td>
+        <td class="num-cell">${formatDiff(benchmarkRow.return_excess, pct)}</td>
+        <td class="num-cell ${metricToneClass(benchmarkRow.sharpe, 'score')}">${num(benchmarkRow.sharpe)}</td>
+        <td class="num-cell">${formatDiff(benchmarkRow.sharpe_excess, num)}</td>
+      `;
+    }).join('');
+
+    if (!rows || !rows.length) {
+      tbody.innerHTML = `<tr><td colspan="${6 + annualBenchmarks.length * 4}">暂无年度收益数据</td></tr>`;
+      return;
     };
     tbody.innerHTML = (rows || []).map((r) => `
       <tr>
-        <td>${r.year ?? '-'}</td>
-        <td>${formatExcess(r.return, r.benchmark_return, pct)}</td>
-        <td>${qty(r.trade_count)}</td>
-        <td>${pct(r.win_rate)}</td>
-        <td>${num(r.profit_factor)}</td>
-        <td>${formatExcess(r.sharpe, r.benchmark_sharpe, num)}</td>
+        <th scope="row" class="year-cell">${r.year ?? '-'}</th>
+        <td class="num-cell ${metricToneClass(r.return, 'return')}">${pct(r.return)}</td>
+        <td class="num-cell ${metricToneClass(r.sharpe, 'score')}">${num(r.sharpe)}</td>
+        <td class="num-cell">${qty(r.trade_count)}</td>
+        <td class="num-cell ${metricToneClass(r.win_rate, 'score')}">${pct(r.win_rate)}</td>
+        <td class="num-cell ${metricToneClass(r.profit_factor, 'score')}">${num(r.profit_factor)}</td>
+        ${benchmarkCells(r)}
       </tr>
     `).join('');
   }
@@ -1708,13 +1835,6 @@
       return;
     }
 
-    const benchmarkMode = String(benchmarkModeEl?.value || 'equal_weight_pool');
-    let benchmarkSymbol = String(benchmarkSymbolEl?.value || '').trim().toUpperCase();
-    if (benchmarkMode === 'symbol' && !benchmarkSymbol) {
-      benchmarkSymbol = DEFAULT_BENCHMARK_SYMBOL;
-      if (benchmarkSymbolEl) benchmarkSymbolEl.value = benchmarkSymbol;
-    }
-
     const strategyParams = {};
     if (isMomentumStrategy(strategyId)) {
       const nShort = Number(momentumNShortEl?.value);
@@ -1832,39 +1952,87 @@
       initial_capital: Number(document.getElementById('capital').value || 200000),
       strategy_id: strategyId,
       strategy_params: strategyParams,
-      benchmark_mode: benchmarkMode,
-      benchmark_symbol: benchmarkMode === 'symbol' ? benchmarkSymbol : '',
     };
 
     try {
-      const resp = await fetch('/backtest/api/run', {
+      const startResp = await fetch('/backtest/api/run', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      const data = await resp.json();
-      if (!resp.ok || data.status !== 'ok') {
-        throw new Error(data.detail || data.status || '回测失败');
+      const startData = await startResp.json();
+      if (!startResp.ok || !startData.run_id) {
+        throw new Error(startData.detail || '启动回测失败');
       }
 
-      statusEl.textContent = `完成。运行 ID=${data.run_id} | 天数=${data.meta.timeline_days} | 基准=${data.meta?.benchmark || '-'}`;
-      renderSummary(data.summary || {});
-      renderBenchmarkSummary(data.benchmark_summary || {});
-      renderStrategyHighlights(data.strategy_highlights || {}, data.meta?.strategy_id || strategyId);
-      renderCharts(data.charts || {}, data.meta?.strategy_id || strategyId);
-      renderHeatmap(data.monthly_heatmap || {});
-      renderAnnual(data.annual_returns || []);
+      const runId = startData.run_id;
+      statusEl.textContent = '正在运行回测...';
+      progressWrapEl.style.display = '';
+      progressEl.value = 0;
+      progressTextEl.textContent = '0%';
 
-      allTrades = data.trades || [];
+      // Poll for progress (result is included when status is terminal)
+      let result = null;
+      while (true) {
+        await new Promise(r => setTimeout(r, 300));
+        const progResp = await fetch(`/backtest/api/progress/${encodeURIComponent(runId)}`);
+        const progData = await progResp.json();
+        if (!progResp.ok) {
+          throw new Error(progData.detail || '进度查询失败');
+        }
+
+        const current = Number(progData.progress_current || 0);
+        const total = Number(progData.progress_total || 1);
+        const pct = total > 0 ? Math.min(current / total, 1) : 0;
+        progressEl.value = pct;
+        progressTextEl.textContent = `${(pct * 100).toFixed(1)}% (${current}/${total})`;
+
+        const terminalStatuses = ['ok', 'error', 'no_market_data', 'no_instruments', 'no_data_in_range'];
+        if (terminalStatuses.includes(progData.status)) {
+          if (progData.status === 'error') {
+            throw new Error(progData.error || '回测运行出错');
+          }
+          result = progData.result;
+          if (!result) {
+            // Fallback: fetch from DB
+            const resultResp = await fetch(`/backtest/api/${encodeURIComponent(runId)}`);
+            result = await resultResp.json();
+            if (!resultResp.ok) {
+              throw new Error(result.detail || '获取回测结果失败');
+            }
+          }
+          break;
+        }
+      }
+
+      progressWrapEl.style.display = 'none';
+
+      if (result.status !== 'ok') {
+        statusEl.textContent = `回测未产生有效结果（${result.status}）。`;
+        runBtn.disabled = false;
+        return;
+      }
+
+      const benchmarkCount = Object.keys(result.benchmarks || {}).length || 1;
+      statusEl.textContent = `完成。运行 ID=${result.run_id} | 天数=${result.meta.timeline_days} | 基准=${benchmarkCount} 个`;
+      renderSummary(result.summary || {});
+      renderBenchmarkSummary(result.benchmarks || {}, result.benchmark_summary || {});
+      renderStrategyHighlights(result.strategy_highlights || {}, result.meta?.strategy_id || strategyId);
+      renderCharts(result.charts || {}, result.meta?.strategy_id || strategyId);
+      renderHeatmap(result.monthly_heatmap || {});
+      renderAnnual(result.annual_returns || [], result.benchmarks || {});
+
+      allTrades = result.trades || [];
       renderTradeFilter(allTrades);
       renderTrades(allTrades, symbolFilterEl.value);
 
-      const stats = (data.symbol_stats && data.symbol_stats.length)
-        ? data.symbol_stats
-        : buildSymbolStats(allTrades, (data.meta && data.meta.symbols) || []);
+      const stats = (result.symbol_stats && result.symbol_stats.length)
+        ? result.symbol_stats
+        : buildSymbolStats(allTrades, (result.meta && result.meta.symbols) || []);
       renderSymbolStats(stats);
     } catch (err) {
       statusEl.textContent = `失败：${err.message}`;
+      progressWrapEl.style.display = 'none';
     } finally {
       runBtn.disabled = false;
       navChart.resize();
@@ -1880,7 +2048,6 @@
 
   renderStrategySelector();
   applyStrategyPanel();
-  applyBenchmarkPanel();
   applyStrategyParamsFromCatalog(strategySelectEl.value);
   renderStrategyHighlights({}, strategySelectEl.value);
 
@@ -1889,7 +2056,6 @@
     applyStrategyParamsFromCatalog(strategySelectEl.value);
     renderStrategyHighlights({}, strategySelectEl.value);
   });
-  benchmarkModeEl?.addEventListener('change', applyBenchmarkPanel);
   runBtn.addEventListener('click', runBacktest);
   holdingsSelectAllBtn?.addEventListener('click', () => setHoldingsSelection(true));
   holdingsSelectNoneBtn?.addEventListener('click', () => setHoldingsSelection(false));

@@ -8,6 +8,7 @@ import yaml
 
 from audit.app_logger import get_logger
 from audit.calc_logger import CalcLogger
+from core.benchmarks import benchmark_market_symbols
 from core.enums import SignalAction, SignalLevel
 from data.service import DataService
 from data.storage.db import get_db
@@ -373,7 +374,14 @@ class SignalEngine:
             return payload
 
         instruments, strategy_cfg = self._load_configs()
-        symbols = [str(item.get("symbol")) for item in instruments]
+        symbols = []
+        seen_symbols: set[str] = set()
+        for raw_symbol in [*(str(item.get("symbol")) for item in instruments), *benchmark_market_symbols()]:
+            symbol = str(raw_symbol or "").strip().upper()
+            if symbol == "" or symbol in seen_symbols:
+                continue
+            seen_symbols.add(symbol)
+            symbols.append(symbol)
 
         start_text = str(strategy_cfg.get("backtest_start_primary", "2015-01-01"))
         start_date = datetime.strptime(start_text, "%Y-%m-%d").date()

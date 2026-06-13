@@ -8,6 +8,7 @@ import pandas as pd
 from audit.app_logger import get_logger
 from data.provider_akshare import AkshareProvider
 from data.provider_efinance import EfinanceProvider
+from data.provider_yahoo import YahooProvider
 from data.storage.market_store import MarketStore
 from data.storage.runtime_store import RuntimeStore
 
@@ -19,8 +20,9 @@ class DataService:
         self.providers = {
             "efinance": EfinanceProvider(),
             "akshare": AkshareProvider(),
+            "yahoo": YahooProvider(),
         }
-        self.provider_priority = provider_priority or ["efinance", "akshare"]
+        self.provider_priority = provider_priority or ["efinance", "akshare", "yahoo"]
         self.market_store = MarketStore()
         self.runtime_store = RuntimeStore()
 

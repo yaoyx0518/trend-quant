@@ -14,6 +14,7 @@ class Database:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_tables()
+        self._migrate()
 
     @contextmanager
     def _connect(self):
@@ -118,6 +119,13 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_market_data_symbol_time ON market_data(symbol, time);
                 """
             )
+
+    def _migrate(self) -> None:
+        with self._connect() as conn:
+            try:
+                conn.execute("ALTER TABLE backtests ADD COLUMN is_favorite INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
 
     # ------------------------------------------------------------------
     # manual_trades
@@ -311,12 +319,25 @@ class Database:
             ).fetchone()
             return json.loads(row["result_json"]) if row else None
 
+    def set_backtest_favorite(self, run_id: str, is_favorite: bool) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                "UPDATE backtests SET is_favorite = ? WHERE run_id = ?",
+                (int(is_favorite), run_id),
+            )
+            return cur.rowcount > 0
+
+    def delete_backtest(self, run_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute("DELETE FROM backtests WHERE run_id = ?", (run_id,))
+            return cur.rowcount > 0
+
     def list_backtests(self, limit: int = 40) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
                 """SELECT run_id, status, strategy_id, start_date, end_date,
                           total_return, win_rate, profit_factor, sharpe,
-                          trade_count, timeline_days, summary, meta, input
+                          trade_count, timeline_days, summary, meta, input, is_favorite
                    FROM backtests
                    ORDER BY created_at DESC
                    LIMIT ?""",
@@ -350,6 +371,7 @@ class Database:
                     "sharpe": summary.get("sharpe") if d["status"] == "ok" else None,
                     "trade_count": summary.get("trade_count") if d["status"] == "ok" else None,
                     "timeline_days": meta.get("timeline_days"),
+                    "is_favorite": bool(d.get("is_favorite", 0)),
                 }
             )
         return items
@@ -357,13 +379,16 @@ class Database:
     def list_backtests_summary(self, limit: int = 40) -> list[dict]:
         with self._connect() as conn:
             rows = conn.execute(
-                """SELECT run_id, status, start_date, end_date, total_return
+                """SELECT run_id, status, start_date, end_date, total_return, is_favorite
                    FROM backtests
                    ORDER BY created_at DESC
                    LIMIT ?""",
                 (limit,),
             ).fetchall()
-            return [dict(row) for row in rows]
+            return [
+                {**dict(row), "is_favorite": bool(row["is_favorite"])}
+                for row in rows
+            ]
 
     # ------------------------------------------------------------------
     # optimization_jobs

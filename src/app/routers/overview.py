@@ -31,8 +31,11 @@ def _latest_signal_payload() -> dict:
     return latest[0] if latest else {}
 
 
-def _recent_backtests(limit: int = 40) -> list[dict]:
-    return get_db().list_backtests(limit=limit)
+def _recent_backtests(limit: int = 40, favorite_only: bool = False) -> list[dict]:
+    items = get_db().list_backtests(limit=limit)
+    if favorite_only:
+        items = [item for item in items if item.get("is_favorite")]
+    return items
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -47,7 +50,7 @@ async def overview_page(request: Request) -> HTMLResponse:
 
 
 @router.get("/api/overview")
-async def overview_api(request: Request) -> dict:
+async def overview_api(request: Request, favorite_only: bool = False) -> dict:
     settings = getattr(request.app.state, "settings", None) or load_settings()
     name_map = load_instrument_name_map()
 
@@ -114,5 +117,5 @@ async def overview_api(request: Request) -> dict:
             "positions": position_rows,
         },
         "action_signals": action_signals,
-        "recent_backtests": _recent_backtests(limit=40),
+        "recent_backtests": _recent_backtests(limit=40, favorite_only=favorite_only),
     }

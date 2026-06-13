@@ -10,6 +10,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from core.benchmarks import benchmark_instruments
 from data.service import DataService
 from data.storage.db import get_db
 from data.storage.market_store import MarketStore
@@ -91,6 +92,10 @@ def _config_name_map() -> dict[str, str]:
         if symbol == "":
             continue
         out[symbol] = str(item.get("name", "") or "").strip()
+    for item in benchmark_instruments():
+        symbol = str(item.get("symbol", "")).strip().upper()
+        if symbol:
+            out.setdefault(symbol, str(item.get("name", "") or "").strip())
     return out
 
 
@@ -119,9 +124,15 @@ async def list_instruments() -> dict:
             continue
         config_by_symbol[symbol] = item
 
+    benchmark_by_symbol = {
+        str(item.get("symbol", "")).strip().upper(): item
+        for item in benchmark_instruments()
+        if str(item.get("symbol", "")).strip()
+    }
+
     name_map = _config_name_map()
 
-    known_symbols = set(config_by_symbol.keys())
+    known_symbols = set(config_by_symbol.keys()) | set(benchmark_by_symbol.keys())
     for symbol in get_db().list_market_symbols():
         known_symbols.add(symbol.upper())
 
@@ -134,6 +145,7 @@ async def list_instruments() -> dict:
 
         cfg = config_by_symbol.get(symbol, {})
         in_config = bool(cfg)
+        is_benchmark = symbol in benchmark_by_symbol
         enabled = bool(cfg.get("enabled", False)) if in_config else False
         name = str(name_map.get(symbol, "") or "")
         items.append(
@@ -144,6 +156,7 @@ async def list_instruments() -> dict:
                 "name": name,
                 "enabled": enabled,
                 "in_config": in_config,
+                "is_benchmark": is_benchmark,
                 "rows": rows,
                 "local_start_date": local_start,
                 "local_end_date": local_end,

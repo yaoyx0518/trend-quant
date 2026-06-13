@@ -28,26 +28,41 @@
   </div>
 
   <div class="table-panel">
-    <h3>近期回测</h3>
+    <h3>近期回测
+      <button id="favFilterBtn" class="fav-filter-btn" title="仅显示收藏">☆</button>
+    </h3>
     <div class="table-shell">
       <table id="btTable">
         <colgroup>
+          <col style="width: 38px;">
           <col style="width: 120px;">
           <col style="width: 220px;">
           <col style="width: 220px;">
-          <col style="width: 520px;">
+          <col style="width: 480px;">
           <col style="width: 120px;">
           <col style="width: 110px;">
           <col style="width: 120px;">
           <col style="width: 100px;">
           <col style="width: 90px;">
+          <col style="width: 50px;">
         </colgroup>
-        <thead><tr><th>运行编号</th><th>策略</th><th>区间</th><th>参数</th><th>总收益</th><th>胜率</th><th>盈亏比</th><th>夏普</th><th>交易数</th></tr></thead>
+        <thead><tr><th></th><th>运行编号</th><th>策略</th><th>区间</th><th>参数</th><th>总收益</th><th>胜率</th><th>盈亏比</th><th>夏普</th><th>交易数</th><th></th></tr></thead>
         <tbody></tbody>
       </table>
     </div>
   </div>
 </section>
+
+<div id="confirmOverlay" class="confirm-overlay" hidden>
+  <div class="confirm-dialog">
+    <p id="confirmMsg">确认删除这条回测记录？</p>
+    <div class="confirm-actions">
+      <button id="confirmCancelBtn" class="confirm-cancel-btn">取消</button>
+      <button id="confirmOkBtn" class="confirm-ok-btn">删除</button>
+    </div>
+  </div>
+</div>
+
 <style>
   #btTable th:nth-child(2),
   #btTable td:nth-child(2),
@@ -88,6 +103,7 @@
 <script>
 (() => {
   const statusEl = document.getElementById('ovStatus');
+  let favFilterOn = false;
 
   function num(v) {
     if (v === null || v === undefined || Number.isNaN(v)) return '-';
@@ -271,6 +287,7 @@
     const bts = data.recent_backtests || [];
     setRows('#btTable tbody', bts.length ? bts.map(b => `
       <tr>
+        <td class="fav-cell"><button class="fav-star${b.is_favorite ? ' is-on' : ''}" data-run-id="${escapeHtml(b.run_id)}">${b.is_favorite ? '★' : '☆'}</button></td>
         <td>${b.run_id || ''}</td>
         <td style="white-space: nowrap;">${strategyText(b.strategy)}</td>
         <td>${b.start_date || ''} ~ ${b.end_date || ''}</td>
@@ -280,8 +297,9 @@
         <td>${num(b.profit_factor)}</td>
         <td>${num(b.sharpe)}</td>
         <td>${num(b.trade_count)}</td>
+        <td class="del-cell"><button class="del-btn" data-run-id="${escapeHtml(b.run_id)}" title="删除">✕</button></td>
       </tr>
-    `).join('') : '<tr><td colspan="9">暂无回测记录。</td></tr>');
+    `).join('') : '<tr><td colspan="11">暂无回测记录。</td></tr>');
 
     statusEl.textContent = `概览已就绪，日期=${data.portfolio?.as_of_date || '-'}`;
   }
@@ -289,7 +307,8 @@
   async function loadOverview() {
     statusEl.textContent = '正在加载概览...';
     try {
-      const resp = await fetch('/api/overview');
+      const url = favFilterOn ? '/api/overview?favorite_only=true' : '/api/overview';
+      const resp = await fetch(url);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || '概览加载失败');
       render(data);
@@ -297,6 +316,78 @@
       statusEl.textContent = `加载失败：${err.message}`;
     }
   }
+
+  let pendingDeleteRunId = null;
+
+  document.getElementById('btTable').addEventListener('click', async (e) => {
+    // --- favorite star ---
+    const favBtn = e.target.closest('.fav-star');
+    if (favBtn) {
+      e.preventDefault();
+      const runId = favBtn.dataset.runId;
+      const wasOn = favBtn.classList.contains('is-on');
+      favBtn.classList.toggle('is-on');
+      favBtn.textContent = wasOn ? '☆' : '★';
+      try {
+        const resp = await fetch(`/backtest/api/${encodeURIComponent(runId)}/favorite`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ is_favorite: !wasOn }),
+        });
+        if (!resp.ok) throw new Error('请求失败');
+      } catch (err) {
+        favBtn.classList.toggle('is-on');
+        favBtn.textContent = wasOn ? '★' : '☆';
+        console.error('收藏操作失败:', err);
+      }
+      return;
+    }
+    // --- delete button ---
+    const delBtn = e.target.closest('.del-btn');
+    if (delBtn) {
+      e.preventDefault();
+      pendingDeleteRunId = delBtn.dataset.runId;
+      document.getElementById('confirmMsg').textContent = `确认删除回测 "${pendingDeleteRunId}"？此操作不可撤销。`;
+      document.getElementById('confirmOverlay').hidden = false;
+    }
+  });
+
+  document.getElementById('confirmCancelBtn').addEventListener('click', () => {
+    pendingDeleteRunId = null;
+    document.getElementById('confirmOverlay').hidden = true;
+  });
+
+  document.getElementById('confirmOkBtn').addEventListener('click', async () => {
+    if (!pendingDeleteRunId) return;
+    const okBtn = document.getElementById('confirmOkBtn');
+    okBtn.disabled = true;
+    okBtn.textContent = '删除中...';
+    try {
+      const resp = await fetch(`/backtest/api/${encodeURIComponent(pendingDeleteRunId)}`, {
+        method: 'DELETE',
+      });
+      if (!resp.ok) throw new Error('删除失败');
+    } catch (err) {
+      console.error('删除失败:', err);
+    }
+    okBtn.disabled = false;
+    okBtn.textContent = '删除';
+    pendingDeleteRunId = null;
+    document.getElementById('confirmOverlay').hidden = true;
+    loadOverview();
+  });
+
+  document.getElementById('favFilterBtn').addEventListener('click', () => {
+    favFilterOn = !favFilterOn;
+    const btn = document.getElementById('favFilterBtn');
+    btn.textContent = favFilterOn ? '★' : '☆';
+    if (favFilterOn) {
+      btn.classList.add('is-on');
+    } else {
+      btn.classList.remove('is-on');
+    }
+    loadOverview();
+  });
 
   loadOverview();
 })();

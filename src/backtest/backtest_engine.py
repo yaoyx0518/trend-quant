@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 
@@ -8,6 +9,11 @@ import yaml
 
 from backtest.benchmark import equal_weight_pool_benchmark, single_symbol_benchmark
 from backtest.metrics import compute_annual_returns, compute_drawdown, compute_metrics, compute_monthly_heatmap, compute_symbol_trade_stats
+from core.benchmarks import (
+    BENCHMARK_MODE_EQUAL_WEIGHT,
+    COMPARISON_BENCHMARKS,
+    DEFAULT_BENCHMARK_SYMBOL as DEFAULT_CUSTOM_BENCHMARK_SYMBOL,
+)
 from core.enums import SignalAction
 from data.storage.db import get_db
 from data.storage.market_store import MarketStore
@@ -36,7 +42,7 @@ from strategy.trend_score_strategy import TrendScoreStrategy
 
 
 class BacktestEngine:
-    DEFAULT_BENCHMARK_SYMBOL = "512500.SS"
+    DEFAULT_BENCHMARK_SYMBOL = DEFAULT_CUSTOM_BENCHMARK_SYMBOL
 
     def __init__(self) -> None:
         self.runtime_store = RuntimeStore()
@@ -189,6 +195,8 @@ class BacktestEngine:
         persist: bool = True,
         include_charts: bool = True,
         include_trades: bool = True,
+        progress_callback: Callable[[int, int], None] | None = None,
+        run_id: str | None = None,
     ) -> dict:
         raw_strategy_cfg, instruments_cfg, app_cfg = self._build_configs(
             strategy_overrides=None, instrument_overrides=instrument_overrides
@@ -273,11 +281,8 @@ class BacktestEngine:
 
         initial_capital = float(payload.get("initial_capital", 200000.0) or 200000.0)
         lot_size = int(app_cfg.get("lot_size", 100))
-        benchmark_mode_raw = str(payload.get("benchmark_mode", "equal_weight_pool")).strip().lower()
-        benchmark_mode = benchmark_mode_raw if benchmark_mode_raw in {"equal_weight_pool", "symbol"} else "equal_weight_pool"
-        benchmark_symbol = str(payload.get("benchmark_symbol", "")).strip().upper()
-        if benchmark_mode == "symbol" and benchmark_symbol == "":
-            benchmark_symbol = self.DEFAULT_BENCHMARK_SYMBOL
+        requested_benchmark_mode = str(payload.get("benchmark_mode", BENCHMARK_MODE_EQUAL_WEIGHT)).strip().lower()
+        requested_benchmark_symbol = str(payload.get("benchmark_symbol", "")).strip().upper()
 
         market_data: dict[str, pd.DataFrame] = {}
         for symbol in symbols:
@@ -287,7 +292,7 @@ class BacktestEngine:
             market_data[symbol] = bars
 
         if not market_data:
-            run_id = datetime.now().strftime("%Y%m%d%H%M%S")
+            run_id = run_id or datetime.now().strftime("%Y%m%d%H%M%S%f")
             result = {
                 "run_id": run_id,
                 "status": "no_market_data",
@@ -318,7 +323,7 @@ class BacktestEngine:
             timeline_set.update(days)
         timeline = sorted(timeline_set)
 
-        run_id = datetime.now().strftime("%Y%m%d%H%M%S")
+        run_id = run_id or datetime.now().strftime("%Y%m%d%H%M%S%f")
         if not timeline:
             result = {
                 "run_id": run_id,
@@ -371,7 +376,10 @@ class BacktestEngine:
 
         risk_sizer = RiskSizer(lot_size=lot_size)
 
-        for day in timeline:
+        total_days = len(timeline)
+        for day_idx, day in enumerate(timeline):
+            if progress_callback:
+                progress_callback(day_idx, total_days)
             day_str = day.isoformat()
 
             signal_map: dict[str, dict] = {}
@@ -802,46 +810,61 @@ class BacktestEngine:
                 prev_prev_scores[symbol] = prev_scores.get(symbol, 0.0)
                 prev_scores[symbol] = float(signal.get("trend_score", 0.0) or 0.0)
 
-        if benchmark_mode == "symbol":
-            if benchmark_symbol == "":
-                raise ValueError("benchmark_symbol is required when benchmark_mode=symbol")
-            benchmark_data = market_data.get(benchmark_symbol, pd.DataFrame())
-            if benchmark_data.empty:
-                benchmark_data = self._prepare_bars(self.market_store.load_history(benchmark_symbol))
-            if benchmark_data.empty:
-                raise ValueError(f"benchmark symbol has no market data: {benchmark_symbol}")
-
-            benchmark_rows = benchmark_data[
-                (benchmark_data["date"] >= start_date) & (benchmark_data["date"] <= end_date)
-            ]
-            if benchmark_rows.empty:
-                raise ValueError(
-                    f"benchmark symbol has no data in range {start_date.isoformat()} to {end_date.isoformat()}: {benchmark_symbol}"
-                )
-
-            benchmark = single_symbol_benchmark(
-                benchmark_data=benchmark_data,
-                timeline=timeline,
-                initial_capital=initial_capital,
-                lot_size=lot_size,
-                symbol=benchmark_symbol,
-            )
-        else:
-            benchmark = equal_weight_pool_benchmark(
-                market_data=market_data,
-                timeline=timeline,
-                initial_capital=initial_capital,
-                lot_size=lot_size,
-            )
-
         drawdown = compute_drawdown(daily_nav)
         summary = compute_metrics(daily_nav=daily_nav, trades=trades, turnover_total=turnover_total)
-        benchmark_daily_nav = benchmark.get("series", [])
-        benchmark_summary = compute_metrics(daily_nav=benchmark_daily_nav, trades=[], turnover_total=0.0)
+        benchmarks: dict[str, dict] = {}
+        for option in COMPARISON_BENCHMARKS:
+            if option.mode == BENCHMARK_MODE_EQUAL_WEIGHT:
+                benchmark = equal_weight_pool_benchmark(
+                    market_data=market_data,
+                    timeline=timeline,
+                    initial_capital=initial_capital,
+                    lot_size=lot_size,
+                )
+            else:
+                benchmark_symbol = str(option.symbol or "").strip().upper()
+                benchmark_data = market_data.get(benchmark_symbol, pd.DataFrame())
+                if benchmark_data.empty:
+                    benchmark_data = self._prepare_bars(self.market_store.load_history(benchmark_symbol))
+                if benchmark_data.empty:
+                    raise ValueError(f"benchmark symbol has no market data: {benchmark_symbol}")
+
+                benchmark_rows = benchmark_data[
+                    (benchmark_data["date"] >= start_date) & (benchmark_data["date"] <= end_date)
+                ]
+                if benchmark_rows.empty:
+                    raise ValueError(
+                        f"benchmark symbol has no data in range {start_date.isoformat()} to {end_date.isoformat()}: {benchmark_symbol}"
+                    )
+
+                benchmark = single_symbol_benchmark(
+                    benchmark_data=benchmark_data,
+                    timeline=timeline,
+                    initial_capital=initial_capital,
+                    lot_size=lot_size,
+                    symbol=benchmark_symbol,
+                )
+
+            series = benchmark.get("series", [])
+            benchmarks[option.mode] = {
+                "mode": option.mode,
+                "label": option.label,
+                "symbol": option.symbol,
+                "name": option.label,
+                "series": series,
+                "summary": compute_metrics(daily_nav=series, trades=[], turnover_total=0.0),
+            }
+
+        primary_benchmark_key = BENCHMARK_MODE_EQUAL_WEIGHT
+        primary_benchmark = benchmarks.get(primary_benchmark_key, {})
+        benchmark_daily_nav = primary_benchmark.get("series", [])
+        benchmark_summary = primary_benchmark.get("summary", {})
+        benchmark_daily_navs = {key: item.get("series", []) for key, item in benchmarks.items()}
         annual_returns = compute_annual_returns(
             daily_nav=daily_nav,
             trades=trades,
             benchmark_daily_nav=benchmark_daily_nav,
+            benchmark_daily_navs=benchmark_daily_navs,
         )
         monthly_heatmap = compute_monthly_heatmap(daily_nav)
         symbol_stats = compute_symbol_trade_stats(trades, symbols=symbols)
@@ -868,8 +891,11 @@ class BacktestEngine:
         nav_dates = [item["date"] for item in daily_nav]
         nav_values = [float(item["equity"]) for item in daily_nav]
 
-        bm_map = {item["date"]: float(item["equity"]) for item in benchmark.get("series", [])}
-        benchmark_values = [bm_map.get(d, None) for d in nav_dates]
+        benchmark_values_by_key: dict[str, list[float | None]] = {}
+        for key, item in benchmarks.items():
+            bm_map = {row["date"]: float(row["equity"]) for row in item.get("series", [])}
+            benchmark_values_by_key[key] = [bm_map.get(d, None) for d in nav_dates]
+        benchmark_values = benchmark_values_by_key.get(primary_benchmark_key, [])
 
         nav_by_date = {item["date"]: float(item["equity"]) for item in daily_nav}
         buy_points = []
@@ -967,8 +993,10 @@ class BacktestEngine:
                 "initial_capital": initial_capital,
                 "selected_symbols": symbols,
                 "strategy_id": resolved_strategy_id,
-                "benchmark_mode": benchmark_mode,
-                "benchmark_symbol": benchmark_symbol,
+                "benchmark_mode": "comparison_set",
+                "benchmark_symbol": "",
+                "requested_benchmark_mode": requested_benchmark_mode,
+                "requested_benchmark_symbol": requested_benchmark_symbol,
                 "strategy_overrides": (strategy_overrides or {}),
                 "symbol_param_overrides": symbol_param_overrides,
             },
@@ -977,11 +1005,20 @@ class BacktestEngine:
                 "symbols": symbols,
                 "start_adjusted_to_fallback": start_adjusted,
                 "timeline_days": len(timeline),
-                "benchmark": benchmark.get("name", "equal_weight_pool"),
+                "benchmark": "comparison_set",
+                "benchmarks": [
+                    {
+                        "mode": item.get("mode"),
+                        "label": item.get("label"),
+                        "symbol": item.get("symbol"),
+                    }
+                    for item in benchmarks.values()
+                ],
             },
             "summary": summary,
             "strategy_highlights": strategy_highlights,
             "benchmark_summary": benchmark_summary,
+            "benchmarks": benchmarks,
             "annual_returns": annual_returns,
             "monthly_heatmap": monthly_heatmap,
             "symbol_stats": symbol_stats,
@@ -997,6 +1034,15 @@ class BacktestEngine:
                 "dates": nav_dates,
                 "nav": nav_values,
                 "benchmark_nav": benchmark_values,
+                "benchmarks": {
+                    key: {
+                        "mode": item.get("mode"),
+                        "label": item.get("label"),
+                        "symbol": item.get("symbol"),
+                        "nav": benchmark_values_by_key.get(key, []),
+                    }
+                    for key, item in benchmarks.items()
+                },
                 "drawdown": drawdown,
                 "buy_points": buy_points,
                 "sell_points": sell_points,
@@ -1022,15 +1068,6 @@ class BacktestEngine:
         if persist:
             self.db.save_backtest(run_id, result)
         return result
-
-
-
-
-
-
-
-
-
 
 
 

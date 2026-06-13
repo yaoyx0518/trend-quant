@@ -6,6 +6,7 @@
   data_provider_priority:
     - efinance
     - akshare
+    - yahoo
   polling_times:
     - "10:00"
     - "10:30"
