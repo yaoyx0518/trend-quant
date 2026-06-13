@@ -64,6 +64,13 @@ class Database:
                     updated_at TEXT
                 );
 
+                CREATE TABLE IF NOT EXISTS signal_run_locks (
+                    run_key TEXT PRIMARY KEY,
+                    trigger TEXT,
+                    slot TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
                 CREATE TABLE IF NOT EXISTS position_snapshots (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     as_of_date TEXT,
@@ -158,6 +165,15 @@ class Database:
     # ------------------------------------------------------------------
     # signals
     # ------------------------------------------------------------------
+    def try_acquire_signal_run(self, run_key: str, trigger: str, slot: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """INSERT OR IGNORE INTO signal_run_locks (run_key, trigger, slot)
+                   VALUES (?, ?, ?)""",
+                (run_key, trigger, slot),
+            )
+            return cur.rowcount > 0
+
     def save_signals(self, trade_day: str, payload: dict) -> None:
         with self._connect() as conn:
             conn.execute(

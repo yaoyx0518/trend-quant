@@ -178,6 +178,19 @@ class SignalEngine:
     def run_poll(self, trigger_name: str = "poll") -> dict:
         now = datetime.now()
         trade_day = now.date()
+        if trigger_name == "poll_30m":
+            slot = now.strftime("%Y-%m-%dT%H:%M")
+            run_key = f"{slot}:{trigger_name}"
+            if not self.db.try_acquire_signal_run(run_key=run_key, trigger=trigger_name, slot=slot):
+                logger.info("Skip duplicate signal run: %s", run_key)
+                return {
+                    "ts": now.isoformat(),
+                    "trigger": trigger_name,
+                    "signals": [],
+                    "status": "skipped_duplicate_run",
+                    "run_key": run_key,
+                }
+
         if not self.is_trading_day(trade_day):
             payload = {
                 "ts": now.isoformat(),
@@ -328,6 +341,10 @@ class SignalEngine:
                     sig["action"] = SignalAction.HOLD
                     sig["level"] = SignalLevel.WARN
                     sig["reason"] = "buy_insufficient_cash_or_risk"
+                elif trigger_name != "final_1445":
+                    sig["action"] = SignalAction.HOLD
+                    sig["level"] = SignalLevel.WARN
+                    sig["reason"] = "buy_wait_final_1445"
             elif action == SignalAction.SELL.value:
                 sellable = int(sig.get("position_snapshot", {}).get("sellable_qty", 0))
                 sig["suggested_qty"] = max(sellable, 0)

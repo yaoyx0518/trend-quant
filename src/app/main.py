@@ -7,7 +7,16 @@ import time
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.routers import backtest, config, instruments, logs, overview, strategy_history, trades
+from app.routers import (
+    backtest,
+    config,
+    instruments,
+    logs,
+    overview,
+    parameter_optimization,
+    strategy_history,
+    trades,
+)
 from audit.app_logger import get_logger, setup_logging
 from core.scheduler import SchedulerManager
 from core.settings import load_settings
@@ -80,8 +89,9 @@ if static_dir.exists():
 
 app.include_router(overview.router)
 app.include_router(config.router)
-app.include_router(backtest.router)
 app.include_router(strategy_history.router)
+app.include_router(parameter_optimization.router)
+app.include_router(backtest.router)
 app.include_router(trades.router)
 app.include_router(logs.router)
 app.include_router(instruments.router)

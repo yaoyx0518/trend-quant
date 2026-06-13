@@ -1,7 +1,325 @@
-﻿{% extends "base.html" %}
+{% extends "base.html" %}
 {% block content %}
 <section class="page-panel logs-page">
   <h2>日志审计</h2>
-  <p>使用接口 <code>/logs/api/calc?limit=100</code> 查询原始计算日志。</p>
+
+  <div class="log-filter-bar">
+    <label>标的
+      <select id="logSymbolSelect">
+        <option value="">全部标的</option>
+      </select>
+    </label>
+    <label>来源
+      <select id="logSourceSelect">
+        <option value="">全部来源</option>
+        <option value="backtest">回测</option>
+        <option value="final_1445">终盘</option>
+        <option value="poll">轮询</option>
+      </select>
+    </label>
+    <label>运行编号
+      <select id="logRunSelect">
+        <option value="">全部运行</option>
+      </select>
+    </label>
+    <label>开始
+      <input id="logStartInput" type="date">
+    </label>
+    <label>结束
+      <input id="logEndInput" type="date">
+    </label>
+    <label>条数
+      <select id="logLimitSelect">
+        <option value="200" selected>200</option>
+        <option value="500">500</option>
+        <option value="1000">1000</option>
+        <option value="0">全部</option>
+      </select>
+    </label>
+    <button id="logSearchBtn" type="button">查询</button>
+  </div>
+
+  <p id="logStatus" class="status-banner">选择筛选条件后点击查询。</p>
+
+  <div class="log-layout">
+    <div class="table-panel log-list-panel">
+      <h3>计算记录</h3>
+      <div class="table-shell log-table-shell">
+        <table id="calcLogTable">
+          <thead>
+            <tr>
+              <th>时间</th>
+              <th>标的</th>
+              <th>来源</th>
+              <th>运行编号</th>
+              <th>触发</th>
+              <th>动作</th>
+              <th>趋势分</th>
+              <th>方向</th>
+              <th>置信度</th>
+              <th>原因</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="table-panel log-detail-panel">
+      <h3>计算链路</h3>
+      <div id="logRecordSummary" class="log-record-summary"></div>
+      <div id="calcChainView" class="calc-chain-view"></div>
+      <details class="raw-log-details">
+        <summary>原始 JSON</summary>
+        <pre id="rawLogJson">{}</pre>
+      </details>
+    </div>
+  </div>
 </section>
+
+<script>
+(() => {
+  const symbolSelect = document.getElementById('logSymbolSelect');
+  const sourceSelect = document.getElementById('logSourceSelect');
+  const runSelect = document.getElementById('logRunSelect');
+  const startInput = document.getElementById('logStartInput');
+  const endInput = document.getElementById('logEndInput');
+  const limitSelect = document.getElementById('logLimitSelect');
+  const searchBtn = document.getElementById('logSearchBtn');
+  const statusEl = document.getElementById('logStatus');
+  const tableBody = document.querySelector('#calcLogTable tbody');
+  const chainView = document.getElementById('calcChainView');
+  const recordSummary = document.getElementById('logRecordSummary');
+  const rawJson = document.getElementById('rawLogJson');
+  let currentItems = [];
+  let selectedLineNo = null;
+  const initialParams = new URLSearchParams(window.location.search);
+
+  function esc(v) {
+    return String(v ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#39;');
+  }
+
+  function num(v, digits = 2) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '-';
+    return n.toFixed(digits);
+  }
+
+  function fmtValue(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    if (typeof v === 'number') return Number.isInteger(v) ? String(v) : num(v, 4);
+    if (Array.isArray(v) || typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+
+  function actionClass(action) {
+    const v = String(action || '').toUpperCase();
+    if (v === 'BUY') return 'log-action-buy';
+    if (v === 'SELL') return 'log-action-sell';
+    return 'log-action-hold';
+  }
+
+  function displaySymbol(item) {
+    const symbol = String(item?.symbol || '').trim();
+    const name = String(item?.name || '').trim();
+    return name || symbol;
+  }
+
+  async function loadSymbols() {
+    const resp = await fetch('/logs/api/calc/symbols');
+    const data = await resp.json();
+    const items = data.items || [];
+    symbolSelect.innerHTML = '<option value="">全部标的</option>' + items.map((item) => {
+      const label = item.name || item.symbol;
+      return `<option value="${esc(item.symbol)}">${esc(label)}</option>`;
+    }).join('');
+  }
+
+  async function loadRuns() {
+    const source = String(sourceSelect.value || initialParams.get('source') || '').trim();
+    const query = source ? `?source=${encodeURIComponent(source)}` : '';
+    const resp = await fetch(`/logs/api/calc/runs${query}`);
+    const data = await resp.json();
+    const items = data.items || [];
+    runSelect.innerHTML = '<option value="">全部运行</option>' + items.map((item) => {
+      const label = `${item.run_id} ${item.start || '-'}~${item.end || '-'} (${item.count || 0})`;
+      return `<option value="${esc(item.run_id)}">${esc(label)}</option>`;
+    }).join('');
+  }
+
+  function buildQuery() {
+    const params = new URLSearchParams();
+    const symbol = String(symbolSelect.value || '').trim();
+    const source = String(sourceSelect.value || '').trim();
+    const runId = String(runSelect.value || '').trim();
+    const start = String(startInput.value || '').trim();
+    const end = String(endInput.value || '').trim();
+    const limit = String(limitSelect.value || '200').trim();
+    if (symbol) params.set('symbol', symbol);
+    if (source) params.set('source', source);
+    if (runId) params.set('run_id', runId);
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    params.set('limit', limit);
+    return params;
+  }
+
+  function applyInitialFilters() {
+    const symbol = String(initialParams.get('symbol') || '').trim();
+    const source = String(initialParams.get('source') || '').trim();
+    const runId = String(initialParams.get('run_id') || '').trim();
+    const start = String(initialParams.get('start') || '').trim();
+    const end = String(initialParams.get('end') || '').trim();
+    const limit = String(initialParams.get('limit') || '').trim();
+
+    if (symbol) {
+      if (!Array.from(symbolSelect.options).some((option) => option.value === symbol)) {
+        symbolSelect.add(new Option(symbol, symbol));
+      }
+      symbolSelect.value = symbol;
+    }
+    if (source) sourceSelect.value = source;
+    if (runId) {
+      if (!Array.from(runSelect.options).some((option) => option.value === runId)) {
+        runSelect.add(new Option(runId, runId));
+      }
+      runSelect.value = runId;
+    }
+    if (start) startInput.value = start.slice(0, 10);
+    if (end) endInput.value = end.slice(0, 10);
+    if (limit) limitSelect.value = limit;
+  }
+
+  function hasInitialFilters() {
+    return ['symbol', 'source', 'run_id', 'start', 'end'].some((key) => {
+      return String(initialParams.get(key) || '').trim();
+    });
+  }
+
+  async function loadLogs() {
+    searchBtn.disabled = true;
+    statusEl.textContent = '正在加载计算日志...';
+    try {
+      const resp = await fetch(`/logs/api/calc?${buildQuery().toString()}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '日志加载失败');
+      currentItems = data.items || [];
+      selectedLineNo = currentItems.length ? currentItems[currentItems.length - 1].line_no : null;
+      renderTable();
+      renderSelected();
+      const meta = data.meta || {};
+      const moreText = meta.has_more ? `，已返回最后 ${meta.returned} 条` : '';
+      statusEl.textContent = `共匹配 ${Number(meta.total || currentItems.length).toLocaleString()} 条${moreText}。`;
+    } catch (err) {
+      statusEl.textContent = `失败：${err.message}`;
+      currentItems = [];
+      renderTable();
+      renderSelected();
+    } finally {
+      searchBtn.disabled = false;
+    }
+  }
+
+  function renderTable() {
+    if (!currentItems.length) {
+      tableBody.innerHTML = '<tr><td colspan="10">暂无计算日志。</td></tr>';
+      return;
+    }
+    tableBody.innerHTML = currentItems.map((item) => `
+      <tr data-line-no="${esc(item.line_no)}" class="${selectedLineNo === item.line_no ? 'is-selected' : ''}">
+        <td>${esc((item.ts || '').replace('T', ' ').slice(0, 19))}</td>
+        <td>${esc(displaySymbol(item))}</td>
+        <td>${esc(item.source || '-')}</td>
+        <td>${esc(item.run_id || '-')}</td>
+        <td>${esc(item.trigger || '-')}</td>
+        <td><span class="log-action ${actionClass(item.action)}">${esc(item.action || '-')}</span></td>
+        <td class="num-cell">${num(item.trend_score)}</td>
+        <td class="num-cell">${num(item.price_direction)}</td>
+        <td class="num-cell">${num(item.confidence, 3)}</td>
+        <td>${esc(item.reason || '-')}</td>
+      </tr>
+    `).join('');
+  }
+
+  function selectedItem() {
+    return currentItems.find((item) => item.line_no === selectedLineNo) || currentItems[currentItems.length - 1] || null;
+  }
+
+  function renderSelected() {
+    const item = selectedItem();
+    if (!item) {
+      recordSummary.innerHTML = '<span>暂无记录</span>';
+      chainView.innerHTML = '';
+      rawJson.textContent = '{}';
+      return;
+    }
+
+    recordSummary.innerHTML = `
+      <span>${esc(displaySymbol(item))}</span>
+      <span>${esc((item.ts || '').replace('T', ' ').slice(0, 19))}</span>
+      <span>${esc(item.source || '-')}</span>
+      ${item.run_id ? `<span>${esc(item.run_id)}</span>` : ''}
+      <span class="log-action ${actionClass(item.action)}">${esc(item.action || '-')}</span>
+      <span>${esc(item.reason || '-')}</span>
+    `;
+    chainView.innerHTML = (item.calc_chain || []).map(renderStage).join('');
+    rawJson.textContent = JSON.stringify(item.raw || {}, null, 2);
+    renderTable();
+  }
+
+  function renderStage(stage, idx) {
+    const inputs = (stage.inputs || []).map((input) => `<span>${esc(input)}</span>`).join('');
+    const outputs = (stage.outputs || []).map((output) => `
+      <tr>
+        <td>${esc(output.label || output.key || '')}</td>
+        <td>${esc(output.key || '')}</td>
+        <td>${esc(fmtValue(output.value))}</td>
+      </tr>
+    `).join('');
+    return `
+      <article class="calc-chain-stage">
+        <div class="calc-chain-step">${idx + 1}</div>
+        <div class="calc-chain-body">
+          <div class="calc-chain-head">
+            <h4>${esc(stage.title || stage.id || '')}</h4>
+            <p>${esc(stage.formula || '')}</p>
+          </div>
+          <div class="calc-chain-inputs">${inputs || '<span>初始输入</span>'}</div>
+          <table class="calc-chain-table">
+            <thead><tr><th>变量</th><th>字段</th><th>值</th></tr></thead>
+            <tbody>${outputs || '<tr><td colspan="3">无输出</td></tr>'}</tbody>
+          </table>
+        </div>
+      </article>
+    `;
+  }
+
+  tableBody.addEventListener('click', (event) => {
+    const row = event.target.closest('tr[data-line-no]');
+    if (!row) return;
+    selectedLineNo = Number(row.dataset.lineNo);
+    renderSelected();
+  });
+
+  sourceSelect.addEventListener('change', loadRuns);
+  searchBtn.addEventListener('click', loadLogs);
+  Promise.all([loadSymbols(), loadRuns()]).then(() => {
+    applyInitialFilters();
+    renderTable();
+    renderSelected();
+    if (hasInitialFilters()) {
+      loadLogs();
+    } else {
+      statusEl.textContent = '筛选项已加载，点击查询查看计算日志。';
+    }
+  }).catch((err) => {
+    statusEl.textContent = `失败：${err.message}`;
+  });
+})();
+</script>
 {% endblock %}

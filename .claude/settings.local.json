@@ -6,7 +6,11 @@
       "Bash(git commit *)",
       "Bash(git push *)",
       "Skill(update-config)",
-      "Bash(python *)"
+      "Bash(python *)",
+      "Bash(PYTHONPATH=src python -c \"from app.main import app; print\\('App loaded OK'\\)\")",
+      "Bash(./venv/Scripts/python.exe -c \"import sys; sys.path.insert\\(0,'src'\\); from app.main import app; print\\('App loaded OK'\\)\")",
+      "Bash(ls venv/Scripts/python.exe)",
+      "Bash(PYTHONPATH=src venv/Scripts/python.exe -c \"from app.routers.backtest import router; print\\('Router OK'\\)\")"
     ]
   }
 }

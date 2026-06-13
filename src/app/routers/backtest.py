@@ -227,6 +227,7 @@ async def run_backtest(payload: BacktestRunRequest) -> dict:
                 strategy_overrides=strategy_overrides,
                 progress_callback=_progress_callback,
                 run_id=run_id,
+                log_calc=True,
             )
             with _backtest_lock:
                 job = _backtest_jobs.get(run_id)

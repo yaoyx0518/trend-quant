@@ -25,8 +25,6 @@ def symbol_to_code(symbol: str | None) -> str:
 def format_symbol_display(symbol: str | None, name: str | None = None) -> str:
     code = symbol_to_code(symbol)
     cleaned_name = strip_etf_suffix(name)
-    if cleaned_name and code:
-        return f"{cleaned_name}（{code}）"
     return cleaned_name or code
 
 

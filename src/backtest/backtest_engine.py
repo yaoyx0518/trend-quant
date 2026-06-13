@@ -9,6 +9,7 @@ import yaml
 
 from backtest.benchmark import equal_weight_pool_benchmark, single_symbol_benchmark
 from backtest.metrics import compute_annual_returns, compute_drawdown, compute_metrics, compute_monthly_heatmap, compute_symbol_trade_stats
+from audit.calc_logger import CalcLogger
 from core.benchmarks import (
     BENCHMARK_MODE_EQUAL_WEIGHT,
     COMPARISON_BENCHMARKS,
@@ -48,6 +49,7 @@ class BacktestEngine:
         self.runtime_store = RuntimeStore()
         self.db = get_db()
         self.market_store = MarketStore()
+        self.calc_logger = CalcLogger()
         self.strategies = {
             TREND_STRATEGY_ID: TrendScoreStrategy(),
             MOMENTUM_STRATEGY_ID: MomentumTopNStrategy(),
@@ -197,6 +199,7 @@ class BacktestEngine:
         include_trades: bool = True,
         progress_callback: Callable[[int, int], None] | None = None,
         run_id: str | None = None,
+        log_calc: bool = False,
     ) -> dict:
         raw_strategy_cfg, instruments_cfg, app_cfg = self._build_configs(
             strategy_overrides=None, instrument_overrides=instrument_overrides
@@ -431,6 +434,23 @@ class BacktestEngine:
                     "chandelier_stop_price": chandelier_stop,
                 }
                 signal = strategy_impl.evaluate(symbol=symbol, bars=bars, state=state, cfg=strategy_cfg)
+                if log_calc:
+                    log_signal = dict(signal)
+                    log_signal["ts"] = f"{day_str}T00:00:00"
+                    log_signal["trade_day"] = day_str
+                    log_signal["source"] = "backtest"
+                    log_signal["run_id"] = run_id
+                    log_signal["strategy_id"] = resolved_strategy_id
+                    log_signal["trigger"] = "backtest_daily_close"
+                    log_signal["signal_timing"] = "daily_close"
+                    log_signal["symbol_config"] = item
+                    log_signal["position_snapshot"] = {
+                        "qty": int(pos.get("qty", 0) or 0),
+                        "sellable_qty": int(pos.get("sellable_qty", 0) or 0),
+                        "avg_price": float(pos.get("avg_price", 0.0) or 0.0),
+                        "buy_date": pos.get("buy_date"),
+                    }
+                    self.calc_logger.log(log_signal)
                 signal_map[symbol] = signal
 
             momentum_plan = {
@@ -1068,8 +1088,6 @@ class BacktestEngine:
         if persist:
             self.db.save_backtest(run_id, result)
         return result
-
-
 
 
 

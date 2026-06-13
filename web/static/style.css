@@ -418,6 +418,16 @@ button:disabled {
   box-shadow: 0 0 0 6px rgba(13, 122, 113, 0.1);
 }
 
+.status-banner .status-link {
+  color: var(--accent);
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.status-banner .status-link:hover {
+  text-decoration: underline;
+}
+
 .context-hint {
   display: inline-flex;
   margin-top: 10px;
@@ -732,7 +742,6 @@ button:disabled {
   word-break: break-word;
 }
 
-#goOptimizeBtn,
 #holdingsSelectAllBtn,
 #holdingsSelectNoneBtn,
 #optLoadParamsBtn,
@@ -744,7 +753,6 @@ button:disabled {
   box-shadow: var(--shadow-sm);
 }
 
-#goOptimizeBtn:hover:not(:disabled),
 #holdingsSelectAllBtn:hover:not(:disabled),
 #holdingsSelectNoneBtn:hover:not(:disabled),
 #optLoadParamsBtn:hover:not(:disabled),
@@ -996,6 +1004,217 @@ details > summary::marker {
   box-shadow: none;
 }
 
+.log-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin: 16px 0 14px;
+}
+
+.log-filter-bar label {
+  display: inline-flex;
+  gap: 10px;
+  align-items: center;
+  min-height: 46px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--text-soft);
+  box-shadow: var(--shadow-sm);
+}
+
+.log-filter-bar select,
+.log-filter-bar input {
+  min-width: 130px;
+}
+
+.log-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(420px, 0.95fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.log-list-panel,
+.log-detail-panel {
+  margin-top: 0;
+}
+
+.backtest-log-panel {
+  margin-top: 24px;
+}
+
+.log-table-shell {
+  max-height: 680px;
+  overflow: auto;
+}
+
+#calcLogTable,
+#btCalcLogTable {
+  min-width: 980px;
+}
+
+#calcLogTable tbody tr,
+#btCalcLogTable tbody tr {
+  cursor: pointer;
+}
+
+#calcLogTable tbody tr.is-selected td,
+#btCalcLogTable tbody tr.is-selected td {
+  background: rgba(215, 240, 234, 0.72);
+  border-bottom-color: rgba(13, 122, 113, 0.18);
+}
+
+.log-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 54px;
+  min-height: 24px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.log-action-buy {
+  background: rgba(193, 91, 88, 0.12);
+  color: var(--danger);
+}
+
+.log-action-sell {
+  background: rgba(27, 130, 95, 0.12);
+  color: var(--success);
+}
+
+.log-action-hold {
+  background: rgba(102, 118, 128, 0.12);
+  color: var(--muted);
+}
+
+.log-record-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 0 0 14px;
+}
+
+.log-record-summary span {
+  min-height: 30px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--text-soft);
+  font-size: 13px;
+}
+
+.calc-chain-view {
+  display: grid;
+  gap: 14px;
+}
+
+.calc-chain-stage {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.calc-chain-stage:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  left: 17px;
+  top: 42px;
+  bottom: -14px;
+  width: 2px;
+  background: linear-gradient(180deg, rgba(13, 122, 113, 0.36), rgba(199, 131, 76, 0.2));
+}
+
+.calc-chain-step {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  color: #fff;
+  font-weight: 800;
+  box-shadow: 0 12px 20px rgba(13, 122, 113, 0.22);
+}
+
+.calc-chain-body {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.86);
+  box-shadow: var(--shadow-sm);
+}
+
+.calc-chain-head {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.calc-chain-head h4 {
+  font-size: 1rem;
+  letter-spacing: 0;
+}
+
+.calc-chain-head p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.calc-chain-inputs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.calc-chain-inputs span {
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.calc-chain-table {
+  font-variant-numeric: tabular-nums;
+}
+
+.calc-chain-table th,
+.calc-chain-table td {
+  padding: 7px 8px;
+  font-size: 12px;
+  word-break: break-word;
+}
+
+.calc-chain-table td:last-child {
+  max-width: 360px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.raw-log-details {
+  margin-top: 16px;
+}
+
+.raw-log-details pre {
+  max-height: 420px;
+}
+
 @keyframes rise-in {
   from {
     opacity: 0;
@@ -1055,5 +1274,9 @@ details > summary::marker {
   .site-nav a {
     min-height: 38px;
     padding: 0 13px;
+  }
+
+  .log-layout {
+    grid-template-columns: 1fr;
   }
 }

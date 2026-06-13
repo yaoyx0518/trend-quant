@@ -11,7 +11,6 @@
       <select id="strategySelect"></select>
     </label>
     <button id="runBtn" type="button">运行回测</button>
-    <button id="goOptimizeBtn" type="button">跳转到参数优化</button>
   </div>
   <div class="content-panel">
     <h3 style="margin: 0 0 8px;">回测标的范围</h3>
@@ -24,7 +23,7 @@
     <p class="context-hint" style="margin-top: 0;">
       默认使用完整分组参与回测，不再需要逐个勾选标的。
     </p>
-    <p class="context-hint" style="margin: 10px 0 0;">比较基准：{% for option in comparison_benchmarks %}{% if option.mode == 'equal_weight_pool' %}{{ instrument_group_label }}（等权）{% else %}{{ option.label }}（{{ option.symbol }}）{% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</p>
+    <p class="context-hint" style="margin: 10px 0 0;">比较基准：{% for option in comparison_benchmarks %}{% if option.mode == 'equal_weight_pool' %}{{ instrument_group_label }}（等权）{% else %}{{ option.label }}{% endif %}{% if not loop.last %} / {% endif %}{% endfor %}</p>
   </div>
   <div id="trendParamsRow" class="bt-form-row">
     <label>n_short <input id="btNShort" type="number" value="5" min="1" step="1"></label>
@@ -221,103 +220,73 @@
     </div>
   </div>
 
-  <hr>
-  <h2 id="optimizeSectionTitle">参数优化</h2>
+  <div class="backtest-log-panel" id="backtestLogPanel">
+    <div class="bt-form-row">
+      <h3 style="margin: 0;">本次回测计算日志</h3>
+      <label>标的
+        <select id="btLogSymbolSelect">
+          <option value="">全部标的</option>
+        </select>
+      </label>
+      <label>开始
+        <input id="btLogStartInput" type="date">
+      </label>
+      <label>结束
+        <input id="btLogEndInput" type="date">
+      </label>
+      <label>条数
+        <select id="btLogLimitSelect">
+          <option value="200" selected>200</option>
+          <option value="500">500</option>
+          <option value="1000">1000</option>
+          <option value="0">全部</option>
+        </select>
+      </label>
+      <button id="btLogRefreshBtn" type="button">刷新日志</button>
+    </div>
+    <p id="btLogStatus" class="context-hint">运行一次回测后，这里会显示本次 run_id 的计算日志。</p>
+    <div class="log-layout">
+      <div class="table-panel log-list-panel">
+        <h3>计算记录</h3>
+        <div class="table-shell log-table-shell">
+          <table id="btCalcLogTable" class="calc-log-table">
+            <thead>
+              <tr>
+                <th>时间</th>
+                <th>标的</th>
+                <th>来源</th>
+                <th>运行编号</th>
+                <th>触发</th>
+                <th>动作</th>
+                <th>趋势分</th>
+                <th>方向</th>
+                <th>置信度</th>
+                <th>原因</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
 
-  <div class="bt-form-row">
-    <button id="optLoadParamsBtn" type="button">加载可调参数</button>
-    <label><input id="optEnableLoo" type="checkbox"> 启用 LOO</label>
-    <label>并行模式
-      <select id="optParallelMode">
-        <option value="auto" selected>自动</option>
-        <option value="single">单进程</option>
-        <option value="manual">手动</option>
-      </select>
-    </label>
-    <label>手动进程数 <input id="optManualWorkers" type="number" min="1" max="32" value="4" disabled></label>
+      <div class="table-panel log-detail-panel">
+        <h3>计算链路</h3>
+        <div id="btLogRecordSummary" class="log-record-summary"></div>
+        <div id="btCalcChainView" class="calc-chain-view"></div>
+        <details class="raw-log-details">
+          <summary>原始 JSON</summary>
+          <pre id="btRawLogJson">{}</pre>
+        </details>
+      </div>
+    </div>
   </div>
 
-  <div class="bt-form-row">
-    <button id="optAddWindowBtn" type="button">添加窗口</button>
-    <span id="optWindowHint">使用自定义日期区间进行优化。</span>
-  </div>
-
-  <div class="table-shell">
-    <table id="optWindowTable">
-      <thead>
-        <tr>
-          <th>开始日期</th>
-          <th>结束日期</th>
-          <th>操作</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <h3>可调参数</h3>
-  <div class="table-shell">
-    <table id="optParamTable">
-      <thead>
-        <tr>
-          <th>使用</th>
-          <th>参数键</th>
-          <th>当前值</th>
-          <th>最小值</th>
-          <th>最大值</th>
-          <th>步长</th>
-          <th>类型</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
-
-  <div class="bt-form-row">
-    <span>已选参数：<strong id="optSelectedCount">0</strong></span>
-    <button id="optStartBtn" type="button">开始优化</button>
-    <button id="optCancelBtn" type="button" disabled>取消优化</button>
-  </div>
-
-  <div class="opt-progress-wrap">
-    <progress id="optProgress" max="1" value="0"></progress>
-    <span id="optProgressText">0%</span>
-  </div>
-  <p id="optStatus" class="status-banner">优化空闲。</p>
-
-  <h3>优化摘要</h3>
-  <pre id="optSummary">暂无结果。</pre>
-
-  <h3>优化结果（按评分前 50）</h3>
-  <div class="table-shell">
-    <table id="optResultTable">
-      <thead>
-        <tr>
-          <th>排名</th>
-          <th>评分</th>
-          <th>部分完成</th>
-          <th>覆盖</th>
-          <th>夏普中位数</th>
-          <th>最低夏普</th>
-          <th>夏普标准差</th>
-          <th>最差回撤</th>
-          <th>交易数</th>
-          <th>胜率</th>
-          <th>盈亏比</th>
-          <th>硬过滤通过</th>
-          <th>参数</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
-  </div>
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script>
 (() => {
   const runBtn = document.getElementById('runBtn');
-  const goOptimizeBtn = document.getElementById('goOptimizeBtn');
   const statusEl = document.getElementById('btStatus');
   const progressWrapEl = document.getElementById('btProgressWrap');
   const progressEl = document.getElementById('btProgress');
@@ -335,6 +304,17 @@
   const holdingsSelectAllBtn = document.getElementById('holdingsSelectAllBtn');
   const holdingsSelectNoneBtn = document.getElementById('holdingsSelectNoneBtn');
   const symbolSortBtnEls = Array.from(document.querySelectorAll('#symbolTable .sym-sort-btn'));
+  const btLogPanelEl = document.getElementById('backtestLogPanel');
+  const btLogSymbolSelectEl = document.getElementById('btLogSymbolSelect');
+  const btLogStartInputEl = document.getElementById('btLogStartInput');
+  const btLogEndInputEl = document.getElementById('btLogEndInput');
+  const btLogLimitSelectEl = document.getElementById('btLogLimitSelect');
+  const btLogRefreshBtnEl = document.getElementById('btLogRefreshBtn');
+  const btLogStatusEl = document.getElementById('btLogStatus');
+  const btCalcLogTableBodyEl = document.querySelector('#btCalcLogTable tbody');
+  const btCalcChainViewEl = document.getElementById('btCalcChainView');
+  const btLogRecordSummaryEl = document.getElementById('btLogRecordSummary');
+  const btRawLogJsonEl = document.getElementById('btRawLogJson');
   const nShortEl = document.getElementById('btNShort');
   const nMidEl = document.getElementById('btNMid');
   const nLongEl = document.getElementById('btNLong');
@@ -404,6 +384,9 @@
   let latestSummary = {};
   let latestBenchmarks = {};
   let latestFallbackBenchmarkSummary = null;
+  let currentBacktestLogRunId = '';
+  let currentBacktestLogItems = [];
+  let selectedBacktestLogLineNo = null;
 
   function pct(v) {
     if (v === null || v === undefined || Number.isNaN(v)) return '-';
@@ -474,7 +457,6 @@
     const normalized = String(symbol || '').trim().toUpperCase();
     const code = symbolCode(normalized);
     const name = String(symbolDisplayNameMap[normalized] || '').trim();
-    if (name && code) return `${name}（${code}）`;
     return name || code || normalized;
   }
 
@@ -510,6 +492,9 @@
   const SYMBOL_COLOR_PALETTE = [
     '#d62728', '#1f77b4', '#ff7f0e', '#2ca02c', '#17becf',
     '#8c564b', '#e377c2', '#7f7f7f', '#bcbd22', '#9467bd',
+    '#006d77', '#c1121f', '#f77f00', '#386641', '#4d908e',
+    '#577590', '#b56576', '#6a994e', '#277da1', '#f3722c',
+    '#8338ec', '#3a86ff', '#ff006e', '#06d6a0', '#118ab2',
   ];
   const TREND_DIST_MIN = -100;
   const TREND_DIST_MAX = 100;
@@ -536,10 +521,25 @@
     200: '#000000',
   });
 
+  function generatedSymbolColor(idx, attempt = 0) {
+    const hue = Math.round((idx * 137.508 + attempt * 31) % 360);
+    const saturation = 58 + ((idx + attempt) % 4) * 7;
+    const lightness = 38 + ((idx + attempt * 2) % 5) * 6;
+    return `hsl(${hue}, ${saturation}%, ${lightness}%)`;
+  }
+
   function buildSymbolColorMap(symbols) {
     const map = {};
+    const usedColors = new Set();
     (symbols || []).forEach((s, idx) => {
-      map[s] = SYMBOL_COLOR_PALETTE[idx % SYMBOL_COLOR_PALETTE.length];
+      let color = SYMBOL_COLOR_PALETTE[idx] || generatedSymbolColor(idx);
+      let attempt = 0;
+      while (usedColors.has(color)) {
+        attempt += 1;
+        color = generatedSymbolColor(idx, attempt);
+      }
+      usedColors.add(color);
+      map[s] = color;
     });
     return map;
   }
@@ -775,7 +775,6 @@
   function benchmarkDisplayName(item, fallbackKey = '') {
     const label = String(item?.label || item?.name || fallbackKey || '').trim();
     const symbol = String(item?.symbol || '').trim();
-    if (symbol && label && !label.includes(symbol)) return `${label}（${symbol}）`;
     return label || symbol || fallbackKey || '基准';
   }
 
@@ -1825,9 +1824,172 @@
     }).join('');
   }
 
+  function initBacktestLogSymbolOptions() {
+    if (!btLogSymbolSelectEl) return;
+    const options = ['<option value="">全部标的</option>'];
+    for (const symbol of fixedBacktestSymbols) {
+      options.push(`<option value="${escapeHtml(symbol)}">${escapeHtml(formatSymbolDisplay(symbol))}</option>`);
+    }
+    btLogSymbolSelectEl.innerHTML = options.join('');
+  }
+
+  function logNum(v, digits = 2) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '-';
+    return n.toFixed(digits);
+  }
+
+  function logValue(v) {
+    if (v === null || v === undefined || v === '') return '-';
+    if (typeof v === 'number') return Number.isInteger(v) ? String(v) : logNum(v, 4);
+    if (Array.isArray(v) || typeof v === 'object') return JSON.stringify(v);
+    return String(v);
+  }
+
+  function logActionClass(action) {
+    const v = String(action || '').toUpperCase();
+    if (v === 'BUY') return 'log-action-buy';
+    if (v === 'SELL') return 'log-action-sell';
+    return 'log-action-hold';
+  }
+
+  function renderBacktestLogTable() {
+    if (!btCalcLogTableBodyEl) return;
+    if (!currentBacktestLogItems.length) {
+      btCalcLogTableBodyEl.innerHTML = '<tr><td colspan="10">暂无本次回测计算日志。</td></tr>';
+      return;
+    }
+    btCalcLogTableBodyEl.innerHTML = currentBacktestLogItems.map((item) => `
+      <tr data-line-no="${escapeHtml(item.line_no)}" class="${selectedBacktestLogLineNo === item.line_no ? 'is-selected' : ''}">
+        <td>${escapeHtml((item.ts || '').replace('T', ' ').slice(0, 19))}</td>
+        <td>${escapeHtml(formatSymbolDisplay(item.symbol || ''))}</td>
+        <td>${escapeHtml(item.source || '-')}</td>
+        <td>${escapeHtml(item.run_id || '-')}</td>
+        <td>${escapeHtml(item.trigger || '-')}</td>
+        <td><span class="log-action ${logActionClass(item.action)}">${escapeHtml(item.action || '-')}</span></td>
+        <td class="num-cell">${logNum(item.trend_score)}</td>
+        <td class="num-cell">${logNum(item.price_direction)}</td>
+        <td class="num-cell">${logNum(item.confidence, 3)}</td>
+        <td>${escapeHtml(item.reason || '-')}</td>
+      </tr>
+    `).join('');
+  }
+
+  function selectedBacktestLogItem() {
+    return currentBacktestLogItems.find((item) => item.line_no === selectedBacktestLogLineNo)
+      || currentBacktestLogItems[currentBacktestLogItems.length - 1]
+      || null;
+  }
+
+  function renderBacktestLogStage(stage, idx) {
+    const inputs = (stage.inputs || []).map((input) => `<span>${escapeHtml(input)}</span>`).join('');
+    const outputs = (stage.outputs || []).map((output) => `
+      <tr>
+        <td>${escapeHtml(output.label || output.key || '')}</td>
+        <td>${escapeHtml(output.key || '')}</td>
+        <td>${escapeHtml(logValue(output.value))}</td>
+      </tr>
+    `).join('');
+    return `
+      <article class="calc-chain-stage">
+        <div class="calc-chain-step">${idx + 1}</div>
+        <div class="calc-chain-body">
+          <div class="calc-chain-head">
+            <h4>${escapeHtml(stage.title || stage.id || '')}</h4>
+            <p>${escapeHtml(stage.formula || '')}</p>
+          </div>
+          <div class="calc-chain-inputs">${inputs || '<span>初始输入</span>'}</div>
+          <table class="calc-chain-table">
+            <thead><tr><th>变量</th><th>字段</th><th>值</th></tr></thead>
+            <tbody>${outputs || '<tr><td colspan="3">无输出</td></tr>'}</tbody>
+          </table>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderBacktestLogSelected() {
+    const item = selectedBacktestLogItem();
+    if (!item) {
+      if (btLogRecordSummaryEl) btLogRecordSummaryEl.innerHTML = '<span>暂无记录</span>';
+      if (btCalcChainViewEl) btCalcChainViewEl.innerHTML = '';
+      if (btRawLogJsonEl) btRawLogJsonEl.textContent = '{}';
+      renderBacktestLogTable();
+      return;
+    }
+
+    btLogRecordSummaryEl.innerHTML = `
+      <span>${escapeHtml(formatSymbolDisplay(item.symbol || ''))}</span>
+      <span>${escapeHtml((item.ts || '').replace('T', ' ').slice(0, 19))}</span>
+      <span>${escapeHtml(item.source || '-')}</span>
+      ${item.run_id ? `<span>${escapeHtml(item.run_id)}</span>` : ''}
+      <span class="log-action ${logActionClass(item.action)}">${escapeHtml(item.action || '-')}</span>
+      <span>${escapeHtml(item.reason || '-')}</span>
+    `;
+    btCalcChainViewEl.innerHTML = (item.calc_chain || []).map(renderBacktestLogStage).join('');
+    btRawLogJsonEl.textContent = JSON.stringify(item.raw || {}, null, 2);
+    renderBacktestLogTable();
+  }
+
+  function buildBacktestLogQuery() {
+    const params = new URLSearchParams();
+    params.set('source', 'backtest');
+    params.set('run_id', currentBacktestLogRunId);
+    params.set('limit', String(btLogLimitSelectEl?.value || '200'));
+    const symbol = String(btLogSymbolSelectEl?.value || '').trim();
+    const start = String(btLogStartInputEl?.value || '').trim();
+    const end = String(btLogEndInputEl?.value || '').trim();
+    if (symbol) params.set('symbol', symbol);
+    if (start) params.set('start', start);
+    if (end) params.set('end', end);
+    return params;
+  }
+
+  function resetBacktestLogs() {
+    currentBacktestLogRunId = '';
+    currentBacktestLogItems = [];
+    selectedBacktestLogLineNo = null;
+    if (btLogStatusEl) btLogStatusEl.textContent = '回测运行中，完成后会加载本次计算日志。';
+    renderBacktestLogTable();
+    renderBacktestLogSelected();
+  }
+
+  async function loadBacktestLogs(runId) {
+    currentBacktestLogRunId = String(runId || currentBacktestLogRunId || '').trim();
+    if (!currentBacktestLogRunId) {
+      if (btLogStatusEl) btLogStatusEl.textContent = '暂无回测运行编号，无法加载计算日志。';
+      return;
+    }
+    btLogRefreshBtnEl.disabled = true;
+    btLogStatusEl.textContent = `正在加载本次回测日志：${currentBacktestLogRunId}`;
+    try {
+      const resp = await fetch(`/logs/api/calc?${buildBacktestLogQuery().toString()}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '日志加载失败');
+      currentBacktestLogItems = data.items || [];
+      selectedBacktestLogLineNo = currentBacktestLogItems.length
+        ? currentBacktestLogItems[currentBacktestLogItems.length - 1].line_no
+        : null;
+      renderBacktestLogTable();
+      renderBacktestLogSelected();
+      const meta = data.meta || {};
+      const moreText = meta.has_more ? `，已返回最后 ${meta.returned} 条` : '';
+      btLogStatusEl.textContent = `本次 run_id 共匹配 ${Number(meta.total || currentBacktestLogItems.length).toLocaleString()} 条${moreText}。`;
+    } catch (err) {
+      currentBacktestLogItems = [];
+      selectedBacktestLogLineNo = null;
+      renderBacktestLogTable();
+      renderBacktestLogSelected();
+      btLogStatusEl.textContent = `日志加载失败：${err.message}`;
+    } finally {
+      btLogRefreshBtnEl.disabled = false;
+    }
+  }
+
   async function runBacktest() {
     runBtn.disabled = true;
     statusEl.textContent = '正在运行回测...';
+    resetBacktestLogs();
     const strategyId = String(strategySelectEl?.value || 'trend_score_v1');
     if (!fixedBacktestSymbols.length) {
       statusEl.textContent = '20 行业 ETF 标的组中没有已启用标的。';
@@ -2014,7 +2176,8 @@
       }
 
       const benchmarkCount = Object.keys(result.benchmarks || {}).length || 1;
-      statusEl.textContent = `完成。运行 ID=${result.run_id} | 天数=${result.meta.timeline_days} | 基准=${benchmarkCount} 个`;
+      const completedRunId = result.run_id || runId;
+      statusEl.textContent = `完成。运行 ID=${completedRunId} | 天数=${result.meta.timeline_days} | 基准=${benchmarkCount} 个，本次计算日志已在页面底部加载。`;
       renderSummary(result.summary || {});
       renderBenchmarkSummary(result.benchmarks || {}, result.benchmark_summary || {});
       renderStrategyHighlights(result.strategy_highlights || {}, result.meta?.strategy_id || strategyId);
@@ -2030,6 +2193,10 @@
         ? result.symbol_stats
         : buildSymbolStats(allTrades, (result.meta && result.meta.symbols) || []);
       renderSymbolStats(stats);
+      currentBacktestLogRunId = completedRunId;
+      if (btLogStartInputEl) btLogStartInputEl.value = String(payload.start_date || '').slice(0, 10);
+      if (btLogEndInputEl) btLogEndInputEl.value = String(payload.end_date || '').slice(0, 10);
+      await loadBacktestLogs(completedRunId);
     } catch (err) {
       statusEl.textContent = `失败：${err.message}`;
       progressWrapEl.style.display = 'none';
@@ -2050,6 +2217,9 @@
   applyStrategyPanel();
   applyStrategyParamsFromCatalog(strategySelectEl.value);
   renderStrategyHighlights({}, strategySelectEl.value);
+  initBacktestLogSymbolOptions();
+  renderBacktestLogTable();
+  renderBacktestLogSelected();
 
   strategySelectEl.addEventListener('change', () => {
     applyStrategyPanel();
@@ -2057,6 +2227,17 @@
     renderStrategyHighlights({}, strategySelectEl.value);
   });
   runBtn.addEventListener('click', runBacktest);
+  btLogRefreshBtnEl?.addEventListener('click', () => loadBacktestLogs(currentBacktestLogRunId));
+  btLogSymbolSelectEl?.addEventListener('change', () => loadBacktestLogs(currentBacktestLogRunId));
+  btLogStartInputEl?.addEventListener('change', () => loadBacktestLogs(currentBacktestLogRunId));
+  btLogEndInputEl?.addEventListener('change', () => loadBacktestLogs(currentBacktestLogRunId));
+  btLogLimitSelectEl?.addEventListener('change', () => loadBacktestLogs(currentBacktestLogRunId));
+  btCalcLogTableBodyEl?.addEventListener('click', (event) => {
+    const row = event.target.closest('tr[data-line-no]');
+    if (!row) return;
+    selectedBacktestLogLineNo = Number(row.dataset.lineNo);
+    renderBacktestLogSelected();
+  });
   holdingsSelectAllBtn?.addEventListener('click', () => setHoldingsSelection(true));
   holdingsSelectNoneBtn?.addEventListener('click', () => setHoldingsSelection(false));
   for (const btn of symbolSortBtnEls) {
@@ -2066,9 +2247,6 @@
     });
   }
   updateSymbolSortIndicators();
-  goOptimizeBtn?.addEventListener('click', () => {
-    document.getElementById('optimizeSectionTitle')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
   symbolFilterEl.addEventListener('change', () => renderTrades(allTrades, symbolFilterEl.value));
   klineSymbolEl.addEventListener('change', () => renderKlineSymbol(klineSymbolEl.value));
   klineChart.on('dataZoom', (params) => updateKlineYAxisByZoom(params));
@@ -2084,489 +2262,7 @@
   });
 })();
 </script>
-
-<script>
-(() => {
-  const loadParamsBtn = document.getElementById('optLoadParamsBtn');
-  const addWindowBtn = document.getElementById('optAddWindowBtn');
-  const startBtn = document.getElementById('optStartBtn');
-  const cancelBtn = document.getElementById('optCancelBtn');
-  const enableLooEl = document.getElementById('optEnableLoo');
-  const parallelModeEl = document.getElementById('optParallelMode');
-  const manualWorkersEl = document.getElementById('optManualWorkers');
-  const windowTbody = document.querySelector('#optWindowTable tbody');
-  const paramTbody = document.querySelector('#optParamTable tbody');
-  const selectedCountEl = document.getElementById('optSelectedCount');
-  const progressEl = document.getElementById('optProgress');
-  const progressTextEl = document.getElementById('optProgressText');
-  const statusEl = document.getElementById('optStatus');
-  const summaryEl = document.getElementById('optSummary');
-  const resultTbody = document.querySelector('#optResultTable tbody');
-  const capitalEl = document.getElementById('capital');
-
-  if (!loadParamsBtn || !windowTbody || !paramTbody || !startBtn || !cancelBtn) {
-    return;
-  }
-
-  let currentJobId = '';
-  let pollTimer = null;
-  let knownParams = [];
-
-  function fmtNum(v, d = 4) {
-    if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
-    return Number(v).toFixed(d);
-  }
-
-  function fmtPct(v, d = 2) {
-    if (v === null || v === undefined || Number.isNaN(Number(v))) return '-';
-    return `${(Number(v) * 100).toFixed(d)}%`;
-  }
-
-  function escapeHtml(text) {
-    const s = String(text ?? '');
-    return s
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
-  }
-
-  function translateJobStatus(status) {
-    const text = String(status || '');
-    if (text === 'running') return '运行中';
-    if (text === 'completed') return '已完成';
-    if (text === 'cancelled') return '已取消';
-    if (text === 'cancelling') return '取消中';
-    if (text === 'failed') return '失败';
-    if (text === 'queued') return '排队中';
-    return text || '-';
-  }
-
-  function valueTypeText(value) {
-    const text = String(value || '');
-    if (text === 'int') return '整数';
-    if (text === 'float') return '小数';
-    if (text === 'bool') return '布尔';
-    if (text === 'str' || text === 'string') return '文本';
-    return text || '-';
-  }
-
-  function yesNo(value) {
-    return value ? '是' : '否';
-  }
-
-  function translateReasonKey(key) {
-    const text = String(key || '');
-    if (text === 'dd_exceed') return '回撤超限';
-    if (text === 'trade_too_few') return '交易过少';
-    if (text === 'min_sharpe_non_positive') return '最低夏普非正';
-    if (text === 'invalid_range') return '参数范围无效';
-    if (text === 'invalid_step') return '步长无效';
-    return text || '-';
-  }
-
-  function translateReasonMap(raw) {
-    const out = {};
-    const src = raw && typeof raw === 'object' ? raw : {};
-    for (const [key, value] of Object.entries(src)) {
-      out[translateReasonKey(key)] = value;
-    }
-    return out;
-  }
-
-  function setProgress(percent, label) {
-    const p = Math.max(0, Math.min(Number(percent || 0), 1));
-    progressEl.value = p;
-    progressTextEl.textContent = label || `${(p * 100).toFixed(1)}%`;
-  }
-
-  function updateManualWorkersEnabled() {
-    manualWorkersEl.disabled = parallelModeEl.value !== 'manual';
-  }
-
-  function updateSelectedCount() {
-    const checked = paramTbody.querySelectorAll('input[data-role="enable"]:checked').length;
-    selectedCountEl.textContent = String(checked);
-  }
-
-  function addWindowRow(startDate = '', endDate = '') {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td><input data-role="start" type="date" value="${escapeHtml(startDate)}"></td>
-      <td><input data-role="end" type="date" value="${escapeHtml(endDate)}"></td>
-      <td><button type="button" data-role="remove-window">移除</button></td>
-    `;
-    const startInput = tr.querySelector('input[data-role="start"]');
-    const endInput = tr.querySelector('input[data-role="end"]');
-    const removeBtn = tr.querySelector('button[data-role="remove-window"]');
-    const onWindowChanged = () => {
-      persistCustomWindows(collectWindows());
-    };
-    startInput?.addEventListener('change', onWindowChanged);
-    endInput?.addEventListener('change', onWindowChanged);
-    removeBtn.addEventListener('click', () => {
-      tr.remove();
-      if (!windowTbody.querySelector('tr')) {
-        addWindowRow('', '');
-      }
-      persistCustomWindows(collectWindows());
-    });
-    windowTbody.appendChild(tr);
-  }
-
-  function collectWindows() {
-    const rows = Array.from(windowTbody.querySelectorAll('tr'));
-    const windows = rows.map((row) => {
-      const start = row.querySelector('input[data-role="start"]')?.value || '';
-      const end = row.querySelector('input[data-role="end"]')?.value || '';
-      return { start_date: start, end_date: end };
-    }).filter((x) => x.start_date && x.end_date);
-    return windows;
-  }
-
-  function defaultYearWindows() {
-    const now = new Date();
-    const endYear = Math.max(2020, now.getFullYear() - 1);
-    const rows = [];
-    for (let y = 2020; y <= endYear; y += 1) {
-      rows.push({
-        start_date: `${y}-01-01`,
-        end_date: `${y}-12-31`,
-      });
-    }
-    return rows;
-  }
-
-  function windowKey(x) {
-    return `${x.start_date}|${x.end_date}`;
-  }
-
-  function dedupeWindows(windows) {
-    const out = [];
-    const seen = new Set();
-    for (const item of windows || []) {
-      const start = String(item?.start_date || '').trim();
-      const end = String(item?.end_date || '').trim();
-      if (!start || !end) continue;
-      const k = `${start}|${end}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      out.push({ start_date: start, end_date: end });
-    }
-    return out;
-  }
-
-  function loadSavedCustomWindows() {
-    try {
-      const raw = localStorage.getItem('opt_custom_windows_v1');
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      return dedupeWindows(parsed);
-    } catch (_err) {
-      return [];
-    }
-  }
-
-  function persistCustomWindows(allWindows) {
-    const defaults = dedupeWindows(defaultYearWindows());
-    const defaultSet = new Set(defaults.map(windowKey));
-    const custom = dedupeWindows(allWindows).filter((x) => !defaultSet.has(windowKey(x)));
-    try {
-      localStorage.setItem('opt_custom_windows_v1', JSON.stringify(custom));
-    } catch (_err) {
-      // ignore localStorage errors
-    }
-  }
-
-  function resetWindowsWithDefaults() {
-    windowTbody.innerHTML = '';
-    const defaults = dedupeWindows(defaultYearWindows());
-    const custom = loadSavedCustomWindows();
-    const merged = dedupeWindows([...defaults, ...custom]);
-    for (const item of merged) {
-      addWindowRow(item.start_date, item.end_date);
-    }
-    if (!merged.length) {
-      addWindowRow('', '');
-    }
-  }
-
-  function collectSelectedParams() {
-    const rows = Array.from(paramTbody.querySelectorAll('tr'));
-    const selected = [];
-
-    for (const row of rows) {
-      const enabled = row.querySelector('input[data-role="enable"]')?.checked;
-      if (!enabled) continue;
-      const key = row.getAttribute('data-key') || '';
-      const minVal = Number(row.querySelector('input[data-role="min"]')?.value);
-      const maxVal = Number(row.querySelector('input[data-role="max"]')?.value);
-      const stepVal = Number(row.querySelector('input[data-role="step"]')?.value);
-      if (!key || Number.isNaN(minVal) || Number.isNaN(maxVal) || Number.isNaN(stepVal)) {
-        continue;
-      }
-      selected.push({ key, min: minVal, max: maxVal, step: stepVal });
-    }
-
-    return selected;
-  }
-
-  function renderParams(items) {
-    knownParams = Array.isArray(items) ? items : [];
-    paramTbody.innerHTML = knownParams.map((p) => {
-      const key = String(p.key || '');
-      const current = p.current;
-      const step = p.step_suggest ?? (p.value_type === 'int' ? 1 : 0.1);
-      const minVal = current ?? 0;
-      const maxVal = current ?? 0;
-      return `
-      <tr data-key="${escapeHtml(key)}">
-        <td><input data-role="enable" type="checkbox"></td>
-        <td>${escapeHtml(key)}</td>
-        <td>${escapeHtml(current)}</td>
-        <td><input data-role="min" type="number" value="${escapeHtml(minVal)}" step="any"></td>
-        <td><input data-role="max" type="number" value="${escapeHtml(maxVal)}" step="any"></td>
-        <td><input data-role="step" type="number" value="${escapeHtml(step)}" step="any"></td>
-        <td>${escapeHtml(valueTypeText(p.value_type || 'float'))}</td>
-      </tr>
-      `;
-    }).join('');
-
-    for (const box of paramTbody.querySelectorAll('input[data-role="enable"]')) {
-      box.addEventListener('change', updateSelectedCount);
-    }
-    updateSelectedCount();
-  }
-
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  }
-
-  async function loadParams() {
-    loadParamsBtn.disabled = true;
-    statusEl.textContent = '正在加载可调参数...';
-    try {
-      const resp = await fetch('/backtest/api/optimize/params');
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.detail || '可调参数加载失败');
-      }
-      renderParams(data.items || []);
-      statusEl.textContent = `已加载 ${Number(data.count || 0)} 个可调参数。`;
-    } catch (err) {
-      statusEl.textContent = `加载可调参数失败：${err.message}`;
-    } finally {
-      loadParamsBtn.disabled = false;
-    }
-  }
-
-  function renderSummary(result) {
-    const summary = result?.summary || {};
-    const hardReasons = summary.hard_filter_reason_counts || {};
-    const output = {
-      状态: translateJobStatus(result?.status || '-'),
-      原始组合数: summary.raw_combo_count,
-      有效组合数: summary.valid_combo_count,
-      无效组合数: summary.invalid_combo_count,
-      无效原因: translateReasonMap(summary.invalid_combo_reasons),
-      已评估组合数: summary.evaluated_combo_count,
-      已完成组合数: summary.completed_combo_count,
-      部分完成组合数: summary.partial_combo_count,
-      硬过滤数量: summary.hard_filtered_count,
-      硬过滤原因统计: {
-        回撤超限: hardReasons.dd_exceed || 0,
-        交易过少: hardReasons.trade_too_few || 0,
-        最低夏普非正: hardReasons.min_sharpe_non_positive || 0,
-      },
-      排名结果总数: summary.ranked_rows_total,
-      保留排名结果数: summary.ranked_rows_kept,
-      进程数: summary.workers,
-      启用LOO: yesNo(summary.enable_loo),
-    };
-    summaryEl.textContent = JSON.stringify(output, null, 2);
-  }
-
-  function renderRows(rows) {
-    const list = Array.isArray(rows) ? rows : [];
-    resultTbody.innerHTML = list.map((row) => {
-      const params = row.params || {};
-      const paramText = Object.keys(params)
-        .sort()
-        .map((k) => `${k}=${params[k]}`)
-        .join(', ');
-      const coverage = `${row.completed_windows || 0}/${row.total_windows || 0}`;
-      return `
-      <tr>
-        <td>${escapeHtml(row.rank)}</td>
-        <td>${fmtNum(row.score, 4)}</td>
-        <td>${row.is_partial ? '是' : '否'}</td>
-        <td>${escapeHtml(coverage)}</td>
-        <td>${fmtNum(row.median_sharpe, 4)}</td>
-        <td>${fmtNum(row.min_sharpe, 4)}</td>
-        <td>${fmtNum(row.std_sharpe, 4)}</td>
-        <td>${fmtPct(row.max_drawdown_worst, 2)}</td>
-        <td>${escapeHtml(row.trade_count_total)}</td>
-        <td>${fmtPct(row.win_rate, 2)}</td>
-        <td>${fmtNum(row.profit_factor, 4)}</td>
-        <td>${row.hard_filter_passed ? '是' : '否'}</td>
-        <td>${escapeHtml(paramText)}</td>
-      </tr>
-      `;
-    }).join('');
-  }
-
-  async function fetchResult(jobId) {
-    try {
-      const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(jobId)}/result`);
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.detail || '优化结果加载失败');
-      }
-      renderSummary(data);
-      renderRows(data.rows || []);
-      const rows = data.rows || [];
-      statusEl.textContent = `${translateJobStatus(data.status || 'completed')}，结果行数=${rows.length}`;
-    } catch (err) {
-      statusEl.textContent = `加载结果失败：${err.message}`;
-    }
-  }
-
-  async function pollStatus() {
-    if (!currentJobId) return;
-    try {
-      const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(currentJobId)}/status`);
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.detail || '状态轮询失败');
-      }
-
-      const progress = data.progress || {};
-      const percent = Number(progress.percent || 0);
-      const done = Number(progress.done_units || 0);
-      const total = Number(progress.total_units || 1);
-      setProgress(percent, `${(percent * 100).toFixed(1)}% (${done}/${total})`);
-
-      const st = String(data.status || 'running');
-      statusEl.textContent = `优化${translateJobStatus(st)}，${done}/${total}`;
-
-      if (st === 'completed' || st === 'cancelled' || st === 'failed') {
-        stopPolling();
-        startBtn.disabled = false;
-        cancelBtn.disabled = true;
-        await fetchResult(currentJobId);
-      }
-    } catch (err) {
-      stopPolling();
-      startBtn.disabled = false;
-      cancelBtn.disabled = true;
-      statusEl.textContent = `状态轮询失败：${err.message}`;
-    }
-  }
-
-  async function startOptimization() {
-    const selectedParams = collectSelectedParams();
-    if (!selectedParams.length) {
-      statusEl.textContent = '请至少选择一个参数进行优化。';
-      return;
-    }
-
-    const windows = collectWindows();
-    if (!windows.length) {
-      statusEl.textContent = '请至少提供一个有效日期窗口。';
-      return;
-    }
-    persistCustomWindows(windows);
-
-    const payload = {
-      initial_capital: Number(capitalEl?.value || 200000),
-      windows,
-      selected_params: selectedParams,
-      enable_loo: Boolean(enableLooEl.checked),
-      parallel_mode: String(parallelModeEl.value || 'auto'),
-      manual_workers: parallelModeEl.value === 'manual' ? Number(manualWorkersEl.value || 1) : null,
-    };
-
-    startBtn.disabled = true;
-    cancelBtn.disabled = false;
-    statusEl.textContent = '正在启动优化任务...';
-    summaryEl.textContent = '运行中...';
-    resultTbody.innerHTML = '';
-    setProgress(0, '0%');
-
-    try {
-      const resp = await fetch('/backtest/api/optimize/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-      });
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.detail || '优化启动失败');
-      }
-      currentJobId = String(data.job_id || '');
-      if (!currentJobId) {
-        throw new Error('缺少任务 ID');
-      }
-
-      stopPolling();
-      pollTimer = setInterval(pollStatus, 1500);
-      await pollStatus();
-    } catch (err) {
-      startBtn.disabled = false;
-      cancelBtn.disabled = true;
-      statusEl.textContent = `启动优化失败：${err.message}`;
-    }
-  }
-
-  async function cancelOptimization() {
-    if (!currentJobId) return;
-    cancelBtn.disabled = true;
-    try {
-      const resp = await fetch(`/backtest/api/optimize/${encodeURIComponent(currentJobId)}/cancel`, { method: 'POST' });
-      const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.detail || '取消优化失败');
-      }
-      statusEl.textContent = `已请求取消，状态=${translateJobStatus(data.status || 'cancelling')}`;
-    } catch (err) {
-      statusEl.textContent = `取消优化失败：${err.message}`;
-      cancelBtn.disabled = false;
-    }
-  }
-
-  loadParamsBtn.addEventListener('click', loadParams);
-  addWindowBtn.addEventListener('click', () => {
-    addWindowRow('', '');
-    persistCustomWindows(collectWindows());
-  });
-  startBtn.addEventListener('click', startOptimization);
-  cancelBtn.addEventListener('click', cancelOptimization);
-  parallelModeEl.addEventListener('change', updateManualWorkersEnabled);
-
-  updateManualWorkersEnabled();
-  resetWindowsWithDefaults();
-
-  loadParams();
-})();
-</script>
 {% endblock %}
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
