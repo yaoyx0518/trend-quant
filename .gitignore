@@ -12,6 +12,7 @@ venv/
 .idea/
 
 # Runtime data
+logs/
 logs/*.log
 logs/app/*.log
 logs/calc/*.jsonl

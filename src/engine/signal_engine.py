@@ -31,6 +31,9 @@ class SignalEngine:
         self.portfolio_service = PortfolioService(runtime_store=self.runtime_store)
         self.initial_capital = float(initial_capital)
 
+    def close(self) -> None:
+        self.data_service.close()
+
     @staticmethod
     def _load_yaml(path: str) -> dict:
         with Path(path).open("r", encoding="utf-8") as f:

@@ -4,9 +4,7 @@
   host: 127.0.0.1
   port: 8000
   data_provider_priority:
-    - efinance
-    - akshare
-    - yahoo
+    - tickflow
   polling_times:
     - "10:00"
     - "10:30"

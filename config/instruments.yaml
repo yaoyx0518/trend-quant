@@ -99,3 +99,8 @@ instruments:
   enabled: true
   risk_budget_pct: 0.01
   stop_atr_mul: 1.5
+- symbol: 518850.SS
+  name: 黄金ETF华夏
+  enabled: true
+  risk_budget_pct: 0.01
+  stop_atr_mul: 1.5

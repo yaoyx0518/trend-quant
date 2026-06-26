@@ -16,7 +16,8 @@ dependencies = [
   "email-validator>=2.2.0",
   "httpx>=0.28.0",
   "efinance==0.5.5.2",
-  "akshare>=1.17.0"
+  "akshare>=1.17.0",
+  "tickflow[all]==0.1.24"
 ]
 
 [build-system]

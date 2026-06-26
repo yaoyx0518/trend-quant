@@ -65,7 +65,12 @@ def load_settings(config_path: Path | None = None) -> Settings:
             timezone=str(app_raw.get("timezone", "Asia/Shanghai")),
             host=str(app_raw.get("host", "127.0.0.1")),
             port=int(app_raw.get("port", 8000)),
-            data_provider_priority=list(app_raw.get("data_provider_priority", ["efinance", "akshare"])),
+            data_provider_priority=list(
+                app_raw.get(
+                    "data_provider_priority",
+                    ["tickflow"],
+                )
+            ),
             polling_times=list(app_raw.get("polling_times", [])),
             final_signal_time=str(app_raw.get("final_signal_time", "14:45")),
             update_time_after_close=str(app_raw.get("update_time_after_close", "15:30")),

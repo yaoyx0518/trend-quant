@@ -76,6 +76,7 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         scheduler_manager.shutdown()
+        signal_engine.close()
         logger.info("Application stopped")
 
 

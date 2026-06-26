@@ -56,10 +56,12 @@ src/
 
   data/
     provider_base.py         # IDataProvider 协议
-    provider_efinance.py     # 主数据源
-    provider_akshare.py      # 备数据源
+    provider_tickflow.py     # 当前唯一启用数据源
+    provider_efinance.py     # 保留代码，默认不启用
+    provider_akshare.py      # 保留代码，默认不启用
+    provider_yahoo.py        # 保留代码，默认不启用
     provider_utils.py        # 字段归一化工具
-    service.py               # DataService（优先级/降级/更新编排）
+    service.py               # DataService（TickFlow-only，失败即报错）
     storage/
       db.py                  # SQLite 数据库封装
       market_store.py        # SQLite 行情存取
@@ -84,7 +86,7 @@ src/
 
   notify/
     feishu_notifier.py       # 通知桩（当前写日志）
-    email_notifier.py        # 通知桩（当前写日志）
+    email_notifier.py        # SMTP 邮件通知
 
   audit/
     app_logger.py            # 应用日志
@@ -119,11 +121,15 @@ logs/
     - `fetch_latest_quote`
     - `fetch_trading_calendar`
 
-- `EfinanceProvider` / `AkshareProvider`
+- `TickFlowProvider` / `EfinanceProvider` / `AkshareProvider` / `YahooProvider`
   - 实现同一接口，字段标准化后返回统一 OHLCV 结构。
+  - 当前生产路径只启用 TickFlow；其它 provider 代码仅保留，不参与自动降级。
+  - TickFlow 默认使用无需 API Key 的免费服务获取历史日 K。
+  - TickFlow 实时行情需要设置环境变量 `TICKFLOW_API_KEY`。
+  - TickFlow 获取失败或返回空数据时直接抛错，阻塞流程，不再尝试 Yahoo/efinance/akshare。
 
 - `DataService` (`src/data/service.py`)
-  - 按 `config/app.yaml` 中 `data_provider_priority` 进行数据源优先级调用与降级。
+  - 固定使用 TickFlow 获取数据。
   - 负责增量更新 ETF 池历史数据到 SQLite。
 
 - `Database` (`src/data/storage/db.py`)
@@ -178,6 +184,8 @@ logs/
 
 - `SchedulerManager` (`src/core/scheduler.py`)
   - 注册三类任务：`poll`、`final_signal(14:45)`、`daily_update(15:30)`。
+  - 使用 APScheduler cron trigger，适合在 Windows / Linux 上以常驻服务方式运行。
+  - 本地 Windows 建议用 Task Scheduler 只负责拉起/守护应用；Linux/云服务器建议用 systemd/supervisor 守护应用进程。
 
 - `app.main` (`src/app/main.py`)
   - 应用生命周期中初始化 `SignalEngine` 与调度器。
@@ -272,7 +280,7 @@ logs/
 ### 8.1 `config/app.yaml`
 
 - 运行参数：host/port/timezone
-- 数据源优先级：`data_provider_priority`
+- 数据源配置：`data_provider_priority` 当前只应配置 `tickflow`
 - 调度时点：`polling_times`、`final_signal_time`、`update_time_after_close`
 - 重试参数：行情拉取与通知重试
 - 交易整手：`lot_size`
@@ -310,7 +318,7 @@ logs/
 
 1. 新建 `provider_xxx.py` 实现 `IDataProvider`
 2. 在 `DataService.providers` 注册
-3. 在 `config/app.yaml` 配置优先级
+3. 明确是否允许降级；当前生产要求是 TickFlow-only，新增 provider 不应默认进入降级链路
 
 ### 10.2 新增策略
 
@@ -325,15 +333,29 @@ logs/
 2. 在信号触发链路接入分级发送与失败重试
 3. 将发送结果写入审计日志
 
+### 10.4 邮件通知配置
+
+当前邮件通知使用 `src/notify/email_notifier.py`，从环境变量读取 SMTP 配置：
+
+- `EMAIL_SMTP_HOST`
+- `EMAIL_SMTP_PORT`
+- `EMAIL_SMTP_USERNAME`
+- `EMAIL_SMTP_PASSWORD`
+- `EMAIL_FROM`
+- `EMAIL_TO`
+- `EMAIL_SMTP_USE_SSL`（可选，默认 `true`）
+
+163 邮箱建议使用 `smtp.163.com:465`，密码使用客户端授权码，不使用网页登录密码。
+
 ## 11. 当前已知限制
 
-- 通知仍为日志桩，未接入真实飞书/邮件发送。
+- 邮件通知能力已接入；具体盘中/收盘报告内容尚未定义。
 - 交易日历在主源不可用时可能退化为工作日判断。
 - 当前仅单账户、人工执行，不含自动下单。
 
 ## 12. 开发建议顺序
 
-1. 真实通知接入（飞书优先）
+1. 定义盘中/收盘邮件报告内容
 2. 盘前/盘后通知任务
 3. 多策略框架（为“行业 ETF TopN 动量”预留）
 4. 日志检索与配置页增强

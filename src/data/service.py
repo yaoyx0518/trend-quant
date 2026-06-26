@@ -1,28 +1,34 @@
 ﻿from __future__ import annotations
 
 from datetime import date, datetime, timedelta
-from pathlib import Path
 
 import pandas as pd
 
 from audit.app_logger import get_logger
-from data.provider_akshare import AkshareProvider
-from data.provider_efinance import EfinanceProvider
-from data.provider_yahoo import YahooProvider
+from data.provider_tickflow import TickFlowProvider
 from data.storage.market_store import MarketStore
 from data.storage.runtime_store import RuntimeStore
 
 logger = get_logger(__name__)
 
 
+class DataProviderError(RuntimeError):
+    """Raised when the configured market data provider cannot return usable data."""
+
+
 class DataService:
     def __init__(self, provider_priority: list[str] | None = None) -> None:
         self.providers = {
-            "efinance": EfinanceProvider(),
-            "akshare": AkshareProvider(),
-            "yahoo": YahooProvider(),
+            "tickflow": TickFlowProvider(),
         }
-        self.provider_priority = provider_priority or ["efinance", "akshare", "yahoo"]
+        requested = provider_priority or ["tickflow"]
+        ignored = [name for name in requested if name != "tickflow"]
+        if ignored:
+            logger.warning(
+                "Ignoring non-TickFlow data providers %s; TickFlow is the only active provider",
+                ignored,
+            )
+        self.provider_priority = ["tickflow"]
         self.market_store = MarketStore()
         self.runtime_store = RuntimeStore()
 
@@ -33,41 +39,55 @@ class DataService:
                 yield name, provider
 
     def fetch_daily_history(self, symbol: str, start: date, end: date, adjust: str = "qfq") -> pd.DataFrame:
-        for name, provider in self._ordered_providers():
-            data = provider.fetch_daily_history(symbol, start, end, adjust)
-            if not data.empty:
-                data["provider"] = name
-                return data
-        return pd.DataFrame()
+        name, provider = self._tickflow_provider()
+        data = provider.fetch_daily_history(symbol, start, end, adjust)
+        if data.empty:
+            raise DataProviderError(
+                f"TickFlow returned no daily history for {symbol} from {start} to {end}"
+            )
+        data["provider"] = name
+        return data
 
     def fetch_minute_history(self, symbol: str, period: str = "30", count: int = 48, adjust: str = "qfq") -> pd.DataFrame:
-        for name, provider in self._ordered_providers():
-            data = provider.fetch_minute_history(symbol, period, count, adjust)
-            if not data.empty:
-                data["provider"] = name
-                return data
-        return pd.DataFrame()
+        name, provider = self._tickflow_provider()
+        data = provider.fetch_minute_history(symbol, period, count, adjust)
+        if data.empty:
+            raise DataProviderError(
+                f"TickFlow returned no {period} minute history for {symbol}, count={count}"
+            )
+        data["provider"] = name
+        return data
 
     def fetch_latest_quote(self, symbol: str) -> dict:
-        for name, provider in self._ordered_providers():
-            quote = provider.fetch_latest_quote(symbol)
-            if quote.get("price") is not None:
-                quote["provider"] = name
-                return quote
-        return {"symbol": symbol, "price": None, "ts": None, "provider": None}
+        name, provider = self._tickflow_provider()
+        quote = provider.fetch_latest_quote(symbol)
+        if quote.get("price") is None:
+            raise DataProviderError(f"TickFlow returned no latest quote price for {symbol}")
+        quote["provider"] = name
+        return quote
 
     def fetch_instrument_name(self, symbol: str) -> dict:
-        for name, provider in self._ordered_providers():
-            quote = provider.fetch_latest_quote(symbol)
-            instrument_name = str(quote.get("name", "") or "").strip()
+        name, provider = self._tickflow_provider()
+        provider_name_fetcher = getattr(provider, "fetch_instrument_name", None)
+        if callable(provider_name_fetcher):
+            instrument_name = str(provider_name_fetcher(symbol) or "").strip()
             if instrument_name:
                 return {
                     "symbol": symbol,
                     "name": instrument_name,
                     "provider": name,
-                    "ts": quote.get("ts"),
+                    "ts": datetime.now().isoformat(),
                 }
-        return {"symbol": symbol, "name": None, "provider": None, "ts": None}
+        quote = provider.fetch_latest_quote(symbol)
+        instrument_name = str(quote.get("name", "") or "").strip()
+        if instrument_name:
+            return {
+                "symbol": symbol,
+                "name": instrument_name,
+                "provider": name,
+                "ts": quote.get("ts"),
+            }
+        raise DataProviderError(f"TickFlow returned no instrument name for {symbol}")
 
     def is_trading_day(self, day: date) -> bool:
         # Try provider calendars first.
@@ -192,3 +212,15 @@ class DataService:
         day = end_date.isoformat()
         self.runtime_store.write_json(f"advice/data_update_{day}.json", payload)
         return payload
+
+    def close(self) -> None:
+        for provider in self.providers.values():
+            close = getattr(provider, "close", None)
+            if callable(close):
+                close()
+
+    def _tickflow_provider(self):
+        provider = self.providers.get("tickflow")
+        if provider is None:
+            raise DataProviderError("TickFlow provider is not configured")
+        return "tickflow", provider
