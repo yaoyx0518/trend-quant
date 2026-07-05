@@ -3,6 +3,7 @@ from app.routers import (
     config,
     instruments,
     logs,
+    market_view,
     overview,
     parameter_optimization,
     strategy_history,
@@ -17,5 +18,6 @@ __all__ = [
     "trades",
     "logs",
     "instruments",
+    "market_view",
     "strategy_history",
 ]

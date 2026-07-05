@@ -124,6 +124,38 @@ class Database:
                     PRIMARY KEY (symbol, time)
                 );
                 CREATE INDEX IF NOT EXISTS idx_market_data_symbol_time ON market_data(symbol, time);
+
+                CREATE TABLE IF NOT EXISTS market_data_raw (
+                    symbol TEXT NOT NULL,
+                    time TEXT NOT NULL,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume REAL,
+                    amount REAL,
+                    provider TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (symbol, time)
+                );
+                CREATE INDEX IF NOT EXISTS idx_market_data_raw_symbol_time
+                    ON market_data_raw(symbol, time);
+
+                CREATE TABLE IF NOT EXISTS market_data_qfq (
+                    symbol TEXT NOT NULL,
+                    time TEXT NOT NULL,
+                    open REAL,
+                    high REAL,
+                    low REAL,
+                    close REAL,
+                    volume REAL,
+                    amount REAL,
+                    provider TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (symbol, time)
+                );
+                CREATE INDEX IF NOT EXISTS idx_market_data_qfq_symbol_time
+                    ON market_data_qfq(symbol, time);
                 """
             )
 
@@ -133,6 +165,20 @@ class Database:
                 conn.execute("ALTER TABLE backtests ADD COLUMN is_favorite INTEGER DEFAULT 0")
             except sqlite3.OperationalError:
                 pass
+            qfq_rows = conn.execute("SELECT COUNT(*) AS n FROM market_data_qfq").fetchone()
+            legacy_rows = conn.execute("SELECT COUNT(*) AS n FROM market_data").fetchone()
+            if (
+                qfq_rows is not None
+                and legacy_rows is not None
+                and int(qfq_rows["n"] or 0) == 0
+                and int(legacy_rows["n"] or 0) > 0
+            ):
+                conn.execute(
+                    """INSERT OR IGNORE INTO market_data_qfq
+                       (symbol, time, open, high, low, close, volume, amount, provider)
+                       SELECT symbol, time, open, high, low, close, volume, amount, provider
+                       FROM market_data"""
+                )
 
     # ------------------------------------------------------------------
     # manual_trades
@@ -596,9 +642,21 @@ class Database:
     # ------------------------------------------------------------------
     # market_data
     # ------------------------------------------------------------------
-    def save_market_data(self, symbol: str, df) -> None:
+    @staticmethod
+    def _market_table(price_mode: str = "qfq") -> str:
+        value = str(price_mode or "qfq").strip().lower()
+        if value in {"qfq", "forward", "forward_additive"}:
+            return "market_data_qfq"
+        if value in {"raw", "none", "unadjusted"}:
+            return "market_data_raw"
+        if value in {"legacy", "market_data"}:
+            return "market_data"
+        raise ValueError(f"unsupported market data price_mode: {price_mode}")
+
+    def save_market_data(self, symbol: str, df, price_mode: str = "qfq") -> None:
         if df.empty:
             return
+        table = self._market_table(price_mode)
         records: list[tuple] = []
         for _, row in df.iterrows():
             records.append(
@@ -616,19 +674,20 @@ class Database:
             )
         with self._connect() as conn:
             conn.executemany(
-                """INSERT OR REPLACE INTO market_data
+                f"""INSERT OR REPLACE INTO {table}
                    (symbol, time, open, high, low, close, volume, amount, provider)
                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 records,
             )
 
-    def load_market_data(self, symbol: str):
+    def load_market_data(self, symbol: str, price_mode: str = "qfq"):
         import pandas as pd
 
+        table = self._market_table(price_mode)
         with self._connect() as conn:
             rows = conn.execute(
-                """SELECT time, open, high, low, close, volume, amount, symbol, provider
-                   FROM market_data WHERE symbol = ? ORDER BY time""",
+                f"""SELECT time, open, high, low, close, volume, amount, symbol, provider
+                   FROM {table} WHERE symbol = ? ORDER BY time""",
                 (symbol,),
             ).fetchall()
         if not rows:
@@ -640,23 +699,31 @@ class Database:
                 df[col] = pd.to_numeric(df[col], errors="coerce")
         return df
 
-    def list_market_symbols(self) -> list[str]:
+    def list_market_symbols(self, price_mode: str = "qfq") -> list[str]:
+        table = self._market_table(price_mode)
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT DISTINCT symbol FROM market_data ORDER BY symbol"
+                f"SELECT DISTINCT symbol FROM {table} ORDER BY symbol"
             ).fetchall()
             return [r["symbol"] for r in rows]
 
-    def get_market_data_summary(self, symbol: str) -> dict:
+    def get_market_data_summary(self, symbol: str, price_mode: str = "qfq") -> dict:
+        table = self._market_table(price_mode)
         with self._connect() as conn:
             row = conn.execute(
-                """SELECT COUNT(*) AS rows, MIN(time) AS start, MAX(time) AS end
-                   FROM market_data WHERE symbol = ?""",
+                f"""SELECT COUNT(*) AS rows, MIN(time) AS start, MAX(time) AS end
+                   FROM {table} WHERE symbol = ?""",
                 (symbol,),
             ).fetchone()
         if row is None or row["rows"] == 0:
             return {"rows": 0, "start": None, "end": None}
         return {"rows": row["rows"], "start": row["start"], "end": row["end"]}
+
+    def clear_market_data(self, price_mode: str = "qfq") -> int:
+        table = self._market_table(price_mode)
+        with self._connect() as conn:
+            cur = conn.execute(f"DELETE FROM {table}")
+            return int(cur.rowcount or 0)
 
     def migrate_market_data_from_parquet(self, base_dir: str = "data/market/etf") -> int:
         import pandas as pd
@@ -666,7 +733,7 @@ class Database:
         for p in Path(base_dir).glob("*.parquet"):
             df = pd.read_parquet(p)
             if not df.empty:
-                self.save_market_data(p.stem, df)
+                self.save_market_data(p.stem, df, price_mode="qfq")
                 count += len(df)
         return count
 

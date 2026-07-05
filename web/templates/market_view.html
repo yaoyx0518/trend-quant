@@ -1,0 +1,525 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-panel market-view-page">
+  <h2>标的查看</h2>
+
+  <div class="bt-form-row market-toolbar">
+    <label>标的
+      <input id="mvSymbolSearch" type="search" list="mvSymbolOptions" placeholder="输入代码或名称搜索">
+      <datalist id="mvSymbolOptions"></datalist>
+    </label>
+    <label>代码
+      <input id="mvSymbolInput" type="text" placeholder="如 518850 或 518850.SS">
+    </label>
+    <label>开始
+      <input id="mvStartDate" type="date">
+    </label>
+    <label>结束
+      <input id="mvEndDate" type="date">
+    </label>
+    <button id="mvRefreshBtn" type="button">刷新</button>
+  </div>
+
+  <div class="market-toolbar market-toolbar-secondary">
+    <div class="market-control-group">
+      <span>主图</span>
+      <label><input name="mvMainMode" type="radio" value="ma" checked> MA</label>
+      <label><input name="mvMainMode" type="radio" value="boll"> BOLL</label>
+    </div>
+    <div class="market-control-group" id="mvMaControls">
+      <span>MA周期</span>
+      <label><input type="checkbox" value="5" checked> 5</label>
+      <label><input type="checkbox" value="10" checked> 10</label>
+      <label><input type="checkbox" value="20" checked> 20</label>
+      <label><input type="checkbox" value="60" checked> 60</label>
+      <label><input type="checkbox" value="120"> 120</label>
+      <label><input type="checkbox" value="200"> 200</label>
+    </div>
+    <div class="market-control-group" id="mvSubControls">
+      <span>副图</span>
+      <label><input type="checkbox" value="volume" checked> VOL</label>
+      <label><input type="checkbox" value="macd" checked> MACD</label>
+      <label><input type="checkbox" value="bias"> BIAS</label>
+    </div>
+  </div>
+
+  <div class="viz-panel market-chart-panel">
+    <div class="market-chart-head">
+      <h3 id="mvChartTitle">日 K</h3>
+      <div id="mvRangeMeta" class="market-range-meta"></div>
+    </div>
+    <div id="mvPriceChart" class="chart-kline market-price-chart"></div>
+    <div id="mvVolumeWrap" class="market-subchart-wrap">
+      <div class="market-subchart-title">VOL</div>
+      <div id="mvVolumeChart" class="chart-md market-subchart"></div>
+    </div>
+    <div id="mvMacdWrap" class="market-subchart-wrap">
+      <div class="market-subchart-title">MACD</div>
+      <div id="mvMacdChart" class="chart-md market-subchart"></div>
+    </div>
+    <div id="mvBiasWrap" class="market-subchart-wrap" style="display:none;">
+      <div class="market-subchart-title">BIAS</div>
+      <div id="mvBiasChart" class="chart-md market-subchart"></div>
+    </div>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+(() => {
+  const symbolSearchEl = document.getElementById('mvSymbolSearch');
+  const symbolOptionsEl = document.getElementById('mvSymbolOptions');
+  const symbolInputEl = document.getElementById('mvSymbolInput');
+  const startDateEl = document.getElementById('mvStartDate');
+  const endDateEl = document.getElementById('mvEndDate');
+  const refreshBtnEl = document.getElementById('mvRefreshBtn');
+  const chartTitleEl = document.getElementById('mvChartTitle');
+  const rangeMetaEl = document.getElementById('mvRangeMeta');
+  const maControlsEl = document.getElementById('mvMaControls');
+  const subControlsEl = document.getElementById('mvSubControls');
+  const volumeWrapEl = document.getElementById('mvVolumeWrap');
+  const macdWrapEl = document.getElementById('mvMacdWrap');
+  const biasWrapEl = document.getElementById('mvBiasWrap');
+
+  const priceChart = echarts.init(document.getElementById('mvPriceChart'));
+  const volumeChart = echarts.init(document.getElementById('mvVolumeChart'));
+  const macdChart = echarts.init(document.getElementById('mvMacdChart'));
+  const biasChart = echarts.init(document.getElementById('mvBiasChart'));
+  const charts = [priceChart, volumeChart, macdChart, biasChart];
+  for (const chart of charts) chart.group = 'market-view-time';
+  echarts.connect('market-view-time');
+
+  const maColors = Object.freeze({
+    5: '#7c3aed',
+    10: '#0d7a71',
+    20: '#c7834c',
+    30: '#2563eb',
+    60: '#b42318',
+    120: '#475569',
+    200: '#111827',
+  });
+  let latestPayload = null;
+  let currentCandles = [];
+  let currentZoom = null;
+  let allSymbols = [];
+
+  function esc(v) {
+    return String(v ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function num(v, digits = 3) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '-';
+    return n.toFixed(digits);
+  }
+
+  function compact(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '-';
+    if (Math.abs(n) >= 100000000) return `${(n / 100000000).toFixed(2)}亿`;
+    if (Math.abs(n) >= 10000) return `${(n / 10000).toFixed(2)}万`;
+    return n.toFixed(0);
+  }
+
+  function checkedMainMode() {
+    return document.querySelector('input[name="mvMainMode"]:checked')?.value || 'ma';
+  }
+
+  function checkedMaPeriods() {
+    return Array.from(maControlsEl.querySelectorAll('input[type="checkbox"]:checked'))
+      .map((el) => String(el.value || '').trim())
+      .filter(Boolean);
+  }
+
+  function checkedSubcharts() {
+    return new Set(Array.from(subControlsEl.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value));
+  }
+
+  function buildDataZoom(start, end) {
+    return [
+      { type: 'inside', xAxisIndex: 0, start, end, throttle: 30 },
+      { type: 'slider', xAxisIndex: 0, start, end, height: 24, bottom: 4 },
+    ];
+  }
+
+  function sixMonthZoom(dates) {
+    if (!Array.isArray(dates) || dates.length <= 1) return { start: 0, end: 100 };
+    const last = new Date(dates[dates.length - 1]);
+    if (Number.isNaN(last.getTime())) return { start: 0, end: 100 };
+    const cutoff = new Date(last);
+    cutoff.setMonth(cutoff.getMonth() - 6);
+    let idx = dates.findIndex((d) => {
+      const day = new Date(d);
+      return !Number.isNaN(day.getTime()) && day >= cutoff;
+    });
+    if (idx < 0) idx = 0;
+    return {
+      start: Math.max(0, Math.min(100, (idx / (dates.length - 1)) * 100)),
+      end: 100,
+    };
+  }
+
+  function zoomFromEvent(params) {
+    const dz = (params && params.batch && params.batch[0]) || params || {};
+    const opt = priceChart.getOption() || {};
+    const optDz = (opt.dataZoom && opt.dataZoom[0]) || {};
+    return {
+      start: Number.isFinite(dz.start) ? dz.start : (Number.isFinite(optDz.start) ? optDz.start : 0),
+      end: Number.isFinite(dz.end) ? dz.end : (Number.isFinite(optDz.end) ? optDz.end : 100),
+    };
+  }
+
+  function visibleIndexRange(length, zoom) {
+    if (!length) return [0, 0];
+    const start = Number.isFinite(zoom?.start) ? zoom.start : 0;
+    const end = Number.isFinite(zoom?.end) ? zoom.end : 100;
+    const s = Math.max(0, Math.min(length - 1, Math.floor((start / 100) * (length - 1))));
+    const e = Math.max(s, Math.min(length - 1, Math.ceil((end / 100) * (length - 1))));
+    return [s, e];
+  }
+
+  function computePriceRange(candles, zoom) {
+    const [start, end] = visibleIndexRange(candles.length, zoom);
+    let low = Infinity;
+    let high = -Infinity;
+    for (let i = start; i <= end; i += 1) {
+      const c = candles[i] || [];
+      const l = Number(c[2]);
+      const h = Number(c[3]);
+      if (Number.isFinite(l)) low = Math.min(low, l);
+      if (Number.isFinite(h)) high = Math.max(high, h);
+    }
+    if (!Number.isFinite(low) || !Number.isFinite(high)) return { min: null, max: null };
+    const pad = high > low ? (high - low) * 0.08 : Math.max(high * 0.02, 0.01);
+    return { min: Math.max(0.01, low - pad), max: high + pad };
+  }
+
+  function updatePriceYAxis(params) {
+    if (!currentCandles.length) return;
+    currentZoom = zoomFromEvent(params);
+    const range = computePriceRange(currentCandles, currentZoom);
+    priceChart.setOption({ yAxis: { min: range.min, max: range.max } }, false);
+  }
+
+  function mainOverlaySeries(indicators) {
+    const mode = checkedMainMode();
+    if (mode === 'boll') {
+      return [
+        { name: 'BOLL上轨', type: 'line', data: indicators.boll?.upper || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#b42318' } },
+        { name: 'BOLL中轨', type: 'line', data: indicators.boll?.mid || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#c7834c' } },
+        { name: 'BOLL下轨', type: 'line', data: indicators.boll?.lower || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#0d7a71' } },
+      ];
+    }
+    return checkedMaPeriods().map((period) => ({
+      name: `MA${period}`,
+      type: 'line',
+      data: indicators.ma?.[period] || [],
+      symbol: 'none',
+      smooth: true,
+      lineStyle: { width: 1.1, color: maColors[period] || '#475569' },
+    }));
+  }
+
+  function renderPrice(payload, zoom) {
+    const dates = payload.dates || [];
+    const candles = payload.candles || [];
+    const indicators = payload.indicators || {};
+    currentCandles = candles;
+    const overlays = mainOverlaySeries(indicators);
+    const range = computePriceRange(candles, zoom);
+    priceChart.setOption({
+      animation: false,
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        formatter: (params) => {
+          if (!params || !params.length) return '-';
+          const lines = [String(params[0].axisValue || '')];
+          for (const p of params) {
+            if (p.seriesType === 'candlestick') {
+              const raw = Array.isArray(p.data) ? p.data : [];
+              lines.push(`开：${num(raw[0])}`);
+              lines.push(`收：${num(raw[1])}`);
+              lines.push(`低：${num(raw[2])}`);
+              lines.push(`高：${num(raw[3])}`);
+            } else if (p.seriesType === 'line') {
+              lines.push(`${p.seriesName}：${num(p.value)}`);
+            }
+          }
+          return lines.join('<br/>');
+        },
+      },
+      legend: { data: ['K', ...overlays.map((item) => item.name)], top: 4 },
+      grid: { left: 62, right: 28, top: 42, bottom: 54 },
+      dataZoom: buildDataZoom(zoom.start, zoom.end),
+      xAxis: { type: 'category', data: dates, boundaryGap: false, axisLine: { onZero: false } },
+      yAxis: { type: 'value', scale: true, min: range.min, max: range.max, axisLabel: { formatter: (v) => num(v, 2) } },
+      series: [
+        {
+          name: 'K',
+          type: 'candlestick',
+          data: candles,
+          itemStyle: {
+            color: '#d14343',
+            color0: '#00a76f',
+            borderColor: '#d14343',
+            borderColor0: '#00a76f',
+          },
+        },
+        ...overlays,
+      ],
+    }, true);
+  }
+
+  function renderVolume(payload, zoom) {
+    const dates = payload.dates || [];
+    const candles = payload.candles || [];
+    const volumes = payload.volumes || [];
+    const indicators = payload.indicators || {};
+    const data = volumes.map((v, idx) => ({
+      value: v,
+      itemStyle: { color: Number(candles[idx]?.[1]) >= Number(candles[idx]?.[0]) ? '#d14343' : '#00a76f' },
+    }));
+    volumeChart.setOption({
+      animation: false,
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: compact },
+      legend: { data: ['成交量', 'VOLMA5', 'VOLMA10'], top: 2 },
+      grid: { left: 62, right: 28, top: 36, bottom: 42 },
+      dataZoom: buildDataZoom(zoom.start, zoom.end),
+      xAxis: { type: 'category', data: dates, boundaryGap: false },
+      yAxis: { type: 'value', scale: true, axisLabel: { formatter: compact } },
+      series: [
+        { name: '成交量', type: 'bar', data, barMaxWidth: 8 },
+        { name: 'VOLMA5', type: 'line', data: indicators.volume_ma?.['5'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1, color: '#7c3aed' } },
+        { name: 'VOLMA10', type: 'line', data: indicators.volume_ma?.['10'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1, color: '#c7834c' } },
+      ],
+    }, true);
+  }
+
+  function renderMacd(payload, zoom) {
+    const dates = payload.dates || [];
+    const macd = payload.indicators?.macd || {};
+    const bars = (macd.bar || []).map((v) => ({
+      value: v,
+      itemStyle: { color: Number(v) >= 0 ? '#d14343' : '#00a76f' },
+    }));
+    macdChart.setOption({
+      animation: false,
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: (v) => num(v, 4) },
+      legend: { data: ['MACD', 'DIF', 'DEA'], top: 2 },
+      grid: { left: 62, right: 28, top: 36, bottom: 42 },
+      dataZoom: buildDataZoom(zoom.start, zoom.end),
+      xAxis: { type: 'category', data: dates, boundaryGap: false },
+      yAxis: { type: 'value', scale: true },
+      series: [
+        { name: 'MACD', type: 'bar', data: bars, barMaxWidth: 8 },
+        { name: 'DIF', type: 'line', data: macd.dif || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#2563eb' } },
+        { name: 'DEA', type: 'line', data: macd.dea || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#c7834c' } },
+      ],
+    }, true);
+  }
+
+  function renderBias(payload, zoom) {
+    const dates = payload.dates || [];
+    const bias = payload.indicators?.bias || {};
+    biasChart.setOption({
+      animation: false,
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: (v) => `${num(v, 2)}%` },
+      legend: { data: ['BIAS6', 'BIAS12', 'BIAS24'], top: 2 },
+      grid: { left: 62, right: 28, top: 36, bottom: 42 },
+      dataZoom: buildDataZoom(zoom.start, zoom.end),
+      xAxis: { type: 'category', data: dates, boundaryGap: false },
+      yAxis: { type: 'value', scale: true, axisLabel: { formatter: (v) => `${num(v, 1)}%` } },
+      series: [
+        { name: 'BIAS6', type: 'line', data: bias['6'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#7c3aed' } },
+        { name: 'BIAS12', type: 'line', data: bias['12'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#0d7a71' } },
+        { name: 'BIAS24', type: 'line', data: bias['24'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#c7834c' } },
+      ],
+    }, true);
+  }
+
+  function applySubchartVisibility() {
+    const selected = checkedSubcharts();
+    volumeWrapEl.style.display = selected.has('volume') ? '' : 'none';
+    macdWrapEl.style.display = selected.has('macd') ? '' : 'none';
+    biasWrapEl.style.display = selected.has('bias') ? '' : 'none';
+    setTimeout(() => charts.forEach((chart) => chart.resize()), 0);
+  }
+
+  function renderAll(payload, preserveZoom = false) {
+    latestPayload = payload;
+    const dates = payload.dates || [];
+    const zoom = preserveZoom && currentZoom ? currentZoom : sixMonthZoom(dates);
+    currentZoom = zoom;
+    chartTitleEl.textContent = `${payload.display_name || payload.symbol || ''} 日 K`;
+    rangeMetaEl.textContent = `${payload.meta?.start || '-'} ~ ${payload.meta?.end || '-'} | ${Number(payload.meta?.rows || 0).toLocaleString()} 根`;
+    renderPrice(payload, zoom);
+    renderVolume(payload, zoom);
+    renderMacd(payload, zoom);
+    renderBias(payload, zoom);
+    applySubchartVisibility();
+  }
+
+  function normalizeSearchText(value) {
+    return String(value || '').trim().toLowerCase();
+  }
+
+  function symbolOptionLabel(item) {
+    const display = String(item?.display_name || item?.name || item?.symbol || '').trim();
+    const symbol = String(item?.symbol || '').trim();
+    return display && display !== symbol ? `${display} ${symbol}` : symbol;
+  }
+
+  function symbolSearchHaystack(item) {
+    return [
+      item?.symbol,
+      item?.name,
+      item?.display_name,
+      symbolOptionLabel(item),
+    ].map(normalizeSearchText).join(' ');
+  }
+
+  function renderSymbolOptions(keyword = '') {
+    const q = normalizeSearchText(keyword);
+    const items = (allSymbols || [])
+      .filter((item) => !q || symbolSearchHaystack(item).includes(q))
+      .slice(0, 80);
+    symbolOptionsEl.innerHTML = items
+      .map((item) => `<option value="${esc(symbolOptionLabel(item))}"></option>`)
+      .join('');
+  }
+
+  function findSymbolByInput(rawValue) {
+    const q = normalizeSearchText(rawValue);
+    if (!q) return null;
+    const exact = allSymbols.find((item) => {
+      const values = [
+        item?.symbol,
+        item?.name,
+        item?.display_name,
+        symbolOptionLabel(item),
+      ].map(normalizeSearchText);
+      return values.includes(q);
+    });
+    if (exact) return exact;
+    return allSymbols.find((item) => symbolSearchHaystack(item).includes(q)) || null;
+  }
+
+  function applySelectedSymbol(item) {
+    if (!item) return;
+    symbolSearchEl.value = symbolOptionLabel(item);
+    symbolInputEl.value = item.symbol || '';
+    renderSymbolOptions(symbolSearchEl.value);
+  }
+
+  async function loadSymbols() {
+    const resp = await fetch('/market-view/api/symbols');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '标的列表加载失败');
+    const items = data.items || [];
+    allSymbols = items;
+    renderSymbolOptions();
+    if (!items.length) {
+      chartTitleEl.textContent = '没有找到本地日 K 数据';
+      rangeMetaEl.textContent = '';
+      return;
+    }
+    applySelectedSymbol(items[0]);
+    await loadDaily(items[0].symbol);
+  }
+
+  function selectedSymbol() {
+    const matched = findSymbolByInput(symbolSearchEl.value);
+    return String(matched?.symbol || symbolInputEl.value || '').trim();
+  }
+
+  async function loadDaily(symbol) {
+    const target = String(symbol || selectedSymbol()).trim();
+    if (!target) {
+      chartTitleEl.textContent = '请输入标的代码或名称';
+      rangeMetaEl.textContent = '';
+      return;
+    }
+    refreshBtnEl.disabled = true;
+    try {
+      const params = new URLSearchParams();
+      params.set('symbol', target);
+      if (startDateEl.value) params.set('start_date', startDateEl.value);
+      if (endDateEl.value) params.set('end_date', endDateEl.value);
+      const resp = await fetch(`/market-view/api/daily?${params.toString()}`);
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '日 K 加载失败');
+      const matched = allSymbols.find((item) => item.symbol === data.symbol) || {
+        symbol: data.symbol,
+        name: data.name,
+        display_name: data.display_name,
+      };
+      applySelectedSymbol(matched);
+      renderAll(data, false);
+    } catch (err) {
+      chartTitleEl.textContent = `加载失败：${err.message}`;
+      rangeMetaEl.textContent = '';
+    } finally {
+      refreshBtnEl.disabled = false;
+    }
+  }
+
+  for (const chart of charts) {
+    chart.on('dataZoom', updatePriceYAxis);
+  }
+  refreshBtnEl.addEventListener('click', () => loadDaily());
+  symbolSearchEl.addEventListener('input', () => {
+    renderSymbolOptions(symbolSearchEl.value);
+    const matched = findSymbolByInput(symbolSearchEl.value);
+    if (matched) symbolInputEl.value = matched.symbol || '';
+  });
+  symbolSearchEl.addEventListener('change', () => {
+    const matched = findSymbolByInput(symbolSearchEl.value);
+    if (!matched) return;
+    startDateEl.value = '';
+    endDateEl.value = '';
+    applySelectedSymbol(matched);
+    loadDaily(matched.symbol);
+  });
+  symbolSearchEl.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter') return;
+    event.preventDefault();
+    const matched = findSymbolByInput(symbolSearchEl.value);
+    if (matched) {
+      startDateEl.value = '';
+      endDateEl.value = '';
+      applySelectedSymbol(matched);
+      loadDaily(matched.symbol);
+    } else {
+      loadDaily();
+    }
+  });
+  symbolInputEl.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') loadDaily();
+  });
+  document.querySelectorAll('input[name="mvMainMode"]').forEach((el) => {
+    el.addEventListener('change', () => latestPayload && renderAll(latestPayload, true));
+  });
+  maControlsEl.addEventListener('change', () => latestPayload && renderAll(latestPayload, true));
+  subControlsEl.addEventListener('change', () => {
+    applySubchartVisibility();
+    if (latestPayload) renderAll(latestPayload, true);
+  });
+  window.addEventListener('resize', () => charts.forEach((chart) => chart.resize()));
+
+  loadSymbols().catch((err) => {
+    chartTitleEl.textContent = `加载失败：${err.message}`;
+    rangeMetaEl.textContent = '';
+  });
+})();
+</script>
+{% endblock %}

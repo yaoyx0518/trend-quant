@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import os
 from pathlib import Path
 import time
 
@@ -12,6 +13,7 @@ from app.routers import (
     config,
     instruments,
     logs,
+    market_view,
     overview,
     parameter_optimization,
     strategy_history,
@@ -65,7 +67,16 @@ async def lifespan(app: FastAPI):
         result = signal_engine.run_daily_update()
         logger.info("Daily market data update result: %s", result.get("status", "ok"))
 
-    scheduler_manager.start(poll_job=poll_job, final_job=final_job, update_job=update_job)
+    disable_scheduler = str(os.getenv("TREND_QUANT_DISABLE_SCHEDULER", "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    if disable_scheduler:
+        logger.warning("Scheduler disabled by TREND_QUANT_DISABLE_SCHEDULER")
+    else:
+        scheduler_manager.start(poll_job=poll_job, final_job=final_job, update_job=update_job)
 
     app.state.settings = settings
     app.state.scheduler_manager = scheduler_manager
@@ -96,3 +107,4 @@ app.include_router(backtest.router)
 app.include_router(trades.router)
 app.include_router(logs.router)
 app.include_router(instruments.router)
+app.include_router(market_view.router)
