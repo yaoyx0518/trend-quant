@@ -156,6 +156,37 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_market_data_qfq_symbol_time
                     ON market_data_qfq(symbol, time);
+
+                CREATE TABLE IF NOT EXISTS instrument_metadata (
+                    symbol TEXT PRIMARY KEY,
+                    name TEXT,
+                    category_l1 TEXT,
+                    category_l2 TEXT,
+                    category_l3 TEXT,
+                    factor_tags TEXT,
+                    region_tag TEXT,
+                    priority_l1 INTEGER,
+                    priority_l2 INTEGER,
+                    priority_l3 INTEGER,
+                    sort_order INTEGER,
+                    source TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_instrument_metadata_category
+                    ON instrument_metadata(category_l1, category_l2, category_l3);
+                CREATE INDEX IF NOT EXISTS idx_instrument_metadata_sort
+                    ON instrument_metadata(priority_l1, priority_l2, priority_l3, sort_order, symbol);
+
+                CREATE TABLE IF NOT EXISTS instrument_categories (
+                    path TEXT PRIMARY KEY,
+                    level INTEGER NOT NULL,
+                    name TEXT NOT NULL,
+                    parent_path TEXT,
+                    priority INTEGER,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_instrument_categories_parent
+                    ON instrument_categories(parent_path, priority, name);
                 """
             )
 
@@ -638,6 +669,169 @@ class Database:
             self.save_optimization_job(job_id, status, result)
             count += 1
         return count
+
+    # ------------------------------------------------------------------
+    # instrument_metadata
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _json_tags(value: Any) -> str:
+        if isinstance(value, str):
+            tags = [part.strip() for part in value.split("/") if part.strip()]
+        elif isinstance(value, (list, tuple, set)):
+            tags = [str(part).strip() for part in value if str(part).strip()]
+        else:
+            tags = []
+        return json.dumps(tags, ensure_ascii=False)
+
+    @staticmethod
+    def _parse_tags(value: Any) -> list[str]:
+        if value is None or value == "":
+            return []
+        try:
+            parsed = json.loads(str(value))
+        except json.JSONDecodeError:
+            return [part.strip() for part in str(value).split("/") if part.strip()]
+        if isinstance(parsed, list):
+            return [str(part).strip() for part in parsed if str(part).strip()]
+        return []
+
+    @staticmethod
+    def _category_path(row: dict[str, Any]) -> str:
+        parts = [
+            str(row.get("category_l1") or "").strip(),
+            str(row.get("category_l2") or "").strip(),
+            str(row.get("category_l3") or "").strip(),
+        ]
+        return "-".join(part for part in parts if part)
+
+    @staticmethod
+    def _metadata_row_to_dict(row: sqlite3.Row) -> dict:
+        item = dict(row)
+        item["factor_tags"] = Database._parse_tags(item.get("factor_tags"))
+        item["category_path"] = Database._category_path(item)
+        return item
+
+    def save_instrument_metadata(self, items: list[dict[str, Any]]) -> int:
+        records: list[tuple] = []
+        for item in items:
+            symbol = str(item.get("symbol") or "").strip().upper()
+            if not symbol:
+                continue
+            records.append(
+                (
+                    symbol,
+                    str(item.get("name") or "").strip(),
+                    str(item.get("category_l1") or "").strip(),
+                    str(item.get("category_l2") or "").strip(),
+                    str(item.get("category_l3") or "").strip(),
+                    self._json_tags(item.get("factor_tags")),
+                    str(item.get("region_tag") or "").strip(),
+                    item.get("priority_l1"),
+                    item.get("priority_l2"),
+                    item.get("priority_l3"),
+                    item.get("sort_order"),
+                    str(item.get("source") or "").strip(),
+                )
+            )
+        if not records:
+            return 0
+
+        with self._connect() as conn:
+            conn.executemany(
+                """INSERT INTO instrument_metadata
+                   (symbol, name, category_l1, category_l2, category_l3, factor_tags,
+                    region_tag, priority_l1, priority_l2, priority_l3, sort_order, source)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(symbol) DO UPDATE SET
+                     name=excluded.name,
+                     category_l1=excluded.category_l1,
+                     category_l2=excluded.category_l2,
+                     category_l3=excluded.category_l3,
+                     factor_tags=excluded.factor_tags,
+                     region_tag=excluded.region_tag,
+                     priority_l1=excluded.priority_l1,
+                     priority_l2=excluded.priority_l2,
+                     priority_l3=excluded.priority_l3,
+                     sort_order=excluded.sort_order,
+                     source=excluded.source,
+                     updated_at=CURRENT_TIMESTAMP""",
+                records,
+            )
+        return len(records)
+
+    def list_instrument_metadata(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM instrument_metadata
+                   ORDER BY
+                     priority_l1 IS NULL, priority_l1,
+                     priority_l2 IS NULL, priority_l2,
+                     priority_l3 IS NULL, priority_l3,
+                     sort_order IS NULL, sort_order,
+                     symbol"""
+            ).fetchall()
+        return [self._metadata_row_to_dict(row) for row in rows]
+
+    def get_instrument_metadata(self, symbol: str) -> dict | None:
+        normalized = str(symbol or "").strip().upper()
+        if not normalized:
+            return None
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM instrument_metadata WHERE symbol = ?",
+                (normalized,),
+            ).fetchone()
+        return self._metadata_row_to_dict(row) if row else None
+
+    def get_instrument_metadata_map(self) -> dict[str, dict]:
+        return {item["symbol"]: item for item in self.list_instrument_metadata()}
+
+    def save_instrument_categories(self, categories: list[dict[str, Any]]) -> int:
+        records: list[tuple] = []
+        for item in categories:
+            path = str(item.get("path") or "").strip()
+            name = str(item.get("name") or "").strip()
+            if not path or not name:
+                continue
+            records.append(
+                (
+                    path,
+                    int(item.get("level") or 0),
+                    name,
+                    str(item.get("parent_path") or "").strip() or None,
+                    item.get("priority"),
+                )
+            )
+        if not records:
+            return 0
+
+        with self._connect() as conn:
+            conn.executemany(
+                """INSERT INTO instrument_categories
+                   (path, level, name, parent_path, priority)
+                   VALUES (?, ?, ?, ?, ?)
+                   ON CONFLICT(path) DO UPDATE SET
+                     level=excluded.level,
+                     name=excluded.name,
+                     parent_path=excluded.parent_path,
+                     priority=excluded.priority,
+                     updated_at=CURRENT_TIMESTAMP""",
+                records,
+            )
+        return len(records)
+
+    def replace_instrument_categories(self, categories: list[dict[str, Any]]) -> int:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM instrument_categories")
+        return self.save_instrument_categories(categories)
+
+    def list_instrument_categories(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM instrument_categories
+                   ORDER BY level, parent_path IS NULL DESC, parent_path, priority IS NULL, priority, name"""
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     # ------------------------------------------------------------------
     # market_data

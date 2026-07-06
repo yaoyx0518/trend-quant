@@ -1,11 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="page-panel market-view-page">
-  <h2>标的查看</h2>
-
   <div class="bt-form-row market-toolbar">
     <label>标的
-      <input id="mvSymbolSearch" type="search" list="mvSymbolOptions" placeholder="输入代码或名称搜索">
+      <input id="mvSymbolSearch" type="search" list="mvSymbolOptions" placeholder="输入代码、名称或分类搜索">
       <datalist id="mvSymbolOptions"></datalist>
     </label>
     <label>代码
@@ -20,46 +18,46 @@
     <button id="mvRefreshBtn" type="button">刷新</button>
   </div>
 
-  <div class="market-toolbar market-toolbar-secondary">
-    <div class="market-control-group">
-      <span>主图</span>
-      <label><input name="mvMainMode" type="radio" value="ma" checked> MA</label>
-      <label><input name="mvMainMode" type="radio" value="boll"> BOLL</label>
-    </div>
-    <div class="market-control-group" id="mvMaControls">
-      <span>MA周期</span>
-      <label><input type="checkbox" value="5" checked> 5</label>
-      <label><input type="checkbox" value="10" checked> 10</label>
-      <label><input type="checkbox" value="20" checked> 20</label>
-      <label><input type="checkbox" value="60" checked> 60</label>
-      <label><input type="checkbox" value="120"> 120</label>
-      <label><input type="checkbox" value="200"> 200</label>
-    </div>
-    <div class="market-control-group" id="mvSubControls">
-      <span>副图</span>
-      <label><input type="checkbox" value="volume" checked> VOL</label>
-      <label><input type="checkbox" value="macd" checked> MACD</label>
-      <label><input type="checkbox" value="bias"> BIAS</label>
-    </div>
-  </div>
-
   <div class="viz-panel market-chart-panel">
     <div class="market-chart-head">
       <h3 id="mvChartTitle">日 K</h3>
       <div id="mvRangeMeta" class="market-range-meta"></div>
     </div>
     <div id="mvPriceChart" class="chart-kline market-price-chart"></div>
+
+    <div id="mvTrendWrap" class="market-subchart-wrap">
+      <div class="market-subchart-title">TREND</div>
+      <form id="mvTrendControls" class="market-trend-controls">
+        <label>S<input id="mvTrendShort" type="number" min="1" max="300" step="1"></label>
+        <label>M<input id="mvTrendMid" type="number" min="1" max="300" step="1"></label>
+        <label>L<input id="mvTrendLong" type="number" min="1" max="500" step="1"></label>
+        <label>ATR<input id="mvTrendAtr" type="number" min="1" max="300" step="1"></label>
+        <button id="mvTrendApplyBtn" type="submit">应用</button>
+      </form>
+      <div id="mvTrendChart" class="chart-md market-subchart market-trend-chart"></div>
+    </div>
+
     <div id="mvVolumeWrap" class="market-subchart-wrap">
       <div class="market-subchart-title">VOL</div>
       <div id="mvVolumeChart" class="chart-md market-subchart"></div>
     </div>
+
+    <div id="mvRsiWrap" class="market-subchart-wrap">
+      <div class="market-subchart-title">RSI</div>
+      <form id="mvRsiControls" class="market-indicator-controls">
+        <label>N<input id="mvRsiPeriod" type="number" min="2" max="300" step="1" value="14"></label>
+        <button id="mvRsiApplyBtn" type="submit">应用</button>
+      </form>
+      <div id="mvRsiChart" class="chart-md market-subchart"></div>
+    </div>
+
+    <div id="mvBiasWrap" class="market-subchart-wrap">
+      <div class="market-subchart-title">BIAS</div>
+      <div id="mvBiasChart" class="chart-md market-subchart"></div>
+    </div>
     <div id="mvMacdWrap" class="market-subchart-wrap">
       <div class="market-subchart-title">MACD</div>
       <div id="mvMacdChart" class="chart-md market-subchart"></div>
-    </div>
-    <div id="mvBiasWrap" class="market-subchart-wrap" style="display:none;">
-      <div class="market-subchart-title">BIAS</div>
-      <div id="mvBiasChart" class="chart-md market-subchart"></div>
     </div>
   </div>
 </section>
@@ -67,25 +65,30 @@
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script>
 (() => {
+  document.getElementById('mvStartDate')?.closest('label')?.remove();
+  document.getElementById('mvEndDate')?.closest('label')?.remove();
+
   const symbolSearchEl = document.getElementById('mvSymbolSearch');
   const symbolOptionsEl = document.getElementById('mvSymbolOptions');
   const symbolInputEl = document.getElementById('mvSymbolInput');
-  const startDateEl = document.getElementById('mvStartDate');
-  const endDateEl = document.getElementById('mvEndDate');
   const refreshBtnEl = document.getElementById('mvRefreshBtn');
   const chartTitleEl = document.getElementById('mvChartTitle');
   const rangeMetaEl = document.getElementById('mvRangeMeta');
-  const maControlsEl = document.getElementById('mvMaControls');
-  const subControlsEl = document.getElementById('mvSubControls');
-  const volumeWrapEl = document.getElementById('mvVolumeWrap');
-  const macdWrapEl = document.getElementById('mvMacdWrap');
-  const biasWrapEl = document.getElementById('mvBiasWrap');
+  const trendControlsEl = document.getElementById('mvTrendControls');
+  const trendShortEl = document.getElementById('mvTrendShort');
+  const trendMidEl = document.getElementById('mvTrendMid');
+  const trendLongEl = document.getElementById('mvTrendLong');
+  const trendAtrEl = document.getElementById('mvTrendAtr');
+  const rsiControlsEl = document.getElementById('mvRsiControls');
+  const rsiPeriodEl = document.getElementById('mvRsiPeriod');
 
   const priceChart = echarts.init(document.getElementById('mvPriceChart'));
+  const trendChart = echarts.init(document.getElementById('mvTrendChart'));
   const volumeChart = echarts.init(document.getElementById('mvVolumeChart'));
+  const rsiChart = echarts.init(document.getElementById('mvRsiChart'));
   const macdChart = echarts.init(document.getElementById('mvMacdChart'));
   const biasChart = echarts.init(document.getElementById('mvBiasChart'));
-  const charts = [priceChart, volumeChart, macdChart, biasChart];
+  const charts = [priceChart, trendChart, volumeChart, rsiChart, biasChart, macdChart];
   for (const chart of charts) chart.group = 'market-view-time';
   echarts.connect('market-view-time');
 
@@ -93,15 +96,15 @@
     5: '#7c3aed',
     10: '#0d7a71',
     20: '#c7834c',
-    30: '#2563eb',
     60: '#b42318',
     120: '#475569',
     200: '#111827',
   });
-  let latestPayload = null;
+  const maPeriods = ['5', '10', '20', '60', '120', '200'];
   let currentCandles = [];
   let currentZoom = null;
   let allSymbols = [];
+  const priceAxisSplitCount = 6;
 
   function esc(v) {
     return String(v ?? '')
@@ -126,20 +129,6 @@
     return n.toFixed(0);
   }
 
-  function checkedMainMode() {
-    return document.querySelector('input[name="mvMainMode"]:checked')?.value || 'ma';
-  }
-
-  function checkedMaPeriods() {
-    return Array.from(maControlsEl.querySelectorAll('input[type="checkbox"]:checked'))
-      .map((el) => String(el.value || '').trim())
-      .filter(Boolean);
-  }
-
-  function checkedSubcharts() {
-    return new Set(Array.from(subControlsEl.querySelectorAll('input[type="checkbox"]:checked')).map((el) => el.value));
-  }
-
   function buildDataZoom(start, end) {
     return [
       { type: 'inside', xAxisIndex: 0, start, end, throttle: 30 },
@@ -147,12 +136,12 @@
     ];
   }
 
-  function sixMonthZoom(dates) {
+  function oneYearZoom(dates) {
     if (!Array.isArray(dates) || dates.length <= 1) return { start: 0, end: 100 };
     const last = new Date(dates[dates.length - 1]);
     if (Number.isNaN(last.getTime())) return { start: 0, end: 100 };
     const cutoff = new Date(last);
-    cutoff.setMonth(cutoff.getMonth() - 6);
+    cutoff.setFullYear(cutoff.getFullYear() - 1);
     let idx = dates.findIndex((d) => {
       const day = new Date(d);
       return !Number.isNaN(day.getTime()) && day >= cutoff;
@@ -183,7 +172,7 @@
     return [s, e];
   }
 
-  function computePriceRange(candles, zoom) {
+  function computeLogPriceRange(candles, zoom) {
     const [start, end] = visibleIndexRange(candles.length, zoom);
     let low = Infinity;
     let high = -Infinity;
@@ -191,31 +180,80 @@
       const c = candles[i] || [];
       const l = Number(c[2]);
       const h = Number(c[3]);
-      if (Number.isFinite(l)) low = Math.min(low, l);
-      if (Number.isFinite(h)) high = Math.max(high, h);
+      if (Number.isFinite(l) && l > 0) low = Math.min(low, l);
+      if (Number.isFinite(h) && h > 0) high = Math.max(high, h);
     }
     if (!Number.isFinite(low) || !Number.isFinite(high)) return { min: null, max: null };
-    const pad = high > low ? (high - low) * 0.08 : Math.max(high * 0.02, 0.01);
-    return { min: Math.max(0.01, low - pad), max: high + pad };
+    if (high < low) high = low;
+    const logLow = Math.log(low);
+    const logHigh = Math.log(high);
+    const span = Math.max(logHigh - logLow, Math.log(1.02));
+    const pad = span * 0.08;
+    const paddedSpan = span + pad * 2;
+    return {
+      min: Math.max(Number.MIN_VALUE, Math.exp(logLow - pad)),
+      max: Math.exp(logHigh + pad),
+      logBase: Math.exp(paddedSpan / priceAxisSplitCount),
+    };
   }
 
   function updatePriceYAxis(params) {
     if (!currentCandles.length) return;
     currentZoom = zoomFromEvent(params);
-    const range = computePriceRange(currentCandles, currentZoom);
-    priceChart.setOption({ yAxis: { min: range.min, max: range.max } }, false);
+    const range = computeLogPriceRange(currentCandles, currentZoom);
+    priceChart.setOption({ yAxis: { min: range.min, max: range.max, logBase: range.logBase } }, false);
+  }
+
+  function trendParamsFromInputs() {
+    const nShort = Number(trendShortEl.value);
+    const nMid = Number(trendMidEl.value);
+    const nLong = Number(trendLongEl.value);
+    const atrPeriod = Number(trendAtrEl.value);
+    if (![nShort, nMid, nLong, atrPeriod].every((v) => Number.isInteger(v) && v > 0)) {
+      throw new Error('趋势值参数必须为正整数');
+    }
+    if (!(nShort < nMid && nMid < nLong)) {
+      throw new Error('趋势值参数要求 S < M < L');
+    }
+    return { nShort, nMid, nLong, atrPeriod };
+  }
+
+  function applyTrendConfigToInputs(config) {
+    if (!config) return;
+    trendShortEl.value = config.n_short ?? trendShortEl.value;
+    trendMidEl.value = config.n_mid ?? trendMidEl.value;
+    trendLongEl.value = config.n_long ?? trendLongEl.value;
+    trendAtrEl.value = config.atr_period ?? trendAtrEl.value;
+  }
+
+  function appendTrendParams(params) {
+    if (!trendShortEl.value || !trendMidEl.value || !trendLongEl.value || !trendAtrEl.value) return;
+    const trendParams = trendParamsFromInputs();
+    params.set('trend_n_short', trendParams.nShort);
+    params.set('trend_n_mid', trendParams.nMid);
+    params.set('trend_n_long', trendParams.nLong);
+    params.set('trend_atr_period', trendParams.atrPeriod);
+  }
+
+  function rsiPeriodFromInput() {
+    const period = Number(rsiPeriodEl.value || 14);
+    if (!Number.isInteger(period) || period <= 1) {
+      throw new Error('RSI 周期必须大于 1');
+    }
+    return period;
+  }
+
+  function applyRsiConfigToInputs(config) {
+    if (!config) return;
+    rsiPeriodEl.value = config.period ?? rsiPeriodEl.value ?? 14;
+  }
+
+  function appendRsiParams(params) {
+    params.set('rsi_period', rsiPeriodFromInput());
   }
 
   function mainOverlaySeries(indicators) {
-    const mode = checkedMainMode();
-    if (mode === 'boll') {
-      return [
-        { name: 'BOLL上轨', type: 'line', data: indicators.boll?.upper || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#b42318' } },
-        { name: 'BOLL中轨', type: 'line', data: indicators.boll?.mid || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#c7834c' } },
-        { name: 'BOLL下轨', type: 'line', data: indicators.boll?.lower || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#0d7a71' } },
-      ];
-    }
-    return checkedMaPeriods().map((period) => ({
+    const maSeries = maPeriods.map((period) => ({
       name: `MA${period}`,
       type: 'line',
       data: indicators.ma?.[period] || [],
@@ -223,6 +261,12 @@
       smooth: true,
       lineStyle: { width: 1.1, color: maColors[period] || '#475569' },
     }));
+    const bollSeries = [
+      { name: 'BOLL上轨', type: 'line', data: indicators.boll?.upper || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#b42318' } },
+      { name: 'BOLL中轨', type: 'line', data: indicators.boll?.mid || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#c7834c' } },
+      { name: 'BOLL下轨', type: 'line', data: indicators.boll?.lower || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#0d7a71' } },
+    ];
+    return [...maSeries, ...bollSeries];
   }
 
   function renderPrice(payload, zoom) {
@@ -231,7 +275,7 @@
     const indicators = payload.indicators || {};
     currentCandles = candles;
     const overlays = mainOverlaySeries(indicators);
-    const range = computePriceRange(candles, zoom);
+    const range = computeLogPriceRange(candles, zoom);
     priceChart.setOption({
       animation: false,
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -255,11 +299,30 @@
           return lines.join('<br/>');
         },
       },
-      legend: { data: ['K', ...overlays.map((item) => item.name)], top: 4 },
+      legend: {
+        data: ['K', ...overlays.map((item) => item.name)],
+        top: 4,
+        selected: {
+          MA120: false,
+          MA200: false,
+          BOLL上轨: false,
+          BOLL中轨: false,
+          BOLL下轨: false,
+        },
+      },
       grid: { left: 62, right: 28, top: 42, bottom: 54 },
       dataZoom: buildDataZoom(zoom.start, zoom.end),
       xAxis: { type: 'category', data: dates, boundaryGap: false, axisLine: { onZero: false } },
-      yAxis: { type: 'value', scale: true, min: range.min, max: range.max, axisLabel: { formatter: (v) => num(v, 2) } },
+      yAxis: {
+        type: 'log',
+        logBase: range.logBase,
+        min: range.min,
+        max: range.max,
+        splitNumber: priceAxisSplitCount,
+        minorTick: { show: true },
+        minorSplitLine: { show: false },
+        axisLabel: { formatter: (v) => num(v, 2) },
+      },
       series: [
         {
           name: 'K',
@@ -273,6 +336,87 @@
           },
         },
         ...overlays,
+      ],
+    }, true);
+  }
+
+  function trendLineColor(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '#667680';
+    const ratio = Math.min(Math.abs(n) / 30, 1);
+    if (n >= 0) {
+      const red = Math.round(218 - ratio * 42);
+      const green = Math.round(92 - ratio * 46);
+      const blue = Math.round(88 - ratio * 36);
+      return `rgb(${red}, ${green}, ${blue})`;
+    }
+    const green = Math.round(140 - ratio * 44);
+    const blue = Math.round(118 - ratio * 35);
+    return `rgb(20, ${green}, ${blue})`;
+  }
+
+  function renderTrend(payload, zoom) {
+    const dates = payload.dates || [];
+    const trend = payload.indicators?.trend || {};
+    const scores = trend.score || [];
+    trendChart.setOption({
+      animation: false,
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        formatter: (params) => {
+          if (!params || !params.length) return '-';
+          const lines = [String(params[0].axisValue || '')];
+          for (const p of params) {
+            const raw = Array.isArray(p.value) ? p.value[1] : p.value;
+            lines.push(`${p.seriesName}：${num(raw, 2)}`);
+          }
+          return lines.join('<br/>');
+        },
+      },
+      legend: { data: ['Trend', 'Trend MA5', 'Trend MA10'], top: 2 },
+      grid: { left: 62, right: 28, top: 36, bottom: 42 },
+      dataZoom: buildDataZoom(zoom.start, zoom.end),
+      visualMap: {
+        show: false,
+        seriesIndex: 0,
+        min: -10,
+        max: 30,
+        dimension: 1,
+        inRange: { color: ['#0a6a4c', '#54a384', '#b1b7bd', '#d95c58', '#a92828'] },
+      },
+      xAxis: { type: 'category', data: dates, boundaryGap: false },
+      yAxis: {
+        type: 'value',
+        min: -10,
+        max: 30,
+        interval: 5,
+        axisLabel: { formatter: (v) => num(v, 0) },
+        splitLine: { lineStyle: { color: 'rgba(102, 118, 128, 0.16)', width: 1 } },
+      },
+      series: [
+        {
+          name: 'Trend',
+          type: 'line',
+          data: scores.map((v, idx) => [dates[idx], v]),
+          symbol: 'none',
+          smooth: true,
+          lineStyle: { width: 2.6 },
+          itemStyle: { color: (params) => trendLineColor(params.value?.[1]) },
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            label: { show: false },
+            lineStyle: { color: '#334155', width: 2.6 },
+            data: [
+              { yAxis: 0, lineStyle: { color: '#1f2937', width: 2.8 } },
+              { yAxis: 5, lineStyle: { color: 'rgba(51, 65, 85, 0.62)', width: 1.8 } },
+            ],
+          },
+        },
+        { name: 'Trend MA5', type: 'line', data: trend.ma?.['5'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.15, color: '#7c3aed' } },
+        { name: 'Trend MA10', type: 'line', data: trend.ma?.['10'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.15, color: '#c7834c' } },
       ],
     }, true);
   }
@@ -299,6 +443,49 @@
         { name: '成交量', type: 'bar', data, barMaxWidth: 8 },
         { name: 'VOLMA5', type: 'line', data: indicators.volume_ma?.['5'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1, color: '#7c3aed' } },
         { name: 'VOLMA10', type: 'line', data: indicators.volume_ma?.['10'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1, color: '#c7834c' } },
+      ],
+    }, true);
+  }
+
+  function renderRsi(payload, zoom) {
+    const dates = payload.dates || [];
+    const rsi = payload.indicators?.rsi || {};
+    const period = Number(rsi.period || rsiPeriodFromInput() || 14);
+    rsiChart.setOption({
+      animation: false,
+      axisPointer: { link: [{ xAxisIndex: 'all' }] },
+      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: (v) => num(v, 2) },
+      legend: { data: [`RSI${period}`], top: 2 },
+      grid: { left: 62, right: 28, top: 36, bottom: 42 },
+      dataZoom: buildDataZoom(zoom.start, zoom.end),
+      xAxis: { type: 'category', data: dates, boundaryGap: false },
+      yAxis: {
+        type: 'value',
+        min: 0,
+        max: 100,
+        interval: 20,
+        axisLabel: { formatter: (v) => num(v, 0) },
+        splitLine: { lineStyle: { color: 'rgba(102, 118, 128, 0.16)', width: 1 } },
+      },
+      series: [
+        {
+          name: `RSI${period}`,
+          type: 'line',
+          data: rsi.series || [],
+          symbol: 'none',
+          smooth: true,
+          lineStyle: { width: 1.7, color: '#2563eb' },
+          markLine: {
+            silent: true,
+            symbol: 'none',
+            label: { show: false },
+            data: [
+              { yAxis: 70, lineStyle: { color: 'rgba(209, 67, 67, 0.45)', width: 1.4 } },
+              { yAxis: 50, lineStyle: { color: 'rgba(51, 65, 85, 0.34)', width: 1.2 } },
+              { yAxis: 30, lineStyle: { color: 'rgba(0, 167, 111, 0.45)', width: 1.4 } },
+            ],
+          },
+        },
       ],
     }, true);
   }
@@ -347,26 +534,21 @@
     }, true);
   }
 
-  function applySubchartVisibility() {
-    const selected = checkedSubcharts();
-    volumeWrapEl.style.display = selected.has('volume') ? '' : 'none';
-    macdWrapEl.style.display = selected.has('macd') ? '' : 'none';
-    biasWrapEl.style.display = selected.has('bias') ? '' : 'none';
-    setTimeout(() => charts.forEach((chart) => chart.resize()), 0);
-  }
-
   function renderAll(payload, preserveZoom = false) {
-    latestPayload = payload;
     const dates = payload.dates || [];
-    const zoom = preserveZoom && currentZoom ? currentZoom : sixMonthZoom(dates);
+    const zoom = preserveZoom && currentZoom ? currentZoom : oneYearZoom(dates);
     currentZoom = zoom;
-    chartTitleEl.textContent = `${payload.display_name || payload.symbol || ''} 日 K`;
+    applyTrendConfigToInputs(payload.meta?.trend_config || {});
+    applyRsiConfigToInputs(payload.meta?.rsi_config || {});
+    chartTitleEl.textContent = `${payload.display_label || payload.display_name || payload.symbol || ''} 日 K`;
     rangeMetaEl.textContent = `${payload.meta?.start || '-'} ~ ${payload.meta?.end || '-'} | ${Number(payload.meta?.rows || 0).toLocaleString()} 根`;
     renderPrice(payload, zoom);
+    renderTrend(payload, zoom);
     renderVolume(payload, zoom);
-    renderMacd(payload, zoom);
+    renderRsi(payload, zoom);
     renderBias(payload, zoom);
-    applySubchartVisibility();
+    renderMacd(payload, zoom);
+    setTimeout(() => charts.forEach((chart) => chart.resize()), 0);
   }
 
   function normalizeSearchText(value) {
@@ -374,7 +556,7 @@
   }
 
   function symbolOptionLabel(item) {
-    const display = String(item?.display_name || item?.name || item?.symbol || '').trim();
+    const display = String(item?.display_label || item?.display_name || item?.name || item?.symbol || '').trim();
     const symbol = String(item?.symbol || '').trim();
     return display && display !== symbol ? `${display} ${symbol}` : symbol;
   }
@@ -384,6 +566,9 @@
       item?.symbol,
       item?.name,
       item?.display_name,
+      item?.display_label,
+      item?.category_path,
+      ...(item?.factor_tags || []),
       symbolOptionLabel(item),
     ].map(normalizeSearchText).join(' ');
   }
@@ -392,7 +577,7 @@
     const q = normalizeSearchText(keyword);
     const items = (allSymbols || [])
       .filter((item) => !q || symbolSearchHaystack(item).includes(q))
-      .slice(0, 80);
+      .slice(0, 120);
     symbolOptionsEl.innerHTML = items
       .map((item) => `<option value="${esc(symbolOptionLabel(item))}"></option>`)
       .join('');
@@ -406,6 +591,7 @@
         item?.symbol,
         item?.name,
         item?.display_name,
+        item?.display_label,
         symbolOptionLabel(item),
       ].map(normalizeSearchText);
       return values.includes(q);
@@ -425,16 +611,15 @@
     const resp = await fetch('/market-view/api/symbols');
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '标的列表加载失败');
-    const items = data.items || [];
-    allSymbols = items;
+    allSymbols = data.items || [];
     renderSymbolOptions();
-    if (!items.length) {
+    if (!allSymbols.length) {
       chartTitleEl.textContent = '没有找到本地日 K 数据';
       rangeMetaEl.textContent = '';
       return;
     }
-    applySelectedSymbol(items[0]);
-    await loadDaily(items[0].symbol);
+    applySelectedSymbol(allSymbols[0]);
+    await loadDaily(allSymbols[0].symbol);
   }
 
   function selectedSymbol() {
@@ -453,8 +638,8 @@
     try {
       const params = new URLSearchParams();
       params.set('symbol', target);
-      if (startDateEl.value) params.set('start_date', startDateEl.value);
-      if (endDateEl.value) params.set('end_date', endDateEl.value);
+      appendTrendParams(params);
+      appendRsiParams(params);
       const resp = await fetch(`/market-view/api/daily?${params.toString()}`);
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || '日 K 加载失败');
@@ -462,6 +647,8 @@
         symbol: data.symbol,
         name: data.name,
         display_name: data.display_name,
+        display_label: data.display_label,
+        category_path: data.meta?.category_path || '',
       };
       applySelectedSymbol(matched);
       renderAll(data, false);
@@ -477,6 +664,14 @@
     chart.on('dataZoom', updatePriceYAxis);
   }
   refreshBtnEl.addEventListener('click', () => loadDaily());
+  trendControlsEl.addEventListener('submit', (event) => {
+    event.preventDefault();
+    loadDaily();
+  });
+  rsiControlsEl.addEventListener('submit', (event) => {
+    event.preventDefault();
+    loadDaily();
+  });
   symbolSearchEl.addEventListener('input', () => {
     renderSymbolOptions(symbolSearchEl.value);
     const matched = findSymbolByInput(symbolSearchEl.value);
@@ -485,8 +680,6 @@
   symbolSearchEl.addEventListener('change', () => {
     const matched = findSymbolByInput(symbolSearchEl.value);
     if (!matched) return;
-    startDateEl.value = '';
-    endDateEl.value = '';
     applySelectedSymbol(matched);
     loadDaily(matched.symbol);
   });
@@ -495,8 +688,6 @@
     event.preventDefault();
     const matched = findSymbolByInput(symbolSearchEl.value);
     if (matched) {
-      startDateEl.value = '';
-      endDateEl.value = '';
       applySelectedSymbol(matched);
       loadDaily(matched.symbol);
     } else {
@@ -505,14 +696,6 @@
   });
   symbolInputEl.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') loadDaily();
-  });
-  document.querySelectorAll('input[name="mvMainMode"]').forEach((el) => {
-    el.addEventListener('change', () => latestPayload && renderAll(latestPayload, true));
-  });
-  maControlsEl.addEventListener('change', () => latestPayload && renderAll(latestPayload, true));
-  subControlsEl.addEventListener('change', () => {
-    applySubchartVisibility();
-    if (latestPayload) renderAll(latestPayload, true);
   });
   window.addEventListener('resize', () => charts.forEach((chart) => chart.resize()));
 

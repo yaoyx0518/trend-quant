@@ -99,6 +99,29 @@ def _config_name_map() -> dict[str, str]:
     return out
 
 
+def _category_path(meta: dict | None) -> str:
+    if not meta:
+        return ""
+    parts = [
+        str(meta.get("category_l1") or "").strip(),
+        str(meta.get("category_l2") or "").strip(),
+        str(meta.get("category_l3") or "").strip(),
+    ]
+    return "-".join(part for part in parts if part)
+
+
+def _metadata_priority(meta: dict | None) -> tuple:
+    if not meta:
+        return (1, 9999, 9999, 9999, 999999)
+    return (
+        0,
+        int(meta.get("priority_l1") or 9999),
+        int(meta.get("priority_l2") or 9999),
+        int(meta.get("priority_l3") or 9999),
+        int(meta.get("sort_order") or 999999),
+    )
+
+
 @router.get("", response_class=HTMLResponse)
 async def instruments_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -130,15 +153,18 @@ async def list_instruments() -> dict:
         if str(item.get("symbol", "")).strip()
     }
 
+    db = get_db()
     name_map = _config_name_map()
+    metadata_by_symbol = db.get_instrument_metadata_map()
 
-    known_symbols = set(config_by_symbol.keys()) | set(benchmark_by_symbol.keys())
-    for symbol in get_db().list_market_symbols():
+    known_symbols = set(config_by_symbol.keys()) | set(benchmark_by_symbol.keys()) | set(metadata_by_symbol.keys())
+    for symbol in db.list_market_symbols():
         known_symbols.add(symbol.upper())
 
     items: list[dict] = []
     for symbol in sorted(known_symbols):
-        summary = get_db().get_market_data_summary(symbol)
+        meta = metadata_by_symbol.get(symbol)
+        summary = db.get_market_data_summary(symbol)
         rows = summary.get("rows", 0)
         local_start = summary.get("start")
         local_end = summary.get("end")
@@ -147,13 +173,24 @@ async def list_instruments() -> dict:
         in_config = bool(cfg)
         is_benchmark = symbol in benchmark_by_symbol
         enabled = bool(cfg.get("enabled", False)) if in_config else False
-        name = str(name_map.get(symbol, "") or "")
+        name = str((meta or {}).get("name") or name_map.get(symbol, "") or "")
+        sort_key = _metadata_priority(meta)
         items.append(
             {
                 "symbol": symbol,
                 "code": _symbol_to_code(symbol),
                 "exchange": _symbol_suffix(symbol),
                 "name": name,
+                "category_l1": str((meta or {}).get("category_l1") or ""),
+                "category_l2": str((meta or {}).get("category_l2") or ""),
+                "category_l3": str((meta or {}).get("category_l3") or ""),
+                "category_path": _category_path(meta),
+                "factor_tags": list((meta or {}).get("factor_tags") or []),
+                "region_tag": str((meta or {}).get("region_tag") or ""),
+                "priority_l1": sort_key[1],
+                "priority_l2": sort_key[2],
+                "priority_l3": sort_key[3],
+                "sort_order": sort_key[4],
                 "enabled": enabled,
                 "in_config": in_config,
                 "is_benchmark": is_benchmark,
@@ -164,7 +201,16 @@ async def list_instruments() -> dict:
             }
         )
 
-    items.sort(key=lambda x: (not bool(x.get("enabled")), str(x.get("symbol", ""))))
+    items.sort(
+        key=lambda x: (
+            1 if not x.get("category_path") else 0,
+            int(x.get("priority_l1") or 9999),
+            int(x.get("priority_l2") or 9999),
+            int(x.get("priority_l3") or 9999),
+            int(x.get("sort_order") or 999999),
+            str(x.get("symbol", "")),
+        )
+    )
     return {"items": items, "count": len(items), "as_of": datetime.now().isoformat()}
 
 

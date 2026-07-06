@@ -1,26 +1,63 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="page-panel instruments-page">
-  <h2>标的管理</h2>
-  <div class="bt-form-row">
-    <button id="backfillAllBtn" type="button">一键补齐至今日</button>
+  <div class="instrument-actions">
+    <button id="backfillAllBtn" type="button">一键补齐当前列表至今日</button>
+    <p id="instStatus" class="status-banner">正在加载标的...</p>
   </div>
-  <p id="instStatus" class="status-banner">正在加载标的...</p>
-  <div class="table-shell">
-    <table id="instTable">
-      <thead>
-        <tr>
-          <th>代码</th>
-          <th>标识</th>
-          <th>名称</th>
-          <th>启用</th>
-          <th>数据行数</th>
-          <th>日期范围</th>
-          <th>补齐日 K</th>
-        </tr>
-      </thead>
-      <tbody></tbody>
-    </table>
+
+  <div class="instrument-filter-panel">
+    <div class="instrument-filter-head">
+      <strong>分类筛选</strong>
+      <button id="instClearFiltersBtn" class="ghost-btn" type="button">清空筛选</button>
+    </div>
+    <div class="instrument-filter-grid">
+      <div class="instrument-filter-group">
+        <div class="instrument-filter-title">一级类目</div>
+        <div id="instFilterL1" class="instrument-filter-options"></div>
+      </div>
+      <div class="instrument-filter-group">
+        <div class="instrument-filter-title">二级类目</div>
+        <div id="instFilterL2" class="instrument-filter-options"></div>
+      </div>
+      <div class="instrument-filter-group">
+        <div class="instrument-filter-title">三级类目</div>
+        <div id="instFilterL3" class="instrument-filter-options"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="instrument-content-layout">
+    <aside class="instrument-side-nav" aria-label="标的分类目录">
+      <div class="instrument-side-nav-title">分类目录</div>
+      <div id="instSideNav" class="instrument-side-nav-body"></div>
+    </aside>
+
+    <div class="table-shell instrument-table-shell">
+      <table id="instTable">
+        <colgroup>
+          <col class="inst-col-symbol">
+          <col class="inst-col-name">
+          <col class="inst-col-category">
+          <col class="inst-col-category">
+          <col class="inst-col-category">
+          <col class="inst-col-factor">
+          <col class="inst-col-date">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>标识</th>
+            <th>名称</th>
+            <th>一级类目</th>
+            <th>二级类目</th>
+            <th>三级类目</th>
+            <th>因子</th>
+            <th>日期范围</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
   </div>
 </section>
 
@@ -28,9 +65,20 @@
 (() => {
   const statusEl = document.getElementById('instStatus');
   const backfillAllBtn = document.getElementById('backfillAllBtn');
+  const clearFiltersBtn = document.getElementById('instClearFiltersBtn');
+  const sideNavEl = document.getElementById('instSideNav');
   const tableBody = document.querySelector('#instTable tbody');
+  const filterEls = {
+    l1: document.getElementById('instFilterL1'),
+    l2: document.getElementById('instFilterL2'),
+    l3: document.getElementById('instFilterL3'),
+  };
   const today = localToday();
+  const filters = { l1: new Set(), l2: new Set(), l3: new Set() };
+  let allItems = [];
   let isBulkRunning = false;
+  let sectionObserver = null;
+  let activeSyncPending = false;
 
   function esc(v) {
     return String(v ?? '')
@@ -60,46 +108,291 @@
     return `${year}-${month}-${day}`;
   }
 
-  function fmtNum(v) {
-    const n = Number(v || 0);
-    if (!Number.isFinite(n)) return '-';
-    return n.toLocaleString();
+  function valueOrDash(value) {
+    const text = String(value || '').trim();
+    return text || '-';
   }
 
-  function render(items) {
-    if (!Array.isArray(items) || !items.length) {
-      tableBody.innerHTML = '<tr><td colspan="7">未找到本地标的数据。</td></tr>';
+  function tagsText(item) {
+    const tags = Array.isArray(item.factor_tags) ? item.factor_tags : [];
+    return tags.length ? tags.join(' / ') : '-';
+  }
+
+  function itemMatchesFilters(item) {
+    const l1 = String(item.category_l1 || '').trim();
+    const l2 = String(item.category_l2 || '').trim();
+    const l3 = String(item.category_l3 || '').trim();
+    if (filters.l1.size && !filters.l1.has(l1)) return false;
+    if (filters.l2.size && !filters.l2.has(l2)) return false;
+    if (filters.l3.size && !filters.l3.has(l3)) return false;
+    return true;
+  }
+
+  function optionItems(level) {
+    const seen = new Set();
+    const out = [];
+    for (const item of allItems) {
+      const l1 = String(item.category_l1 || '').trim();
+      const l2 = String(item.category_l2 || '').trim();
+      const l3 = String(item.category_l3 || '').trim();
+      if (level === 'l2' && filters.l1.size && !filters.l1.has(l1)) continue;
+      if (level === 'l3') {
+        if (filters.l1.size && !filters.l1.has(l1)) continue;
+        if (filters.l2.size && !filters.l2.has(l2)) continue;
+      }
+      const value = level === 'l1' ? l1 : (level === 'l2' ? l2 : l3);
+      if (!value || seen.has(value)) continue;
+      seen.add(value);
+      out.push(value);
+    }
+    return out;
+  }
+
+  function optionGroups(level) {
+    if (level === 'l1') {
+      return [{ key: 'l1', title: '', values: optionItems('l1') }];
+    }
+
+    const groups = [];
+    const groupMap = new Map();
+    for (const item of allItems) {
+      const l1 = String(item.category_l1 || '').trim();
+      const l2 = String(item.category_l2 || '').trim();
+      const l3 = String(item.category_l3 || '').trim();
+      if (level === 'l2') {
+        if (filters.l1.size && !filters.l1.has(l1)) continue;
+        if (!l2) continue;
+        const key = l1 || '未分类';
+        if (!groupMap.has(key)) {
+          groupMap.set(key, { key, title: key, values: [], seen: new Set() });
+          groups.push(groupMap.get(key));
+        }
+        const group = groupMap.get(key);
+        if (!group.seen.has(l2)) {
+          group.seen.add(l2);
+          group.values.push(l2);
+        }
+      } else if (level === 'l3') {
+        if (filters.l1.size && !filters.l1.has(l1)) continue;
+        if (filters.l2.size && !filters.l2.has(l2)) continue;
+        if (!l3) continue;
+        const key = `${l1 || '未分类'}-${l2 || '未分二级'}`;
+        const title = filters.l2.size ? (l2 || '未分二级') : `${l1 || '未分类'} / ${l2 || '未分二级'}`;
+        if (!groupMap.has(key)) {
+          groupMap.set(key, { key, title, values: [], seen: new Set() });
+          groups.push(groupMap.get(key));
+        }
+        const group = groupMap.get(key);
+        if (!group.seen.has(l3)) {
+          group.seen.add(l3);
+          group.values.push(l3);
+        }
+      }
+    }
+    return groups.map(({ key, title, values }) => ({ key, title, values }));
+  }
+
+  function pruneInvalidFilters() {
+    const availableL2 = new Set(optionItems('l2'));
+    const availableL3 = new Set(optionItems('l3'));
+    for (const value of Array.from(filters.l2)) {
+      if (!availableL2.has(value)) filters.l2.delete(value);
+    }
+    for (const value of Array.from(filters.l3)) {
+      if (!availableL3.has(value)) filters.l3.delete(value);
+    }
+  }
+
+  function renderFilterGroup(level, el, groups) {
+    const selected = filters[level];
+    const visibleGroups = groups.filter((group) => group.values.length);
+    if (!visibleGroups.length) {
+      el.innerHTML = '<span class="instrument-filter-empty">无可选项</span>';
+      return;
+    }
+    el.innerHTML = visibleGroups.map((group) => {
+      const options = group.values.map((value) => {
+        const id = `inst-${level}-${group.key}-${value}`.replace(/[^\w\u4e00-\u9fa5-]/g, '-');
+        const checked = selected.has(value) ? 'checked' : '';
+        return `
+          <label for="${esc(id)}">
+            <input id="${esc(id)}" type="checkbox" data-level="${esc(level)}" value="${esc(value)}" ${checked}>
+            <span>${esc(value)}</span>
+          </label>
+        `;
+      }).join('');
+      const title = group.title ? `<div class="instrument-filter-subtitle">${esc(group.title)}</div>` : '';
+      return `<div class="instrument-filter-option-row">${title}<div class="instrument-filter-option-list">${options}</div></div>`;
+    }).join('');
+  }
+
+  function renderFilters() {
+    pruneInvalidFilters();
+    renderFilterGroup('l1', filterEls.l1, optionGroups('l1'));
+    renderFilterGroup('l2', filterEls.l2, optionGroups('l2'));
+    renderFilterGroup('l3', filterEls.l3, optionGroups('l3'));
+  }
+
+  function safeAnchorId(l1, l2, index) {
+    const raw = `${l1}-${l2}`.trim().replace(/\s+/g, '-');
+    const safe = raw.replace(/[^\w\u4e00-\u9fa5-]/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');
+    return `inst-section-${index}-${safe || 'uncategorized'}`;
+  }
+
+  function categorySections(items) {
+    const out = [];
+    let lastL1 = null;
+    let lastL2 = null;
+    for (const item of items) {
+      const l1 = String(item.category_l1 || '').trim() || '未分类';
+      const l2 = String(item.category_l2 || '').trim() || '未分二级';
+      if (l1 === lastL1 && l2 === lastL2) {
+        out[out.length - 1].count += 1;
+        continue;
+      }
+      out.push({
+        id: safeAnchorId(l1, l2, out.length + 1),
+        l1,
+        l2,
+        count: 1,
+      });
+      lastL1 = l1;
+      lastL2 = l2;
+    }
+    return out;
+  }
+
+  function setActiveSideNav(sectionId) {
+    if (!sectionId) return;
+    let activeBtn = null;
+    for (const btn of sideNavEl.querySelectorAll('[data-section-id]')) {
+      const active = btn.getAttribute('data-section-id') === sectionId;
+      btn.classList.toggle('is-active', active);
+      if (active) activeBtn = btn;
+    }
+    if (activeBtn) {
+      const scroller = sideNavEl.closest('.instrument-side-nav') || sideNavEl;
+      const targetTop = activeBtn.offsetTop - (scroller.clientHeight / 2) + (activeBtn.offsetHeight / 2);
+      scroller.scrollTo({ top: Math.max(0, targetTop), behavior: 'smooth' });
+    }
+  }
+
+  function renderSideNav(sections) {
+    if (!sections.length) {
+      sideNavEl.innerHTML = '<div class="instrument-side-nav-empty">无可跳转分类</div>';
       return;
     }
 
-    tableBody.innerHTML = items.map((item) => {
-      const symbol = String(item.symbol || '').trim();
-      const localStart = dateOnly(item.local_start_date);
-      const localEnd = dateOnly(item.local_end_date);
-      const startDefault = localEnd || localStart || '2020-01-01';
-      return `
-        <tr
-          data-symbol="${esc(symbol)}"
-          data-local-start="${esc(localStart)}"
-          data-local-end="${esc(localEnd)}"
+    const parts = [];
+    let lastL1 = null;
+    for (const section of sections) {
+      if (section.l1 !== lastL1) {
+        if (lastL1 !== null) parts.push('</div>');
+        parts.push(`
+          <div class="instrument-side-nav-group">
+            <div class="instrument-side-nav-l1">${esc(section.l1)}</div>
+        `);
+        lastL1 = section.l1;
+      }
+      parts.push(`
+        <button
+          class="instrument-side-nav-l2"
+          type="button"
+          data-section-id="${esc(section.id)}"
+          title="${esc(`${section.l1} - ${section.l2}`)}"
         >
-          <td>${esc(item.code || '')}</td>
-          <td>${esc(symbol)}</td>
-          <td>${esc(item.name || '-')}</td>
-          <td>${item.enabled ? '是' : '否'}</td>
-          <td data-role="rows">${fmtNum(item.rows)}</td>
-          <td data-role="range">${esc(dateRangeText(localStart, localEnd))}</td>
-          <td>
-            <div class="bt-form-row" style="margin: 0; gap: 6px;">
-              <input data-role="start" type="date" value="${esc(startDefault)}">
-              <input data-role="end" type="date" value="${esc(today)}">
-              <button data-role="backfill" type="button">补齐</button>
-            </div>
-            <div data-role="msg" style="font-size: 12px; color: #556; margin-top: 4px;"></div>
-          </td>
-        </tr>
-      `;
-    }).join('');
+          <span>${esc(section.l2)}</span>
+          <em>${Number(section.count || 0).toLocaleString()}</em>
+        </button>
+      `);
+    }
+    if (lastL1 !== null) parts.push('</div>');
+    sideNavEl.innerHTML = parts.join('');
+  }
+
+  function syncActiveSection() {
+    activeSyncPending = false;
+    const sections = Array.from(tableBody.querySelectorAll('tr.instrument-group-l2[id]'));
+    if (!sections.length) return;
+    const anchorTop = 260;
+    let current = sections[0];
+    for (const section of sections) {
+      if (section.getBoundingClientRect().top <= anchorTop) current = section;
+      else break;
+    }
+    setActiveSideNav(current.id);
+  }
+
+  function requestActiveSync() {
+    if (activeSyncPending) return;
+    activeSyncPending = true;
+    window.requestAnimationFrame(syncActiveSection);
+  }
+
+  function setupSectionObserver() {
+    if (sectionObserver) sectionObserver.disconnect();
+    sectionObserver = null;
+    syncActiveSection();
+  }
+
+  function rowHtml(item) {
+    const symbol = String(item.symbol || '').trim();
+    const localStart = dateOnly(item.local_start_date);
+    const localEnd = dateOnly(item.local_end_date);
+    return `
+      <tr
+        data-symbol="${esc(symbol)}"
+        data-local-start="${esc(localStart)}"
+        data-local-end="${esc(localEnd)}"
+      >
+        <td class="instrument-symbol-cell">${esc(symbol)}</td>
+        <td class="instrument-name-cell">${esc(item.name || '-')}</td>
+        <td class="instrument-category-cell">${esc(valueOrDash(item.category_l1))}</td>
+        <td class="instrument-category-cell">${esc(valueOrDash(item.category_l2))}</td>
+        <td class="instrument-category-cell">${esc(valueOrDash(item.category_l3))}</td>
+        <td class="instrument-factor-cell">${esc(tagsText(item))}</td>
+        <td class="instrument-date-cell" data-role="range">${esc(dateRangeText(localStart, localEnd))}</td>
+      </tr>
+    `;
+  }
+
+  function renderTable(items, sections) {
+    if (!Array.isArray(items) || !items.length) {
+      tableBody.innerHTML = '<tr><td colspan="7">没有符合条件的本地标的数据。</td></tr>';
+      return;
+    }
+
+    const parts = [];
+    let lastL1 = null;
+    let lastL2 = null;
+    let sectionIndex = 0;
+    for (const item of items) {
+      const l1 = String(item.category_l1 || '').trim() || '未分类';
+      const l2 = String(item.category_l2 || '').trim() || '未分二级';
+      if (l1 !== lastL1) {
+        parts.push(`<tr class="instrument-group-l1"><td colspan="7">${esc(l1)}</td></tr>`);
+        lastL1 = l1;
+        lastL2 = null;
+      }
+      if (l2 !== lastL2) {
+        const section = sections[sectionIndex] || { id: safeAnchorId(l1, l2, sectionIndex + 1), l1, l2 };
+        sectionIndex += 1;
+        parts.push(`<tr id="${esc(section.id)}" class="instrument-group-l2" data-l1="${esc(l1)}" data-l2="${esc(l2)}"><td colspan="7">${esc(l2)}</td></tr>`);
+        lastL2 = l2;
+      }
+      parts.push(rowHtml(item));
+    }
+    tableBody.innerHTML = parts.join('');
+  }
+
+  function render() {
+    renderFilters();
+    const visibleItems = allItems.filter(itemMatchesFilters);
+    const sections = categorySections(visibleItems);
+    renderSideNav(sections);
+    renderTable(visibleItems, sections);
+    setupSectionObserver();
+    statusEl.textContent = `已加载 ${allItems.length} 个标的，当前显示 ${visibleItems.length} 个。`;
   }
 
   async function loadList() {
@@ -107,11 +400,9 @@
     try {
       const resp = await fetch('/instruments/api/list');
       const data = await resp.json();
-      if (!resp.ok) {
-        throw new Error(data.detail || '列表加载失败');
-      }
-      render(data.items || []);
-      statusEl.textContent = `已加载 ${Number(data.count || 0)} 个标的。`;
+      if (!resp.ok) throw new Error(data.detail || '列表加载失败');
+      allItems = data.items || [];
+      render();
     } catch (err) {
       statusEl.textContent = `加载失败：${err.message}`;
       tableBody.innerHTML = '<tr><td colspan="7">数据加载失败。</td></tr>';
@@ -137,76 +428,53 @@
   }
 
   function refreshRowAfterBackfill(row, result) {
-    const rowsEl = row.querySelector('[data-role="rows"]');
     const rangeEl = row.querySelector('[data-role="range"]');
-    const startEl = row.querySelector('[data-role="start"]');
-    const endEl = row.querySelector('[data-role="end"]');
     const localStart = dateOnly(result.local_start_after);
     const localEnd = dateOnly(result.local_end_after);
 
-    if (rowsEl) rowsEl.textContent = fmtNum(result.rows_after);
     if (rangeEl) rangeEl.textContent = dateRangeText(localStart, localEnd);
     row.dataset.localStart = localStart;
     row.dataset.localEnd = localEnd;
-    if (startEl) startEl.value = localEnd || localStart || '2020-01-01';
-    if (endEl) endEl.value = today;
   }
 
   async function runBackfill(row, options = {}) {
     const symbol = String(row.dataset.symbol || '').trim();
     if (!symbol) return { ok: false, error: new Error('标的无效') };
-    const startEl = row.querySelector('[data-role="start"]');
-    const endEl = row.querySelector('[data-role="end"]');
     const btn = row.querySelector('[data-role="backfill"]');
-    const startDate = String(startEl?.value || '').trim();
-    const endDate = String(endEl?.value || '').trim();
+    const startDate = nextStartDateForRow(row);
+    const endDate = today;
     const restoreButton = options.restoreButton !== false;
 
     if (!startDate) {
-      setRowMessage(row, '请输入开始日期。', true);
-      return { ok: false, error: new Error('请输入开始日期') };
-    }
-    if (endDate && endDate < startDate) {
-      setRowMessage(row, '结束日期必须大于等于开始日期。', true);
-      return { ok: false, error: new Error('结束日期必须大于等于开始日期') };
+      setRowMessage(row, '无法确定补齐开始日期。', true);
+      return { ok: false, error: new Error('无法确定补齐开始日期') };
     }
 
     if (btn) btn.disabled = true;
-    setRowMessage(row, '正在补齐...');
+    setRowMessage(row, `正在补齐至 ${today}...`);
     try {
       const resp = await fetch(`/instruments/api/${encodeURIComponent(symbol)}/backfill`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          start_date: startDate,
-          end_date: endDate,
-        }),
+        body: JSON.stringify({ start_date: startDate, end_date: endDate }),
       });
       const data = await resp.json();
-      if (!resp.ok || !data.ok) {
-        throw new Error(data.detail || '补齐失败');
-      }
+      if (!resp.ok || !data.ok) throw new Error(data.detail || '补齐失败');
 
       const result = data.result || {};
       refreshRowAfterBackfill(row, result);
-
       if (result.status === 'no_data') {
         setRowMessage(
           row,
-          `未获取到数据。本地范围仍为 ${dateRangeText(result.local_start_after, result.local_end_after)}，请检查行情源连接或稍后重试。`,
+          `未获取到数据。本地范围仍为 ${dateRangeText(result.local_start_after, result.local_end_after)}。`,
           true
         );
         return { ok: false, noData: true, result };
       }
 
       const adjusted = Boolean(result.request_adjusted_to_earliest_available);
-      const adjustedText = adjusted
-        ? ` 请求开始日期已调整为最早可用日期 ${result.fetched_start || '-'}。`
-        : '';
-      setRowMessage(
-        row,
-        `完成。新增 ${Number(result.added_rows || 0)} 行，本地范围 ${dateRangeText(result.local_start_after, result.local_end_after)}。${adjustedText}`
-      );
+      const adjustedText = adjusted ? ` 请求开始日期已调整为 ${result.fetched_start || '-'}。` : '';
+      setRowMessage(row, `完成，新增 ${Number(result.added_rows || 0)} 行。${adjustedText}`);
       return { ok: true, result };
     } catch (err) {
       setRowMessage(row, `失败：${err.message}`, true);
@@ -218,7 +486,6 @@
 
   async function runBackfillAll() {
     if (isBulkRunning) return;
-
     const rows = Array.from(tableBody.querySelectorAll('tr[data-symbol]'));
     if (!rows.length) {
       statusEl.textContent = '没有可补齐的标的。';
@@ -232,17 +499,12 @@
     let failed = 0;
     let noData = 0;
     let addedRows = 0;
-    statusEl.textContent = `准备补齐 ${rows.length} 个标的，范围为各标的最后一天至 ${today}。`;
+    statusEl.textContent = `准备补齐当前列表 ${rows.length} 个标的至 ${today}。`;
 
     try {
       for (const row of rows) {
         const symbol = String(row.dataset.symbol || '').trim();
         const start = nextStartDateForRow(row);
-        const startEl = row.querySelector('[data-role="start"]');
-        const endEl = row.querySelector('[data-role="end"]');
-        if (startEl) startEl.value = start;
-        if (endEl) endEl.value = today;
-
         statusEl.textContent = `正在补齐 ${symbol}（${finished + 1}/${rows.length}）：${start} 至 ${today}`;
         const outcome = await runBackfill(row, { restoreButton: false });
         finished += 1;
@@ -254,7 +516,6 @@
           failed += 1;
         }
       }
-
       statusEl.textContent = `一键补齐结束：共 ${rows.length} 个标的，未获取到数据 ${noData} 个，失败 ${failed} 个，新增 ${addedRows.toLocaleString()} 行。`;
     } finally {
       isBulkRunning = false;
@@ -272,6 +533,37 @@
     await runBackfill(row);
   });
 
+  for (const el of Object.values(filterEls)) {
+    el.addEventListener('change', (event) => {
+      const target = event.target;
+      if (!(target instanceof HTMLInputElement)) return;
+      const level = target.dataset.level;
+      if (!filters[level]) return;
+      if (target.checked) filters[level].add(target.value);
+      else filters[level].delete(target.value);
+      render();
+    });
+  }
+
+  clearFiltersBtn.addEventListener('click', () => {
+    filters.l1.clear();
+    filters.l2.clear();
+    filters.l3.clear();
+    render();
+  });
+  sideNavEl.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    const btn = target.closest('[data-section-id]');
+    if (!(btn instanceof HTMLElement)) return;
+    const sectionId = btn.getAttribute('data-section-id') || '';
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    setActiveSideNav(sectionId);
+    section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  window.addEventListener('scroll', requestActiveSync, { passive: true });
+  window.addEventListener('resize', requestActiveSync);
   backfillAllBtn?.addEventListener('click', runBackfillAll);
 
   loadList();
