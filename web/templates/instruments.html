@@ -5,11 +5,22 @@
     <button id="backfillAllBtn" type="button">一键补齐当前列表至今日</button>
     <p id="instStatus" class="status-banner">正在加载标的...</p>
   </div>
+  <div id="instProgressWrap" class="inst-progress-wrap" hidden>
+    <progress id="instProgress" max="1" value="0"></progress>
+    <span id="instProgressText">0%</span>
+  </div>
+  <div id="instCompletionNotice" class="instrument-completion-notice" hidden>
+    <span id="instCompletionText"></span>
+    <button id="instCompletionClose" class="ghost-btn" type="button" aria-label="关闭补齐完成提示">关闭</button>
+  </div>
 
   <div class="instrument-filter-panel">
     <div class="instrument-filter-head">
       <strong>分类筛选</strong>
-      <button id="instClearFiltersBtn" class="ghost-btn" type="button">清空筛选</button>
+      <div class="instrument-filter-actions">
+        <button id="addInstrumentBtn" type="button">新增标的</button>
+        <button id="instClearFiltersBtn" class="ghost-btn" type="button">清空筛选</button>
+      </div>
     </div>
     <div class="instrument-filter-grid">
       <div class="instrument-filter-group">
@@ -61,13 +72,69 @@
   </div>
 </section>
 
+<div id="addInstrumentModal" class="instrument-modal" hidden>
+  <form id="addInstrumentForm" class="instrument-dialog" autocomplete="off">
+    <div class="instrument-dialog-head">
+      <h3>新增标的</h3>
+      <button id="addInstrumentCloseBtn" class="ghost-btn" type="button" aria-label="关闭新增标的弹窗">关闭</button>
+    </div>
+    <div class="instrument-form-grid">
+      <label>
+        <span>代码</span>
+        <input id="addInstrumentSymbol" type="text" placeholder="如 518850 或 518850.SH" required>
+      </label>
+      <label>
+        <span>名称</span>
+        <input id="addInstrumentName" type="text" readonly placeholder="输入代码后自动查询">
+      </label>
+      <label>
+        <span>一级类目</span>
+        <select id="addCategoryL1" required></select>
+      </label>
+      <label>
+        <span>二级类目</span>
+        <select id="addCategoryL2" required></select>
+      </label>
+      <label>
+        <span>三级类目</span>
+        <select id="addCategoryL3" required></select>
+      </label>
+    </div>
+    <p id="addInstrumentMsg" class="instrument-form-message"></p>
+    <div class="instrument-dialog-actions">
+      <button id="addInstrumentCancelBtn" class="ghost-btn" type="button">取消</button>
+      <button id="addInstrumentConfirmBtn" type="submit" disabled>确认</button>
+    </div>
+  </form>
+</div>
+
 <script>
 (() => {
   const statusEl = document.getElementById('instStatus');
   const backfillAllBtn = document.getElementById('backfillAllBtn');
+  const progressWrapEl = document.getElementById('instProgressWrap');
+  const progressEl = document.getElementById('instProgress');
+  const progressTextEl = document.getElementById('instProgressText');
+  const completionNoticeEl = document.getElementById('instCompletionNotice');
+  const completionTextEl = document.getElementById('instCompletionText');
+  const completionCloseBtn = document.getElementById('instCompletionClose');
   const clearFiltersBtn = document.getElementById('instClearFiltersBtn');
   const sideNavEl = document.getElementById('instSideNav');
   const tableBody = document.querySelector('#instTable tbody');
+  const addInstrumentBtn = document.getElementById('addInstrumentBtn');
+  const addInstrumentModal = document.getElementById('addInstrumentModal');
+  const addInstrumentForm = document.getElementById('addInstrumentForm');
+  const addInstrumentCloseBtn = document.getElementById('addInstrumentCloseBtn');
+  const addInstrumentCancelBtn = document.getElementById('addInstrumentCancelBtn');
+  const addInstrumentConfirmBtn = document.getElementById('addInstrumentConfirmBtn');
+  const addInstrumentSymbolEl = document.getElementById('addInstrumentSymbol');
+  const addInstrumentNameEl = document.getElementById('addInstrumentName');
+  const addInstrumentMsgEl = document.getElementById('addInstrumentMsg');
+  const addCategoryEls = {
+    l1: document.getElementById('addCategoryL1'),
+    l2: document.getElementById('addCategoryL2'),
+    l3: document.getElementById('addCategoryL3'),
+  };
   const filterEls = {
     l1: document.getElementById('instFilterL1'),
     l2: document.getElementById('instFilterL2'),
@@ -76,9 +143,20 @@
   const today = localToday();
   const filters = { l1: new Set(), l2: new Set(), l3: new Set() };
   let allItems = [];
+  let categoryItems = [];
+  let addLookupTimer = null;
+  let addLookupSeq = 0;
+  let isAddRunning = false;
+  let addPollTimer = null;
   let isBulkRunning = false;
+  let bulkPollTimer = null;
+  let currentBulkJobId = null;
+  let currentCompletionJobId = null;
+  let completedJobRefreshDone = null;
+  let completedAddJobRefreshDone = null;
   let sectionObserver = null;
   let activeSyncPending = false;
+  const dismissedCompletionKey = 'instrumentBulkBackfillDismissedJobId';
 
   function esc(v) {
     return String(v ?? '')
@@ -111,6 +189,57 @@
   function valueOrDash(value) {
     const text = String(value || '').trim();
     return text || '-';
+  }
+
+  function normalizeSymbolInput(value) {
+    const text = String(value || '').trim().toUpperCase();
+    if (!text) return '';
+    if (text.includes('.')) {
+      const [code, rawSuffix] = text.split('.', 2);
+      const suffix = rawSuffix === 'SH' ? 'SS' : rawSuffix;
+      return `${code}.${suffix}`;
+    }
+    const digits = text.replace(/\D/g, '');
+    if (digits.length !== 6) return text;
+    return `${digits}.${digits.startsWith('5') || digits.startsWith('6') ? 'SS' : 'SZ'}`;
+  }
+
+  function knownSymbolSet() {
+    return new Set((allItems || []).map((item) => String(item.symbol || '').trim().toUpperCase()).filter(Boolean));
+  }
+
+  function setAddMessage(text, isError = false) {
+    if (!addInstrumentMsgEl) return;
+    addInstrumentMsgEl.textContent = text || '';
+    addInstrumentMsgEl.classList.toggle('is-error', Boolean(isError));
+  }
+
+  function syncTaskControls() {
+    const disabled = isBulkRunning || isAddRunning;
+    if (backfillAllBtn) backfillAllBtn.disabled = disabled;
+    if (addInstrumentBtn) addInstrumentBtn.disabled = disabled;
+    for (const btn of tableBody.querySelectorAll('button[data-role="backfill"]')) {
+      btn.disabled = disabled;
+    }
+    updateAddConfirmState();
+  }
+
+  function addFormPayload() {
+    const nameLoading = addInstrumentNameEl?.dataset.loading === '1';
+    return {
+      symbol: normalizeSymbolInput(addInstrumentSymbolEl?.dataset.symbol || addInstrumentSymbolEl?.value || ''),
+      name: nameLoading ? '' : String(addInstrumentNameEl?.value || '').trim(),
+      category_l1: String(addCategoryEls.l1?.value || '').trim(),
+      category_l2: String(addCategoryEls.l2?.value || '').trim(),
+      category_l3: String(addCategoryEls.l3?.value || '').trim(),
+    };
+  }
+
+  function updateAddConfirmState() {
+    if (!addInstrumentConfirmBtn) return;
+    const payload = addFormPayload();
+    const ready = payload.symbol && payload.name && payload.category_l1 && payload.category_l2 && payload.category_l3;
+    addInstrumentConfirmBtn.disabled = !ready || isBulkRunning || isAddRunning;
   }
 
   function tagsText(item) {
@@ -231,6 +360,87 @@
     renderFilterGroup('l1', filterEls.l1, optionGroups('l1'));
     renderFilterGroup('l2', filterEls.l2, optionGroups('l2'));
     renderFilterGroup('l3', filterEls.l3, optionGroups('l3'));
+  }
+
+  function categoryItemsFromList() {
+    const rows = [];
+    const seen = new Set();
+    for (const item of allItems) {
+      const l1 = String(item.category_l1 || '').trim();
+      const l2 = String(item.category_l2 || '').trim();
+      const l3 = String(item.category_l3 || '').trim();
+      const candidates = [
+        { path: l1, level: 1, name: l1, parent_path: '', priority: item.priority_l1 },
+        { path: `${l1}-${l2}`, level: 2, name: l2, parent_path: l1, priority: item.priority_l2 },
+        { path: `${l1}-${l2}-${l3}`, level: 3, name: l3, parent_path: `${l1}-${l2}`, priority: item.priority_l3 },
+      ];
+      for (const row of candidates) {
+        if (!row.name || seen.has(row.path)) continue;
+        seen.add(row.path);
+        rows.push(row);
+      }
+    }
+    return rows;
+  }
+
+  function categoryRows() {
+    return Array.isArray(categoryItems) && categoryItems.length ? categoryItems : categoryItemsFromList();
+  }
+
+  function categoryChildren(level, parentPath = '') {
+    return categoryRows()
+      .filter((row) => Number(row.level || 0) === level && String(row.parent_path || '') === parentPath)
+      .sort((a, b) => {
+        const ap = Number(a.priority || 9999);
+        const bp = Number(b.priority || 9999);
+        if (ap !== bp) return ap - bp;
+        return String(a.name || '').localeCompare(String(b.name || ''), 'zh-Hans-CN');
+      });
+  }
+
+  function setSelectOptions(select, rows, placeholder) {
+    if (!select) return;
+    const current = select.value;
+    const options = [`<option value="">${esc(placeholder)}</option>`].concat(
+      rows.map((row) => `<option value="${esc(row.name)}" data-path="${esc(row.path)}">${esc(row.name)}</option>`)
+    );
+    select.innerHTML = options.join('');
+    if (rows.some((row) => row.name === current)) select.value = current;
+  }
+
+  function selectedCategoryPath(level) {
+    const select = addCategoryEls[level];
+    if (!select) return '';
+    const option = select.selectedOptions && select.selectedOptions[0];
+    return option ? String(option.dataset.path || '').trim() : '';
+  }
+
+  function renderAddCategorySelects(changedLevel = '') {
+    setSelectOptions(addCategoryEls.l1, categoryChildren(1), '选择一级类目');
+    if (changedLevel === 'l1') {
+      addCategoryEls.l2.value = '';
+      addCategoryEls.l3.value = '';
+    }
+
+    const l1Path = selectedCategoryPath('l1');
+    setSelectOptions(addCategoryEls.l2, l1Path ? categoryChildren(2, l1Path) : [], '选择二级类目');
+    if (changedLevel === 'l1' || changedLevel === 'l2') addCategoryEls.l3.value = '';
+
+    const l2Path = selectedCategoryPath('l2');
+    setSelectOptions(addCategoryEls.l3, l2Path ? categoryChildren(3, l2Path) : [], '选择三级类目');
+    updateAddConfirmState();
+  }
+
+  async function loadCategories() {
+    try {
+      const resp = await fetch('/instruments/api/categories');
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.detail || '分类加载失败');
+      categoryItems = data.items || [];
+    } catch (err) {
+      categoryItems = categoryItemsFromList();
+    }
+    renderAddCategorySelects();
   }
 
   function safeAnchorId(l1, l2, index) {
@@ -392,7 +602,9 @@
     renderSideNav(sections);
     renderTable(visibleItems, sections);
     setupSectionObserver();
-    statusEl.textContent = `已加载 ${allItems.length} 个标的，当前显示 ${visibleItems.length} 个。`;
+    if (!isBulkRunning && !isAddRunning) {
+      statusEl.textContent = `已加载 ${allItems.length} 个标的，当前显示 ${visibleItems.length} 个。`;
+    }
   }
 
   async function loadList() {
@@ -417,9 +629,191 @@
   }
 
   function setBackfillControlsDisabled(disabled) {
-    if (backfillAllBtn) backfillAllBtn.disabled = disabled;
+    if (backfillAllBtn) backfillAllBtn.disabled = disabled || isAddRunning;
     for (const btn of tableBody.querySelectorAll('button[data-role="backfill"]')) {
-      btn.disabled = disabled;
+      btn.disabled = disabled || isAddRunning;
+    }
+    syncTaskControls();
+  }
+
+  function summaryText(summary) {
+    const total = Number(summary?.total || 0);
+    const failed = Number(summary?.failed || 0);
+    const noData = Number(summary?.no_data || 0);
+    const addedRows = Number(summary?.added_rows || 0);
+    return `共 ${total} 个标的，未获取到数据 ${noData} 个，失败 ${failed} 个，新增 ${addedRows.toLocaleString()} 行。`;
+  }
+
+  function dismissedCompletionJobId() {
+    try {
+      return window.localStorage.getItem(dismissedCompletionKey) || '';
+    } catch (err) {
+      return '';
+    }
+  }
+
+  function dismissCompletion(jobId) {
+    if (completionNoticeEl) completionNoticeEl.hidden = true;
+    try {
+      if (jobId) window.localStorage.setItem(dismissedCompletionKey, jobId);
+    } catch (err) {
+      // Ignore localStorage failures; dismissal only affects the current browser.
+    }
+  }
+
+  function showCompletionNotice(job) {
+    const jobId = String(job?.job_id || '');
+    if (!completionNoticeEl || !completionTextEl || !jobId) return;
+    if (dismissedCompletionJobId() === jobId) {
+      completionNoticeEl.hidden = true;
+      return;
+    }
+    currentCompletionJobId = jobId;
+    const text = job.status === 'failed'
+      ? `后台补齐任务失败：${job.error || '请查看日志。'}`
+      : `后台补齐完成，${summaryText(job.summary || {})}`;
+    completionTextEl.textContent = text;
+    completionNoticeEl.hidden = false;
+  }
+
+  function showAddCompletionNotice(job) {
+    const jobId = String(job?.job_id || '');
+    if (!completionNoticeEl || !completionTextEl || !jobId) return;
+    currentCompletionJobId = jobId;
+    const summary = job.summary || {};
+    const text = job.status === 'failed'
+      ? `新增标的任务失败：${job.error || '请查看日志。'}`
+      : `新增标的完成：${summary.symbol || ''} ${summary.name || ''}，新增 ${Number(summary.added_rows || 0).toLocaleString()} 行。`;
+    completionTextEl.textContent = text;
+    completionNoticeEl.hidden = false;
+  }
+
+  function hideCompletionNotice() {
+    if (completionNoticeEl) completionNoticeEl.hidden = true;
+  }
+
+  function setProgressVisible(visible) {
+    if (progressWrapEl) progressWrapEl.hidden = !visible;
+  }
+
+  function setProgress(current, total) {
+    const safeTotal = Math.max(Number(total || 0), 1);
+    const safeCurrent = Math.max(0, Math.min(Number(current || 0), safeTotal));
+    const ratio = safeCurrent / safeTotal;
+    if (progressEl) progressEl.value = ratio;
+    if (progressTextEl) {
+      progressTextEl.textContent = `${(ratio * 100).toFixed(1)}% (${safeCurrent}/${safeTotal})`;
+    }
+  }
+
+  function stopBulkPolling() {
+    if (bulkPollTimer) window.clearInterval(bulkPollTimer);
+    bulkPollTimer = null;
+  }
+
+  function stopAddPolling() {
+    if (addPollTimer) window.clearInterval(addPollTimer);
+    addPollTimer = null;
+  }
+
+  function startBulkPolling() {
+    if (bulkPollTimer) return;
+    bulkPollTimer = window.setInterval(() => {
+      refreshBulkStatus({ silent: true });
+    }, 2000);
+  }
+
+  function startAddPolling() {
+    if (addPollTimer) return;
+    addPollTimer = window.setInterval(() => {
+      refreshAddStatus({ silent: true });
+    }, 2000);
+  }
+
+  function applyBulkJob(job) {
+    const status = String(job?.status || 'idle');
+    const running = status === 'running';
+    isBulkRunning = running;
+    setBackfillControlsDisabled(running);
+
+    if (backfillAllBtn) {
+      backfillAllBtn.textContent = running ? '后台补齐中...' : '一键补齐当前列表至今日';
+    }
+
+    if (running) {
+      currentBulkJobId = String(job.job_id || '');
+      hideCompletionNotice();
+      setProgressVisible(true);
+      setProgress(job.progress_current, job.progress_total);
+      statusEl.textContent = job.message || '后台补齐进行中...';
+      startBulkPolling();
+      return;
+    }
+
+    stopBulkPolling();
+    if (!isAddRunning) setProgressVisible(false);
+
+    if ((status === 'completed' || status === 'failed') && job?.job_id) {
+      currentBulkJobId = String(job.job_id || '');
+      currentCompletionJobId = currentBulkJobId;
+      statusEl.textContent = job.message || (status === 'completed' ? '后台补齐完成。' : '后台补齐失败。');
+      showCompletionNotice(job);
+      if (status === 'completed' && completedJobRefreshDone !== currentBulkJobId) {
+        completedJobRefreshDone = currentBulkJobId;
+        loadList();
+      }
+    }
+  }
+
+  async function refreshBulkStatus(options = {}) {
+    try {
+      const resp = await fetch('/instruments/api/backfill-all/status');
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.detail || '状态查询失败');
+      applyBulkJob(data.job || {});
+    } catch (err) {
+      if (!options.silent) statusEl.textContent = `补齐状态查询失败：${err.message}`;
+    }
+  }
+
+  function applyAddJob(job) {
+    const status = String(job?.status || 'idle');
+    const running = status === 'running';
+    isAddRunning = running;
+    syncTaskControls();
+
+    if (running) {
+      hideCompletionNotice();
+      setProgressVisible(true);
+      setProgress(job.progress_current, job.progress_total);
+      statusEl.textContent = job.message || '新增标的任务进行中...';
+      startAddPolling();
+      return;
+    }
+
+    stopAddPolling();
+    if (!isBulkRunning) setProgressVisible(false);
+
+    if ((status === 'completed' || status === 'failed') && job?.job_id) {
+      const jobId = String(job.job_id || '');
+      statusEl.textContent = job.message || (status === 'completed' ? '新增标的完成。' : '新增标的失败。');
+      showAddCompletionNotice(job);
+      if (status === 'completed' && completedAddJobRefreshDone !== jobId) {
+        completedAddJobRefreshDone = jobId;
+        loadList();
+        loadCategories();
+      }
+    }
+  }
+
+  async function refreshAddStatus(options = {}) {
+    try {
+      const resp = await fetch('/instruments/api/add/status');
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.detail || '新增状态查询失败');
+      applyAddJob(data.job || {});
+    } catch (err) {
+      if (!options.silent) statusEl.textContent = `新增状态查询失败：${err.message}`;
     }
   }
 
@@ -484,8 +878,149 @@
     }
   }
 
+  function resetAddForm() {
+    if (!addInstrumentForm) return;
+    addInstrumentForm.reset();
+    if (addInstrumentSymbolEl) addInstrumentSymbolEl.dataset.symbol = '';
+    if (addInstrumentNameEl) {
+      addInstrumentNameEl.dataset.loading = '0';
+      addInstrumentNameEl.value = '';
+    }
+    setAddMessage('');
+    renderAddCategorySelects();
+    updateAddConfirmState();
+  }
+
+  async function openAddModal() {
+    resetAddForm();
+    if (addInstrumentModal) addInstrumentModal.hidden = false;
+    if (!categoryRows().length) await loadCategories();
+    else renderAddCategorySelects();
+    addInstrumentSymbolEl?.focus();
+  }
+
+  function closeAddModal() {
+    if (addInstrumentModal) addInstrumentModal.hidden = true;
+  }
+
+  async function lookupAddInstrumentName() {
+    const rawSymbol = String(addInstrumentSymbolEl?.value || '').trim();
+    const symbol = normalizeSymbolInput(rawSymbol);
+    const seq = ++addLookupSeq;
+
+    if (addInstrumentSymbolEl) addInstrumentSymbolEl.dataset.symbol = '';
+    if (addInstrumentNameEl) {
+      addInstrumentNameEl.dataset.loading = '0';
+      addInstrumentNameEl.value = '';
+    }
+    updateAddConfirmState();
+
+    if (!symbol) {
+      setAddMessage('');
+      return;
+    }
+    if (!/^\d{6}\.(SS|SZ|BJ)$/.test(symbol)) {
+      setAddMessage('请输入 6 位标的代码，或完整代码如 518850.SH。', true);
+      return;
+    }
+    if (knownSymbolSet().has(symbol)) {
+      setAddMessage(`${symbol} 已被管理，不能重复添加。`, true);
+      return;
+    }
+
+    setAddMessage(`正在查询 ${symbol} 名称...`);
+    if (addInstrumentNameEl) {
+      addInstrumentNameEl.dataset.loading = '1';
+      addInstrumentNameEl.value = '查询中...';
+    }
+    try {
+      const resp = await fetch('/instruments/api/lookup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ symbol }),
+      });
+      const data = await resp.json();
+      if (seq !== addLookupSeq) return;
+      if (!resp.ok || !data.ok) throw new Error(data.detail || '名称查询失败');
+      if (addInstrumentSymbolEl) {
+        addInstrumentSymbolEl.dataset.symbol = data.symbol || symbol;
+        addInstrumentSymbolEl.value = data.symbol || symbol;
+      }
+      if (addInstrumentNameEl) {
+        addInstrumentNameEl.dataset.loading = '0';
+        addInstrumentNameEl.value = data.name || '';
+      }
+      setAddMessage(data.name ? `已识别：${data.name}` : '未查询到名称，请检查代码。', !data.name);
+    } catch (err) {
+      if (seq !== addLookupSeq) return;
+      if (addInstrumentNameEl) {
+        addInstrumentNameEl.dataset.loading = '0';
+        addInstrumentNameEl.value = '';
+      }
+      setAddMessage(err.message, true);
+    } finally {
+      updateAddConfirmState();
+    }
+  }
+
+  function scheduleAddLookup() {
+    if (addLookupTimer) window.clearTimeout(addLookupTimer);
+    const symbol = normalizeSymbolInput(addInstrumentSymbolEl?.value || '');
+    if (addInstrumentSymbolEl) addInstrumentSymbolEl.dataset.symbol = '';
+    if (addInstrumentNameEl) {
+      addInstrumentNameEl.dataset.loading = '0';
+      addInstrumentNameEl.value = '';
+    }
+    updateAddConfirmState();
+    if (!symbol) {
+      setAddMessage('');
+      return;
+    }
+    addLookupTimer = window.setTimeout(lookupAddInstrumentName, symbol.length >= 9 ? 250 : 650);
+  }
+
+  async function runAddInstrument(event) {
+    event.preventDefault();
+    if (isBulkRunning || isAddRunning) return;
+    const payload = addFormPayload();
+    if (!payload.symbol || !payload.name || !payload.category_l1 || !payload.category_l2 || !payload.category_l3) {
+      setAddMessage('请先完成代码识别和一二三级类目选择。', true);
+      return;
+    }
+    if (knownSymbolSet().has(payload.symbol)) {
+      setAddMessage(`${payload.symbol} 已被管理，不能重复添加。`, true);
+      return;
+    }
+
+    isAddRunning = true;
+    syncTaskControls();
+    hideCompletionNotice();
+    setProgressVisible(true);
+    setProgress(0, 3);
+    statusEl.textContent = `正在提交新增标的任务：${payload.symbol}。`;
+    setAddMessage('任务已提交，后台正在补充数据。');
+
+    try {
+      const resp = await fetch('/instruments/api/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, end_date: today }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.detail || '新增标的任务启动失败');
+      closeAddModal();
+      applyAddJob(data.job || {});
+    } catch (err) {
+      isAddRunning = false;
+      syncTaskControls();
+      setProgressVisible(false);
+      statusEl.textContent = `新增标的启动失败：${err.message}`;
+      setAddMessage(err.message, true);
+    }
+  }
+
   async function runBackfillAll() {
-    if (isBulkRunning) return;
+    if (isBulkRunning || isAddRunning) return;
     const rows = Array.from(tableBody.querySelectorAll('tr[data-symbol]'));
     if (!rows.length) {
       statusEl.textContent = '没有可补齐的标的。';
@@ -494,32 +1029,29 @@
 
     isBulkRunning = true;
     setBackfillControlsDisabled(true);
-
-    let finished = 0;
-    let failed = 0;
-    let noData = 0;
-    let addedRows = 0;
-    statusEl.textContent = `准备补齐当前列表 ${rows.length} 个标的至 ${today}。`;
+    hideCompletionNotice();
+    setProgressVisible(true);
+    setProgress(0, rows.length);
+    statusEl.textContent = `正在提交后台补齐任务：当前列表 ${rows.length} 个标的至 ${today}。`;
 
     try {
-      for (const row of rows) {
-        const symbol = String(row.dataset.symbol || '').trim();
-        const start = nextStartDateForRow(row);
-        statusEl.textContent = `正在补齐 ${symbol}（${finished + 1}/${rows.length}）：${start} 至 ${today}`;
-        const outcome = await runBackfill(row, { restoreButton: false });
-        finished += 1;
-        if (outcome.ok) {
-          addedRows += Number(outcome.result?.added_rows || 0);
-        } else if (outcome.noData) {
-          noData += 1;
-        } else {
-          failed += 1;
-        }
-      }
-      statusEl.textContent = `一键补齐结束：共 ${rows.length} 个标的，未获取到数据 ${noData} 个，失败 ${failed} 个，新增 ${addedRows.toLocaleString()} 行。`;
-    } finally {
+      const items = rows.map((row) => ({
+        symbol: String(row.dataset.symbol || '').trim(),
+        start_date: nextStartDateForRow(row),
+      })).filter((item) => item.symbol);
+      const resp = await fetch('/instruments/api/backfill-all', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items, end_date: today }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.detail || '后台补齐启动失败');
+      applyBulkJob(data.job || {});
+    } catch (err) {
+      statusEl.textContent = `后台补齐启动失败：${err.message}`;
       isBulkRunning = false;
       setBackfillControlsDisabled(false);
+      setProgressVisible(false);
     }
   }
 
@@ -545,6 +1077,10 @@
     });
   }
 
+  for (const [level, el] of Object.entries(addCategoryEls)) {
+    el?.addEventListener('change', () => renderAddCategorySelects(level));
+  }
+
   clearFiltersBtn.addEventListener('click', () => {
     filters.l1.clear();
     filters.l2.clear();
@@ -565,8 +1101,25 @@
   window.addEventListener('scroll', requestActiveSync, { passive: true });
   window.addEventListener('resize', requestActiveSync);
   backfillAllBtn?.addEventListener('click', runBackfillAll);
+  addInstrumentBtn?.addEventListener('click', openAddModal);
+  addInstrumentCloseBtn?.addEventListener('click', closeAddModal);
+  addInstrumentCancelBtn?.addEventListener('click', closeAddModal);
+  addInstrumentModal?.addEventListener('click', (event) => {
+    if (event.target === addInstrumentModal) closeAddModal();
+  });
+  addInstrumentSymbolEl?.addEventListener('input', scheduleAddLookup);
+  addInstrumentSymbolEl?.addEventListener('blur', () => {
+    if (addLookupTimer) window.clearTimeout(addLookupTimer);
+    addLookupTimer = null;
+    lookupAddInstrumentName();
+  });
+  addInstrumentForm?.addEventListener('submit', runAddInstrument);
+  completionCloseBtn?.addEventListener('click', () => dismissCompletion(currentCompletionJobId || currentBulkJobId));
 
   loadList();
+  loadCategories();
+  refreshBulkStatus({ silent: true });
+  refreshAddStatus({ silent: true });
 })();
 </script>
 {% endblock %}

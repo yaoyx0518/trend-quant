@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import logging
+import threading
 from datetime import date, datetime
 from pathlib import Path
+from typing import Callable
 
 import pandas as pd
 import yaml
@@ -20,12 +23,439 @@ router = APIRouter(prefix="/instruments", tags=["instruments"])
 templates = Jinja2Templates(directory="web/templates")
 market_store = MarketStore()
 runtime_store = RuntimeStore()
+logger = logging.getLogger(__name__)
 
 
 class InstrumentBackfillRequest(BaseModel):
     start_date: str = Field(default="")
     end_date: str = Field(default="")
     adjust: str = Field(default="")
+
+
+class InstrumentBulkBackfillItem(BaseModel):
+    symbol: str
+    start_date: str = Field(default="")
+
+
+class InstrumentBulkBackfillRequest(BaseModel):
+    items: list[InstrumentBulkBackfillItem] = Field(default_factory=list)
+    end_date: str = Field(default="")
+    adjust: str = Field(default="")
+
+
+class InstrumentNameLookupRequest(BaseModel):
+    symbol: str
+
+
+class InstrumentAddRequest(BaseModel):
+    symbol: str
+    name: str = Field(default="")
+    category_l1: str
+    category_l2: str
+    category_l3: str
+    end_date: str = Field(default="")
+    adjust: str = Field(default="")
+
+
+_config_write_lock = threading.Lock()
+
+
+def _empty_bulk_status() -> dict:
+    return {
+        "job_id": None,
+        "status": "idle",
+        "started_at": None,
+        "finished_at": None,
+        "progress_current": 0,
+        "progress_total": 0,
+        "current_symbol": None,
+        "message": "空闲。",
+        "error": None,
+        "summary": {
+            "total": 0,
+            "finished": 0,
+            "updated": 0,
+            "no_data": 0,
+            "failed": 0,
+            "added_rows": 0,
+        },
+    }
+
+
+class BulkBackfillJobManager:
+    def __init__(
+        self,
+        data_service_factory: Callable[[list[str] | None], DataService] | None = None,
+        runtime_store_obj: RuntimeStore | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._status = _empty_bulk_status()
+        self._data_service_factory = data_service_factory or (
+            lambda provider_priority: DataService(provider_priority=provider_priority)
+        )
+        self._runtime_store = runtime_store_obj or runtime_store
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return self._copy_status()
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._status.get("status") == "running"
+
+    def start(
+        self,
+        *,
+        items: list[dict],
+        end_date: date,
+        adjust: str,
+        provider_priority: list[str] | None,
+    ) -> tuple[bool, dict]:
+        if not items:
+            raise HTTPException(status_code=400, detail="没有可补齐的标的")
+
+        now = datetime.now()
+        job_id = now.strftime("%Y%m%d%H%M%S%f")
+        with self._lock:
+            if self._status.get("status") == "running":
+                return False, self._copy_status()
+
+            self._status = {
+                "job_id": job_id,
+                "status": "running",
+                "started_at": now.isoformat(),
+                "finished_at": None,
+                "progress_current": 0,
+                "progress_total": len(items),
+                "current_symbol": None,
+                "message": f"后台补齐任务已启动，共 {len(items)} 个标的。",
+                "error": None,
+                "summary": {
+                    "total": len(items),
+                    "finished": 0,
+                    "updated": 0,
+                    "no_data": 0,
+                    "failed": 0,
+                    "added_rows": 0,
+                },
+                "results": [],
+                "adjust": adjust,
+                "requested_end": end_date.isoformat(),
+            }
+            snapshot = self._copy_status()
+
+        thread = threading.Thread(
+            target=self._run,
+            kwargs={
+                "job_id": job_id,
+                "items": items,
+                "end_date": end_date,
+                "adjust": adjust,
+                "provider_priority": provider_priority,
+            },
+            daemon=True,
+        )
+        thread.start()
+        return True, snapshot
+
+    def _copy_status(self) -> dict:
+        status = dict(self._status)
+        status["summary"] = dict(self._status.get("summary") or {})
+        status["results"] = list(self._status.get("results") or [])
+        return status
+
+    def _run(
+        self,
+        *,
+        job_id: str,
+        items: list[dict],
+        end_date: date,
+        adjust: str,
+        provider_priority: list[str] | None,
+    ) -> None:
+        data_service = self._data_service_factory(provider_priority)
+        try:
+            for index, item in enumerate(items, start=1):
+                symbol = str(item.get("symbol") or "").strip().upper()
+                start_date = item.get("start_date")
+                with self._lock:
+                    if self._status.get("job_id") != job_id:
+                        return
+                    self._status["current_symbol"] = symbol
+                    self._status["message"] = f"正在补齐 {symbol}（{index}/{len(items)}）"
+
+                try:
+                    result = data_service.backfill_daily_history(
+                        symbol=symbol,
+                        start_date=start_date,
+                        end_date=end_date,
+                        adjust=adjust,
+                    )
+                    result["adjust"] = adjust
+                    result["symbol"] = symbol
+                    result["request_adjusted_to_earliest_available"] = bool(
+                        result.get("fetched_start")
+                        and result.get("requested_start")
+                        and str(result.get("fetched_start")) > str(result.get("requested_start"))
+                    )
+                    result_payload = {"ok": True, "result": result}
+                except Exception as exc:
+                    logger.exception("Instrument bulk backfill failed for %s", symbol)
+                    result_payload = {
+                        "ok": False,
+                        "symbol": symbol,
+                        "error": str(exc),
+                    }
+
+                with self._lock:
+                    if self._status.get("job_id") != job_id:
+                        return
+                    summary = self._status["summary"]
+                    summary["finished"] = int(summary.get("finished", 0)) + 1
+                    if result_payload["ok"]:
+                        result = result_payload["result"]
+                        status = str(result.get("status") or "")
+                        if status == "no_data":
+                            summary["no_data"] = int(summary.get("no_data", 0)) + 1
+                        else:
+                            summary["updated"] = int(summary.get("updated", 0)) + 1
+                        summary["added_rows"] = int(summary.get("added_rows", 0)) + int(
+                            result.get("added_rows") or 0
+                        )
+                    else:
+                        summary["failed"] = int(summary.get("failed", 0)) + 1
+
+                    self._status["progress_current"] = index
+                    self._status.setdefault("results", []).append(result_payload)
+
+            with self._lock:
+                if self._status.get("job_id") != job_id:
+                    return
+                summary = self._status["summary"]
+                self._status["status"] = "completed"
+                self._status["current_symbol"] = None
+                self._status["finished_at"] = datetime.now().isoformat()
+                self._status["message"] = (
+                    f"后台补齐完成：共 {summary.get('total', 0)} 个标的，"
+                    f"失败 {summary.get('failed', 0)} 个，"
+                    f"未获取到数据 {summary.get('no_data', 0)} 个，"
+                    f"新增 {int(summary.get('added_rows', 0)):,} 行。"
+                )
+                final_status = self._copy_status()
+            self._runtime_store.write_json(f"advice/instrument_bulk_backfill_{job_id}.json", final_status)
+        except Exception as exc:
+            logger.exception("Instrument bulk backfill job_id=%s failed", job_id)
+            with self._lock:
+                if self._status.get("job_id") == job_id:
+                    self._status["status"] = "failed"
+                    self._status["finished_at"] = datetime.now().isoformat()
+                    self._status["error"] = str(exc)
+                    self._status["message"] = f"后台补齐任务失败：{exc}"
+        finally:
+            close = getattr(data_service, "close", None)
+            if callable(close):
+                close()
+
+
+bulk_backfill_manager = BulkBackfillJobManager()
+
+
+def _empty_add_status() -> dict:
+    return {
+        "job_id": None,
+        "status": "idle",
+        "started_at": None,
+        "finished_at": None,
+        "progress_current": 0,
+        "progress_total": 0,
+        "current_symbol": None,
+        "message": "空闲。",
+        "error": None,
+        "summary": {
+            "symbol": None,
+            "name": None,
+            "metadata_saved": 0,
+            "config_saved": 0,
+            "added_rows": 0,
+            "backfill_status": None,
+        },
+    }
+
+
+class InstrumentAddJobManager:
+    def __init__(
+        self,
+        data_service_factory: Callable[[list[str] | None], DataService] | None = None,
+        runtime_store_obj: RuntimeStore | None = None,
+        config_path: str | Path = "config/instruments.yaml",
+    ) -> None:
+        self._lock = threading.Lock()
+        self._status = _empty_add_status()
+        self._pending_symbols: set[str] = set()
+        self._data_service_factory = data_service_factory or (
+            lambda provider_priority: DataService(provider_priority=provider_priority)
+        )
+        self._runtime_store = runtime_store_obj or runtime_store
+        self._config_path = Path(config_path)
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return self._copy_status()
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._status.get("status") == "running"
+
+    def is_symbol_pending(self, symbol: str) -> bool:
+        normalized = _normalize_symbol(symbol)
+        with self._lock:
+            return normalized in self._pending_symbols
+
+    def start(
+        self,
+        *,
+        item: dict,
+        end_date: date,
+        adjust: str,
+        provider_priority: list[str] | None,
+    ) -> tuple[bool, dict]:
+        symbol = _normalize_symbol(item.get("symbol", ""))
+        if not symbol:
+            raise HTTPException(status_code=400, detail="标的无效")
+
+        now = datetime.now()
+        job_id = now.strftime("%Y%m%d%H%M%S%f")
+        with self._lock:
+            if self._status.get("status") == "running":
+                return False, self._copy_status()
+            if symbol in self._pending_symbols:
+                return False, self._copy_status()
+
+            self._pending_symbols.add(symbol)
+            self._status = {
+                "job_id": job_id,
+                "status": "running",
+                "started_at": now.isoformat(),
+                "finished_at": None,
+                "progress_current": 0,
+                "progress_total": 3,
+                "current_symbol": symbol,
+                "message": f"新增标的任务已启动：{symbol}。",
+                "error": None,
+                "summary": {
+                    "symbol": symbol,
+                    "name": str(item.get("name") or "").strip(),
+                    "metadata_saved": 0,
+                    "config_saved": 0,
+                    "added_rows": 0,
+                    "backfill_status": None,
+                },
+                "result": None,
+                "adjust": adjust,
+                "requested_end": end_date.isoformat(),
+            }
+            snapshot = self._copy_status()
+
+        thread = threading.Thread(
+            target=self._run,
+            kwargs={
+                "job_id": job_id,
+                "item": {**item, "symbol": symbol},
+                "end_date": end_date,
+                "adjust": adjust,
+                "provider_priority": provider_priority,
+            },
+            daemon=True,
+        )
+        thread.start()
+        return True, snapshot
+
+    def _copy_status(self) -> dict:
+        status = dict(self._status)
+        status["summary"] = dict(self._status.get("summary") or {})
+        status["result"] = dict(self._status.get("result") or {}) if self._status.get("result") else None
+        return status
+
+    def _set_progress(self, job_id: str, current: int, message: str) -> None:
+        with self._lock:
+            if self._status.get("job_id") != job_id:
+                return
+            self._status["progress_current"] = current
+            self._status["message"] = message
+
+    def _run(
+        self,
+        *,
+        job_id: str,
+        item: dict,
+        end_date: date,
+        adjust: str,
+        provider_priority: list[str] | None,
+    ) -> None:
+        symbol = str(item.get("symbol") or "").strip().upper()
+        data_service = self._data_service_factory(provider_priority)
+        try:
+            self._set_progress(job_id, 0, f"正在写入 {symbol} 的配置与分类信息。")
+            record = _build_new_instrument_record(item)
+            config_saved = _append_instrument_config(record, self._config_path)
+            metadata_saved = get_db().save_instrument_metadata([record])
+            with self._lock:
+                if self._status.get("job_id") == job_id:
+                    summary = self._status["summary"]
+                    summary["name"] = record.get("name")
+                    summary["metadata_saved"] = metadata_saved
+                    summary["config_saved"] = config_saved
+                    self._status["progress_current"] = 1
+                    self._status["message"] = f"{symbol} 已写入配置，正在补齐历史行情。"
+
+            result = data_service.backfill_daily_history(
+                symbol=symbol,
+                start_date=date(2020, 1, 1),
+                end_date=end_date,
+                adjust=adjust,
+            )
+            result["adjust"] = adjust
+            result["symbol"] = symbol
+            result["request_adjusted_to_earliest_available"] = bool(
+                result.get("fetched_start")
+                and result.get("requested_start")
+                and str(result.get("fetched_start")) > str(result.get("requested_start"))
+            )
+
+            with self._lock:
+                if self._status.get("job_id") != job_id:
+                    return
+                summary = self._status["summary"]
+                summary["added_rows"] = int(result.get("added_rows") or 0)
+                summary["backfill_status"] = str(result.get("status") or "")
+                self._status["status"] = "completed"
+                self._status["finished_at"] = datetime.now().isoformat()
+                self._status["progress_current"] = 3
+                self._status["current_symbol"] = None
+                self._status["message"] = (
+                    f"新增标的完成：{symbol}，新增 "
+                    f"{int(result.get('added_rows') or 0):,} 行历史行情。"
+                )
+                self._status["result"] = result
+                final_status = self._copy_status()
+            self._runtime_store.write_json(f"advice/instrument_add_{job_id}.json", final_status)
+        except Exception as exc:
+            logger.exception("Instrument add job_id=%s failed for %s", job_id, symbol)
+            with self._lock:
+                if self._status.get("job_id") == job_id:
+                    self._status["status"] = "failed"
+                    self._status["finished_at"] = datetime.now().isoformat()
+                    self._status["error"] = str(exc)
+                    self._status["message"] = f"新增标的任务失败：{exc}"
+        finally:
+            close = getattr(data_service, "close", None)
+            if callable(close):
+                close()
+            with self._lock:
+                self._pending_symbols.discard(symbol)
+
+
+add_instrument_manager = InstrumentAddJobManager()
 
 
 def _to_date(text: str, fallback: date) -> date:
@@ -61,7 +491,10 @@ def _normalize_symbol(raw_symbol: str) -> str:
     if text == "":
         return ""
     if "." in text:
-        return text
+        code, suffix = text.split(".", 1)
+        if suffix == "SH":
+            suffix = "SS"
+        return f"{code}.{suffix}"
     digits = "".join(ch for ch in text if ch.isdigit())
     if len(digits) != 6:
         return text
@@ -99,6 +532,179 @@ def _config_name_map() -> dict[str, str]:
     return out
 
 
+def _config_items(path: str | Path = "config/instruments.yaml") -> list[dict]:
+    payload = _load_yaml(str(path))
+    items = payload.get("instruments", []) if isinstance(payload, dict) else []
+    return items if isinstance(items, list) else []
+
+
+def _known_managed_symbols() -> set[str]:
+    symbols: set[str] = set()
+    for item in _config_items():
+        if isinstance(item, dict):
+            symbol = _normalize_symbol(item.get("symbol", ""))
+            if symbol:
+                symbols.add(symbol)
+    for item in benchmark_instruments():
+        symbol = _normalize_symbol(item.get("symbol", ""))
+        if symbol:
+            symbols.add(symbol)
+
+    db = get_db()
+    symbols.update(str(item.get("symbol") or "").strip().upper() for item in db.list_instrument_metadata())
+    symbols.update(str(symbol or "").strip().upper() for symbol in db.list_market_symbols())
+    return {symbol for symbol in symbols if symbol}
+
+
+def _category_path_from_parts(l1: str, l2: str = "", l3: str = "") -> str:
+    return "-".join(part for part in [l1, l2, l3] if str(part or "").strip())
+
+
+def _category_priority_map() -> dict[str, int | None]:
+    try:
+        rows = get_db().list_instrument_categories()
+    except RuntimeError:
+        rows = []
+    return {
+        str(row.get("path") or "").strip(): row.get("priority")
+        for row in rows
+        if str(row.get("path") or "").strip()
+    }
+
+
+def _next_sort_order(config_items: list[dict] | None = None) -> int:
+    values: list[int] = []
+    for item in config_items if config_items is not None else _config_items():
+        if isinstance(item, dict):
+            try:
+                values.append(int(item.get("sort_order") or 0))
+            except (TypeError, ValueError):
+                pass
+    try:
+        for item in get_db().list_instrument_metadata():
+            try:
+                values.append(int(item.get("sort_order") or 0))
+            except (TypeError, ValueError):
+                pass
+    except RuntimeError:
+        pass
+    return max(values or [0]) + 1
+
+
+def _build_new_instrument_record(item: dict) -> dict:
+    symbol = _normalize_symbol(item.get("symbol", ""))
+    name = str(item.get("name") or "").strip()
+    l1 = str(item.get("category_l1") or "").strip()
+    l2 = str(item.get("category_l2") or "").strip()
+    l3 = str(item.get("category_l3") or "").strip()
+    if not symbol:
+        raise ValueError("标的无效")
+    if not name:
+        raise ValueError("标的名称为空，请先查询名称")
+    if not (l1 and l2 and l3):
+        raise ValueError("一二三级类目均必选")
+
+    priorities = _category_priority_map()
+    asset_type = "stock" if l1 == "股票" else "etf"
+    return {
+        "symbol": symbol,
+        "name": name,
+        "enabled": True,
+        "risk_budget_pct": 0.01,
+        "stop_atr_mul": 1.5,
+        "asset_type": asset_type,
+        "category_l1": l1,
+        "category_l2": l2,
+        "category_l3": l3,
+        "factor_tags": [],
+        "region_tag": "",
+        "priority_l1": priorities.get(_category_path_from_parts(l1)),
+        "priority_l2": priorities.get(_category_path_from_parts(l1, l2)),
+        "priority_l3": priorities.get(_category_path_from_parts(l1, l2, l3)),
+        "sort_order": _next_sort_order(),
+        "source": "manual_add",
+    }
+
+
+def _append_instrument_config(record: dict, path: str | Path = "config/instruments.yaml") -> int:
+    target = Path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with _config_write_lock:
+        payload = _load_yaml(str(target))
+        items = payload.get("instruments", []) if isinstance(payload, dict) else []
+        if not isinstance(items, list):
+            items = []
+
+        symbol = _normalize_symbol(record.get("symbol", ""))
+        for item in items:
+            if isinstance(item, dict) and _normalize_symbol(item.get("symbol", "")) == symbol:
+                raise ValueError(f"{symbol} 已在标的配置中")
+
+        config_record = {
+            "symbol": symbol,
+            "name": str(record.get("name") or "").strip(),
+            "enabled": bool(record.get("enabled", True)),
+            "risk_budget_pct": record.get("risk_budget_pct", 0.01),
+            "stop_atr_mul": record.get("stop_atr_mul", 1.5),
+            "asset_type": str(record.get("asset_type") or "etf"),
+            "category_l1": str(record.get("category_l1") or "").strip(),
+            "category_l2": str(record.get("category_l2") or "").strip(),
+            "category_l3": str(record.get("category_l3") or "").strip(),
+            "priority_l1": record.get("priority_l1"),
+            "priority_l2": record.get("priority_l2"),
+            "priority_l3": record.get("priority_l3"),
+            "sort_order": record.get("sort_order"),
+        }
+        items.append(config_record)
+        target.write_text(
+            yaml.safe_dump({"instruments": items}, sort_keys=False, allow_unicode=True),
+            encoding="utf-8",
+        )
+    return 1
+
+
+def _category_options() -> list[dict]:
+    db = get_db()
+    rows = db.list_instrument_categories()
+    if rows:
+        return rows
+
+    categories: dict[str, dict] = {}
+    for item in [*db.list_instrument_metadata(), *_config_items()]:
+        if not isinstance(item, dict):
+            continue
+        l1 = str(item.get("category_l1") or "").strip()
+        l2 = str(item.get("category_l2") or "").strip()
+        l3 = str(item.get("category_l3") or "").strip()
+        if l1:
+            categories.setdefault(
+                l1,
+                {"path": l1, "level": 1, "name": l1, "parent_path": "", "priority": item.get("priority_l1")},
+            )
+        if l1 and l2:
+            path = _category_path_from_parts(l1, l2)
+            categories.setdefault(
+                path,
+                {"path": path, "level": 2, "name": l2, "parent_path": l1, "priority": item.get("priority_l2")},
+            )
+        if l1 and l2 and l3:
+            parent = _category_path_from_parts(l1, l2)
+            path = _category_path_from_parts(l1, l2, l3)
+            categories.setdefault(
+                path,
+                {"path": path, "level": 3, "name": l3, "parent_path": parent, "priority": item.get("priority_l3")},
+            )
+    return sorted(
+        categories.values(),
+        key=lambda item: (
+            int(item.get("level") or 0),
+            str(item.get("parent_path") or ""),
+            int(item.get("priority") or 9999),
+            str(item.get("name") or ""),
+        ),
+    )
+
+
 def _category_path(meta: dict | None) -> str:
     if not meta:
         return ""
@@ -122,6 +728,18 @@ def _metadata_priority(meta: dict | None) -> tuple:
     )
 
 
+def _provider_priority_from_request(request: Request) -> list[str] | None:
+    if hasattr(request.app.state, "settings"):
+        return list(getattr(request.app.state.settings.app, "data_provider_priority", []) or [])
+    return None
+
+
+def _default_adjust() -> str:
+    strategy_payload = _load_yaml("config/strategy.yaml")
+    strategy_cfg = strategy_payload.get("strategy", {}) if isinstance(strategy_payload, dict) else {}
+    return str(strategy_cfg.get("adjust", "qfq")) if isinstance(strategy_cfg, dict) else "qfq"
+
+
 @router.get("", response_class=HTMLResponse)
 async def instruments_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -129,6 +747,93 @@ async def instruments_page(request: Request) -> HTMLResponse:
         request=request,
         context={"title": "标的管理"},
     )
+
+
+@router.get("/api/categories")
+async def list_categories() -> dict:
+    items = _category_options()
+    return {"ok": True, "items": items, "count": len(items)}
+
+
+@router.post("/api/lookup")
+async def lookup_instrument_name(payload: InstrumentNameLookupRequest, request: Request) -> dict:
+    normalized_symbol = _normalize_symbol(payload.symbol)
+    if normalized_symbol == "":
+        raise HTTPException(status_code=400, detail="标的代码必填")
+    if add_instrument_manager.is_symbol_pending(normalized_symbol):
+        raise HTTPException(status_code=409, detail=f"{normalized_symbol} 正在新增补充中")
+    if normalized_symbol in _known_managed_symbols():
+        raise HTTPException(status_code=409, detail=f"{normalized_symbol} 已被管理")
+
+    data_service = DataService(provider_priority=_provider_priority_from_request(request))
+    try:
+        result = data_service.fetch_instrument_name(normalized_symbol)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"名称查询失败：{exc}") from exc
+    finally:
+        data_service.close()
+
+    return {
+        "ok": True,
+        "symbol": normalized_symbol,
+        "code": _symbol_to_code(normalized_symbol),
+        "exchange": _symbol_suffix(normalized_symbol),
+        "name": result.get("name", ""),
+        "provider": result.get("provider", ""),
+        "ts": result.get("ts"),
+    }
+
+
+@router.post("/api/add")
+async def start_add_instrument(payload: InstrumentAddRequest, request: Request) -> dict:
+    normalized_symbol = _normalize_symbol(payload.symbol)
+    if normalized_symbol == "":
+        raise HTTPException(status_code=400, detail="标的代码必填")
+    if add_instrument_manager.is_symbol_pending(normalized_symbol):
+        raise HTTPException(status_code=409, detail=f"{normalized_symbol} 正在新增补充中")
+    if add_instrument_manager.is_running():
+        raise HTTPException(status_code=409, detail="已有新增标的任务正在运行")
+    if normalized_symbol in _known_managed_symbols():
+        raise HTTPException(status_code=409, detail=f"{normalized_symbol} 已被管理")
+
+    category_values = [
+        str(payload.category_l1 or "").strip(),
+        str(payload.category_l2 or "").strip(),
+        str(payload.category_l3 or "").strip(),
+    ]
+    if not all(category_values):
+        raise HTTPException(status_code=400, detail="一二三级类目均必选")
+
+    valid_paths = {str(item.get("path") or "").strip() for item in _category_options()}
+    category_path = _category_path_from_parts(*category_values)
+    if category_path not in valid_paths:
+        raise HTTPException(status_code=400, detail="类目组合不存在，请重新选择")
+
+    try:
+        end_date = _to_date(payload.end_date, date.today())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式必须是 YYYY-MM-DD")
+
+    adjust = str(payload.adjust or _default_adjust()).strip().lower() or "qfq"
+    item = {
+        "symbol": normalized_symbol,
+        "name": str(payload.name or "").strip(),
+        "category_l1": category_values[0],
+        "category_l2": category_values[1],
+        "category_l3": category_values[2],
+    }
+    started, status = add_instrument_manager.start(
+        item=item,
+        end_date=end_date,
+        adjust=adjust,
+        provider_priority=_provider_priority_from_request(request),
+    )
+    return {"ok": True, "started": started, "job": status}
+
+
+@router.get("/api/add/status")
+async def get_add_instrument_status() -> dict:
+    return {"ok": True, "job": add_instrument_manager.snapshot()}
 
 
 @router.get("/api/list")
@@ -229,21 +934,18 @@ async def backfill_instrument(symbol: str, payload: InstrumentBackfillRequest, r
     except ValueError:
         raise HTTPException(status_code=400, detail="日期格式必须是 YYYY-MM-DD")
 
-    strategy_payload = _load_yaml("config/strategy.yaml")
-    strategy_cfg = strategy_payload.get("strategy", {}) if isinstance(strategy_payload, dict) else {}
-    adjust_default = str(strategy_cfg.get("adjust", "qfq")) if isinstance(strategy_cfg, dict) else "qfq"
-    adjust = str(payload.adjust or adjust_default).strip().lower() or "qfq"
+    adjust = str(payload.adjust or _default_adjust()).strip().lower() or "qfq"
 
-    provider_priority = None
-    if hasattr(request.app.state, "settings"):
-        provider_priority = list(getattr(request.app.state.settings.app, "data_provider_priority", []) or [])
-    data_service = DataService(provider_priority=provider_priority)
-    result = data_service.backfill_daily_history(
-        symbol=normalized_symbol,
-        start_date=start_date,
-        end_date=end_date,
-        adjust=adjust,
-    )
+    data_service = DataService(provider_priority=_provider_priority_from_request(request))
+    try:
+        result = data_service.backfill_daily_history(
+            symbol=normalized_symbol,
+            start_date=start_date,
+            end_date=end_date,
+            adjust=adjust,
+        )
+    finally:
+        data_service.close()
     result["adjust"] = adjust
     result["requested_symbol"] = symbol
     result["symbol"] = normalized_symbol
@@ -256,3 +958,38 @@ async def backfill_instrument(symbol: str, payload: InstrumentBackfillRequest, r
     stamp = datetime.now().strftime("%Y%m%d%H%M%S")
     runtime_store.write_json(f"advice/instrument_backfill_{normalized_symbol}_{stamp}.json", result)
     return {"ok": True, "result": result}
+
+
+@router.post("/api/backfill-all")
+async def start_bulk_backfill(payload: InstrumentBulkBackfillRequest, request: Request) -> dict:
+    try:
+        end_date = _to_date(payload.end_date, date.today())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="日期格式必须是 YYYY-MM-DD")
+
+    adjust = str(payload.adjust or _default_adjust()).strip().lower() or "qfq"
+    items: list[dict] = []
+    seen_symbols: set[str] = set()
+    for raw_item in payload.items:
+        symbol = _normalize_symbol(raw_item.symbol)
+        if symbol == "" or symbol in seen_symbols:
+            continue
+        seen_symbols.add(symbol)
+        try:
+            start_date = _to_date(raw_item.start_date, date(2020, 1, 1))
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"{symbol} 的开始日期格式必须是 YYYY-MM-DD")
+        items.append({"symbol": symbol, "start_date": start_date})
+
+    started, status = bulk_backfill_manager.start(
+        items=items,
+        end_date=end_date,
+        adjust=adjust,
+        provider_priority=_provider_priority_from_request(request),
+    )
+    return {"ok": True, "started": started, "job": status}
+
+
+@router.get("/api/backfill-all/status")
+async def get_bulk_backfill_status() -> dict:
+    return {"ok": True, "job": bulk_backfill_manager.snapshot()}

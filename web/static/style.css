@@ -766,6 +766,79 @@ button:disabled {
   margin: 0;
 }
 
+.inst-progress-wrap {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.inst-progress-wrap[hidden] {
+  display: none;
+}
+
+.inst-progress-wrap progress {
+  width: min(560px, 100%);
+  height: 14px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(20, 41, 51, 0.08);
+}
+
+.inst-progress-wrap progress::-webkit-progress-bar {
+  background: rgba(20, 41, 51, 0.08);
+}
+
+.inst-progress-wrap progress::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-warm) 100%);
+  border-radius: 999px;
+}
+
+.inst-progress-wrap progress::-moz-progress-bar {
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-warm) 100%);
+  border-radius: 999px;
+}
+
+.inst-progress-wrap span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.instrument-completion-notice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border: 1px solid rgba(13, 122, 113, 0.16);
+  border-radius: 12px;
+  background: rgba(215, 240, 234, 0.72);
+  color: var(--accent-strong);
+  box-shadow: var(--shadow-sm);
+}
+
+.instrument-completion-notice[hidden] {
+  display: none;
+}
+
+.instrument-completion-notice span {
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.instrument-completion-notice .ghost-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
 .instruments-page {
   overflow: visible;
   animation: none;
@@ -788,15 +861,121 @@ button:disabled {
   margin-bottom: 12px;
 }
 
+.instrument-filter-actions {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .instrument-filter-head strong {
   color: var(--text);
   font-size: 14px;
 }
 
-.instrument-filter-head .ghost-btn {
+.instrument-filter-actions button {
   min-height: 34px;
   padding: 0 12px;
   font-size: 12px;
+}
+
+.instrument-filter-actions .ghost-btn {
+  min-height: 34px;
+}
+
+.instrument-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(17, 35, 42, 0.38);
+  backdrop-filter: blur(4px);
+}
+
+.instrument-modal[hidden] {
+  display: none;
+}
+
+.instrument-dialog {
+  width: min(620px, 100%);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+.instrument-dialog-head {
+  display: flex;
+  gap: 14px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.instrument-dialog-head h3 {
+  margin: 0;
+  font-size: 1.18rem;
+  letter-spacing: 0;
+}
+
+.instrument-dialog-head .ghost-btn {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+
+.instrument-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.instrument-form-grid label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.instrument-form-grid input,
+.instrument-form-grid select {
+  width: 100%;
+  min-width: 0;
+}
+
+.instrument-form-grid input[readonly] {
+  background: rgba(240, 245, 242, 0.82);
+  color: var(--text);
+}
+
+.instrument-form-message {
+  min-height: 22px;
+  margin: 14px 0 0;
+  color: var(--accent-strong);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.instrument-form-message.is-error {
+  color: #b42318;
+}
+
+.instrument-dialog-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.instrument-dialog-actions button {
+  min-width: 92px;
 }
 
 .instrument-filter-grid {
@@ -1773,6 +1952,14 @@ details > summary::marker {
   }
 
   .instrument-filter-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .instrument-filter-head {
+    align-items: flex-start;
+  }
+
+  .instrument-form-grid {
     grid-template-columns: 1fr;
   }
 

@@ -340,21 +340,6 @@
     }, true);
   }
 
-  function trendLineColor(value) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return '#667680';
-    const ratio = Math.min(Math.abs(n) / 30, 1);
-    if (n >= 0) {
-      const red = Math.round(218 - ratio * 42);
-      const green = Math.round(92 - ratio * 46);
-      const blue = Math.round(88 - ratio * 36);
-      return `rgb(${red}, ${green}, ${blue})`;
-    }
-    const green = Math.round(140 - ratio * 44);
-    const blue = Math.round(118 - ratio * 35);
-    return `rgb(20, ${green}, ${blue})`;
-  }
-
   function renderTrend(payload, zoom) {
     const dates = payload.dates || [];
     const trend = payload.indicators?.trend || {};
@@ -370,21 +355,34 @@
           const lines = [String(params[0].axisValue || '')];
           for (const p of params) {
             const raw = Array.isArray(p.value) ? p.value[1] : p.value;
+            if (raw == null || raw === '-') continue;
             lines.push(`${p.seriesName}：${num(raw, 2)}`);
           }
           return lines.join('<br/>');
         },
       },
-      legend: { data: ['Trend', 'Trend MA5', 'Trend MA10'], top: 2 },
+      legend: {
+        data: ['Trend', 'Trend MA5', 'Trend MA10'],
+        top: 2,
+        selected: { 'Trend MA10': false },
+      },
       grid: { left: 62, right: 28, top: 36, bottom: 42 },
       dataZoom: buildDataZoom(zoom.start, zoom.end),
       visualMap: {
         show: false,
+        type: 'piecewise',
         seriesIndex: 0,
-        min: -10,
-        max: 30,
         dimension: 1,
-        inRange: { color: ['#0a6a4c', '#54a384', '#b1b7bd', '#d95c58', '#a92828'] },
+        pieces: [
+          { lt: -7.5, color: '#0a6a4c' },
+          { gte: -7.5, lt: -5, color: '#16805f' },
+          { gte: -5, lt: -2.5, color: '#2d9877' },
+          { gte: -2.5, lt: 0, color: '#62b99b' },
+          { gte: 0, lt: 5, color: '#df8b86' },
+          { gte: 5, lt: 10, color: '#d95c58' },
+          { gte: 10, lt: 20, color: '#c43d3b' },
+          { gte: 20, color: '#a92828' },
+        ],
       },
       xAxis: { type: 'category', data: dates, boundaryGap: false },
       yAxis: {
@@ -403,7 +401,6 @@
           symbol: 'none',
           smooth: true,
           lineStyle: { width: 2.6 },
-          itemStyle: { color: (params) => trendLineColor(params.value?.[1]) },
           markLine: {
             silent: true,
             symbol: 'none',

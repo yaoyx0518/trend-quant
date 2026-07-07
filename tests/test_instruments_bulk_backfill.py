@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+import threading
+import tempfile
+import time
+import unittest
+from datetime import date
+from pathlib import Path
+
+import yaml
+
+from app.routers.instruments import BulkBackfillJobManager, InstrumentAddJobManager
+from data.storage.db import get_db, init_db
+
+
+class FakeRuntimeStore:
+    def __init__(self) -> None:
+        self.writes: list[tuple[str, dict]] = []
+
+    def write_json(self, path: str, payload: dict) -> None:
+        self.writes.append((path, payload))
+
+
+class FakeBackfillService:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def backfill_daily_history(self, symbol: str, start_date: date, end_date: date, adjust: str) -> dict:
+        if symbol == "000003.SZ":
+            raise RuntimeError("provider failed")
+        if symbol == "000002.SZ":
+            return {
+                "symbol": symbol,
+                "status": "no_data",
+                "requested_start": start_date.isoformat(),
+                "requested_end": end_date.isoformat(),
+                "added_rows": 0,
+                "fetched_start": None,
+            }
+        return {
+            "symbol": symbol,
+            "status": "updated",
+            "requested_start": start_date.isoformat(),
+            "requested_end": end_date.isoformat(),
+            "added_rows": 2,
+            "fetched_start": start_date.isoformat(),
+        }
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class BlockingBackfillService:
+    def __init__(self, release: threading.Event) -> None:
+        self.release = release
+
+    def backfill_daily_history(self, symbol: str, start_date: date, end_date: date, adjust: str) -> dict:
+        self.release.wait(timeout=2)
+        return {
+            "symbol": symbol,
+            "status": "updated",
+            "requested_start": start_date.isoformat(),
+            "requested_end": end_date.isoformat(),
+            "added_rows": 1,
+            "fetched_start": start_date.isoformat(),
+        }
+
+    def close(self) -> None:
+        pass
+
+
+def wait_for_terminal(manager: BulkBackfillJobManager, timeout: float = 2.0) -> dict:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        status = manager.snapshot()
+        if status["status"] in {"completed", "failed"}:
+            return status
+        time.sleep(0.02)
+    raise AssertionError("bulk backfill job did not finish")
+
+
+class BulkBackfillJobManagerTest(unittest.TestCase):
+    def test_runs_in_background_and_summarizes_results(self) -> None:
+        store = FakeRuntimeStore()
+        services: list[FakeBackfillService] = []
+
+        def factory(provider_priority: list[str] | None) -> FakeBackfillService:
+            service = FakeBackfillService()
+            services.append(service)
+            return service
+
+        manager = BulkBackfillJobManager(data_service_factory=factory, runtime_store_obj=store)
+        started, status = manager.start(
+            items=[
+                {"symbol": "000001.SZ", "start_date": date(2026, 7, 1)},
+                {"symbol": "000002.SZ", "start_date": date(2026, 7, 1)},
+                {"symbol": "000003.SZ", "start_date": date(2026, 7, 1)},
+            ],
+            end_date=date(2026, 7, 7),
+            adjust="qfq",
+            provider_priority=["tickflow"],
+        )
+
+        self.assertTrue(started)
+        self.assertEqual(status["status"], "running")
+
+        done = wait_for_terminal(manager)
+
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual(done["progress_current"], 3)
+        self.assertEqual(done["progress_total"], 3)
+        self.assertEqual(done["summary"]["updated"], 1)
+        self.assertEqual(done["summary"]["no_data"], 1)
+        self.assertEqual(done["summary"]["failed"], 1)
+        self.assertEqual(done["summary"]["added_rows"], 2)
+        self.assertTrue(services[0].closed)
+        self.assertEqual(len(store.writes), 1)
+
+    def test_rejects_second_job_while_running(self) -> None:
+        release = threading.Event()
+        manager = BulkBackfillJobManager(
+            data_service_factory=lambda provider_priority: BlockingBackfillService(release),
+            runtime_store_obj=FakeRuntimeStore(),
+        )
+
+        started, status = manager.start(
+            items=[{"symbol": "000001.SZ", "start_date": date(2026, 7, 1)}],
+            end_date=date(2026, 7, 7),
+            adjust="qfq",
+            provider_priority=None,
+        )
+        self.assertTrue(started)
+        self.assertEqual(status["status"], "running")
+
+        started_again, second_status = manager.start(
+            items=[{"symbol": "000002.SZ", "start_date": date(2026, 7, 1)}],
+            end_date=date(2026, 7, 7),
+            adjust="qfq",
+            provider_priority=None,
+        )
+        self.assertFalse(started_again)
+        self.assertEqual(second_status["job_id"], status["job_id"])
+
+        release.set()
+        self.assertEqual(wait_for_terminal(manager)["status"], "completed")
+
+
+class InstrumentAddJobManagerTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp.name)
+        init_db(self.tmp_path / "test.db")
+        get_db().save_instrument_categories(
+            [
+                {"path": "股票", "level": 1, "name": "股票", "priority": 3},
+                {
+                    "path": "股票-创业板",
+                    "level": 2,
+                    "name": "创业板",
+                    "parent_path": "股票",
+                    "priority": 1,
+                },
+                {
+                    "path": "股票-创业板-电源设备",
+                    "level": 3,
+                    "name": "电源设备",
+                    "parent_path": "股票-创业板",
+                    "priority": 1,
+                },
+                {"path": "商品", "level": 1, "name": "商品", "priority": 4},
+                {
+                    "path": "商品-贵金属",
+                    "level": 2,
+                    "name": "贵金属",
+                    "parent_path": "商品",
+                    "priority": 1,
+                },
+                {
+                    "path": "商品-贵金属-实物黄金",
+                    "level": 3,
+                    "name": "实物黄金",
+                    "parent_path": "商品-贵金属",
+                    "priority": 1,
+                },
+            ]
+        )
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
+    def test_add_job_writes_config_metadata_and_backfills(self) -> None:
+        config_path = self.tmp_path / "instruments.yaml"
+        manager = InstrumentAddJobManager(
+            data_service_factory=lambda provider_priority: FakeBackfillService(),
+            runtime_store_obj=FakeRuntimeStore(),
+            config_path=config_path,
+        )
+
+        started, status = manager.start(
+            item={
+                "symbol": "301516.SZ",
+                "name": "中远通",
+                "category_l1": "股票",
+                "category_l2": "创业板",
+                "category_l3": "电源设备",
+            },
+            end_date=date(2026, 7, 7),
+            adjust="qfq",
+            provider_priority=None,
+        )
+
+        self.assertTrue(started)
+        self.assertEqual(status["status"], "running")
+        done = wait_for_terminal(manager)
+
+        self.assertEqual(done["status"], "completed")
+        self.assertEqual(done["progress_current"], 3)
+        self.assertEqual(done["summary"]["config_saved"], 1)
+        self.assertEqual(done["summary"]["metadata_saved"], 1)
+        self.assertEqual(done["summary"]["added_rows"], 2)
+        saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved_config["instruments"][0]["symbol"], "301516.SZ")
+        self.assertEqual(saved_config["instruments"][0]["asset_type"], "stock")
+        self.assertEqual(get_db().get_instrument_metadata("301516.SZ")["category_path"], "股票-创业板-电源设备")
+
+    def test_rejects_second_add_job_while_running(self) -> None:
+        release = threading.Event()
+        manager = InstrumentAddJobManager(
+            data_service_factory=lambda provider_priority: BlockingBackfillService(release),
+            runtime_store_obj=FakeRuntimeStore(),
+            config_path=self.tmp_path / "instruments.yaml",
+        )
+
+        started, status = manager.start(
+            item={
+                "symbol": "518850.SS",
+                "name": "黄金ETF华夏",
+                "category_l1": "商品",
+                "category_l2": "贵金属",
+                "category_l3": "实物黄金",
+            },
+            end_date=date(2026, 7, 7),
+            adjust="qfq",
+            provider_priority=None,
+        )
+        self.assertTrue(started)
+
+        started_again, second_status = manager.start(
+            item={
+                "symbol": "159985.SZ",
+                "name": "豆粕ETF华夏",
+                "category_l1": "商品",
+                "category_l2": "贵金属",
+                "category_l3": "实物黄金",
+            },
+            end_date=date(2026, 7, 7),
+            adjust="qfq",
+            provider_priority=None,
+        )
+        self.assertFalse(started_again)
+        self.assertEqual(second_status["job_id"], status["job_id"])
+
+        release.set()
+        self.assertEqual(wait_for_terminal(manager)["status"], "completed")
+
+
+if __name__ == "__main__":
+    unittest.main()
