@@ -1301,6 +1301,231 @@ button:disabled {
   font-weight: 800;
 }
 
+.rule-metric-panel {
+  padding: 18px;
+}
+
+.rule-metric-table {
+  width: 100%;
+  min-width: 920px;
+  table-layout: fixed;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.rule-metric-table th,
+.rule-metric-table td {
+  padding: 12px 14px;
+  text-align: right;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.rule-metric-table th {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+  background: rgba(229, 238, 233, 0.78);
+}
+
+.rule-metric-table td {
+  color: var(--text);
+  font-size: 18px;
+  line-height: 1.2;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.rule-metric-table th:first-child,
+.rule-metric-table td:first-child {
+  text-align: left;
+}
+
+.modal-open {
+  overflow: hidden;
+}
+
+.rule-strategy-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 36px 24px;
+  overflow: auto;
+  background: rgba(17, 35, 42, 0.42);
+  backdrop-filter: blur(5px);
+}
+
+.rule-strategy-modal[hidden] {
+  display: none;
+}
+
+.rule-strategy-dialog {
+  width: min(1120px, 100%);
+  padding: 22px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--panel-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+.rule-strategy-dialog-head {
+  display: flex;
+  gap: 18px;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+
+.rule-strategy-dialog-head h3 {
+  margin: 0 0 8px;
+  font-size: 1.24rem;
+  letter-spacing: 0;
+}
+
+.rule-strategy-dialog-head .context-hint {
+  margin: 0;
+}
+
+.rule-strategy-name-field {
+  width: min(520px, 100%);
+  margin-bottom: 16px;
+}
+
+.rule-strategy-name-field input {
+  width: 100%;
+}
+
+.rule-condition-stack {
+  display: grid;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.rule-condition-panel {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.rule-condition-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.rule-condition-head h4 {
+  margin: 0;
+}
+
+.rule-condition-row {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) 78px minmax(260px, 1fr) 74px;
+  gap: 12px;
+  align-items: start;
+  padding: 12px 0;
+  border-top: 1px solid rgba(20, 41, 51, 0.08);
+}
+
+.rule-condition-row:first-child {
+  border-top: 0;
+}
+
+.rule-value-editor {
+  display: grid;
+  grid-template-columns: 126px minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  min-width: 0;
+}
+
+.rule-value-editor select,
+.rule-value-editor input,
+.rule-condition-row .rule-operator {
+  width: 100%;
+  min-height: 38px;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+.rule-condition-row .rule-operator {
+  align-self: start;
+  text-align: center;
+}
+
+.rule-remove-condition {
+  width: 74px;
+  min-height: 38px;
+  padding: 0 10px;
+}
+
+.value-detail,
+.indicator-params,
+.state-params {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.value-detail {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.indicator-params,
+.state-params {
+  grid-template-columns: repeat(2, minmax(96px, 1fr));
+}
+
+.indicator-params label,
+.state-params label {
+  display: grid;
+  grid-template-columns: auto minmax(82px, 1fr);
+  gap: 8px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.indicator-params input,
+.state-params input {
+  min-width: 0;
+}
+
+.rule-strategy-dialog-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 18px;
+}
+
+.rule-strategy-dialog-actions #strategySaveStatus {
+  margin-right: auto;
+  color: var(--muted);
+  font-weight: 700;
+}
+
+@media (max-width: 1100px) {
+  .rule-condition-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-value-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-remove-condition {
+    width: 100%;
+  }
+}
+
 .metric-negative,
 .metric-risk {
   color: var(--success);

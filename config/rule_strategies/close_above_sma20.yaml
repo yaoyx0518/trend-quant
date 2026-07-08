@@ -1,0 +1,39 @@
+schema_version: 1
+id: close_above_sma20
+name: 收盘价上穿/跌破 SMA20
+trade_mode: single_symbol_all_in
+description: 收盘价大于等于 SMA20 时买入，收盘价小于等于 SMA20 时卖出。
+
+entry:
+  type: group
+  combinator: all
+  children:
+    - id: close_gte_sma20
+      type: condition
+      left:
+        type: price
+        field: close
+      operator: ">="
+      right:
+        type: indicator
+        name: sma
+        params:
+          field: close
+          period: 20
+
+exit:
+  type: group
+  combinator: all
+  children:
+    - id: close_lte_sma20
+      type: condition
+      left:
+        type: price
+        field: close
+      operator: "<="
+      right:
+        type: indicator
+        name: sma
+        params:
+          field: close
+          period: 20

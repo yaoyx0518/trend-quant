@@ -1,0 +1,461 @@
+from __future__ import annotations
+
+from datetime import date, datetime
+
+import pandas as pd
+
+from rule_backtest.condition_engine import ConditionEngine
+from rule_backtest.indicators import latest_field
+from rule_backtest.metrics import annual_returns, compute_drawdown, compute_summary, monthly_returns
+from rule_backtest.models import BacktestExecutionConfig, PositionState, RuleBacktestRequest
+from rule_backtest.state_values import initialize_stop_state, update_position_state_for_day
+from rule_backtest.value_resolver import ValueResolver
+
+
+class SingleSymbolAllInBacktestEngine:
+    def run(self, request: RuleBacktestRequest) -> dict:
+        bars = self._prepare_bars(request.bars)
+        if request.start_date is not None:
+            bars = bars[bars["date"] >= request.start_date]
+        if request.end_date is not None:
+            bars = bars[bars["date"] <= request.end_date]
+        bars = bars.reset_index(drop=True)
+
+        run_id = request.run_id or datetime.now().strftime("%Y%m%d%H%M%S%f")
+        strategy = request.strategy
+        execution = request.execution
+        debug_enabled = self._debug_enabled(execution=execution, bars=bars)
+
+        resolver = ValueResolver(strategy_cfg=strategy.get("indicator_config", {}) if isinstance(strategy, dict) else {})
+        condition_engine = ConditionEngine(resolver)
+
+        cash = float(execution.initial_capital)
+        position = PositionState()
+        trades: list[dict] = []
+        daily_nav: list[dict] = []
+        condition_trace: list[dict] = []
+        debug_log: list[dict] = []
+        turnover_total = 0.0
+
+        for idx, row in bars.iterrows():
+            day = row["date"]
+            day_str = day.isoformat()
+            day_bars = bars.iloc[: idx + 1].copy()
+            close_price = float(row["close"])
+            debug_day: dict = {
+                "date": day_str,
+                "raw_bar": self._row_to_dict(row),
+                "history_window": {
+                    "start": bars.iloc[0]["date"].isoformat(),
+                    "end": day_str,
+                    "rows": int(len(day_bars)),
+                },
+            } if debug_enabled else {}
+
+            state_before = self._position_snapshot(position)
+            state_trace = update_position_state_for_day(position=position, bars=day_bars, strategy=strategy)
+            sold_today = False
+            if debug_enabled:
+                debug_day["state_before"] = state_before
+                debug_day["state_values"] = state_trace
+
+            exit_passed = False
+            exit_traces: list[dict] = []
+            if position.is_open:
+                exit_passed, exit_traces = condition_engine.evaluate_group(
+                    strategy.get("exit", {}),
+                    bars=day_bars,
+                    position=position,
+                    debug=debug_enabled,
+                )
+                condition_trace.extend(self._format_condition_trace(day_str, "EXIT", exit_traces))
+                if debug_enabled:
+                    debug_day["exit_condition_trace"] = exit_traces
+
+            if position.is_open and exit_passed:
+                reason, reference_price = self._resolve_sell_reference_price(
+                    exit_traces=exit_traces,
+                    close_price=close_price,
+                    position=position,
+                )
+                trade, cash_delta = self._execute_sell(
+                    symbol=request.symbol,
+                    day=day_str,
+                    qty=position.qty,
+                    reference_price=reference_price,
+                    cash_before=cash,
+                    avg_cost=position.avg_cost,
+                    reason=reason,
+                    execution=execution,
+                )
+                cash += cash_delta
+                turnover_total += float(trade["gross_amount"])
+                trades.append(trade)
+                if debug_enabled:
+                    debug_day["decision"] = {"side": "SELL", "reason": reason}
+                    debug_day["execution_trace"] = trade
+                position.reset()
+                sold_today = True
+
+            entry_passed = False
+            entry_traces: list[dict] = []
+            if (not position.is_open) and (not sold_today):
+                entry_passed, entry_traces = condition_engine.evaluate_group(
+                    strategy.get("entry", {}),
+                    bars=day_bars,
+                    position=position,
+                    debug=debug_enabled,
+                )
+                condition_trace.extend(self._format_condition_trace(day_str, "ENTRY", entry_traces))
+                if debug_enabled:
+                    debug_day["entry_condition_trace"] = entry_traces
+
+            if (not position.is_open) and entry_passed:
+                reference_price = close_price
+                qty = self._max_buy_qty(
+                    cash=cash,
+                    reference_price=reference_price,
+                    execution=execution,
+                )
+                if qty > 0:
+                    trade, cash_delta = self._execute_buy(
+                        symbol=request.symbol,
+                        day=day_str,
+                        qty=qty,
+                        reference_price=reference_price,
+                        cash_before=cash,
+                        reason="entry_conditions_passed",
+                        execution=execution,
+                    )
+                    cash += cash_delta
+                    turnover_total += float(trade["gross_amount"])
+                    trades.append(trade)
+                    position.qty = qty
+                    position.avg_cost = float(trade["total_cost"]) / qty
+                    initialize_trace = initialize_stop_state(
+                        position=position,
+                        bars=day_bars,
+                        strategy=strategy,
+                        entry_price=float(trade["exec_price"]),
+                        entry_date=day_str,
+                    )
+                    if debug_enabled:
+                        debug_day["decision"] = {"side": "BUY", "reason": "entry_conditions_passed"}
+                        debug_day["execution_trace"] = trade
+                        debug_day["state_initialization"] = initialize_trace
+
+            market_value = position.qty * close_price if position.is_open else 0.0
+            equity = cash + market_value
+            nav_row = {
+                "date": day_str,
+                "cash": float(cash),
+                "market_value": float(market_value),
+                "equity": float(equity),
+                "qty": int(position.qty),
+                "close": float(close_price),
+            }
+            daily_nav.append(nav_row)
+            if debug_enabled:
+                debug_day["state_after"] = self._position_snapshot(position)
+                debug_day["daily_nav"] = nav_row
+                debug_log.append(debug_day)
+
+        drawdown = compute_drawdown(daily_nav)
+        summary = compute_summary(daily_nav=daily_nav, trades=trades, turnover_total=turnover_total)
+        benchmark = self._buy_and_hold_benchmark(
+            bars=bars,
+            initial_capital=execution.initial_capital,
+            lot_size=execution.lot_size,
+        )
+        kline_payload = self._build_kline_payload(bars=bars, trades=trades)
+
+        return {
+            "run_id": run_id,
+            "status": "ok",
+            "strategy_id": strategy.get("id", ""),
+            "symbol": request.symbol,
+            "start_date": bars["date"].iloc[0].isoformat() if not bars.empty else None,
+            "end_date": bars["date"].iloc[-1].isoformat() if not bars.empty else None,
+            "initial_capital": float(execution.initial_capital),
+            "final_equity": float(daily_nav[-1]["equity"]) if daily_nav else float(execution.initial_capital),
+            "summary": summary,
+            "trades": trades,
+            "daily_nav": daily_nav,
+            "condition_trace": condition_trace,
+            "debug_log": debug_log if debug_enabled else [],
+            "drawdown": drawdown,
+            "annual_returns": annual_returns(daily_nav),
+            "monthly_returns": monthly_returns(daily_nav),
+            "benchmark": benchmark,
+            "charts": {
+                "dates": [row["date"] for row in daily_nav],
+                "nav": [row["equity"] for row in daily_nav],
+                "drawdown": [row["drawdown"] for row in drawdown],
+                "buy_points": [self._trade_point(trade) for trade in trades if trade["side"] == "BUY"],
+                "sell_points": [self._trade_point(trade) for trade in trades if trade["side"] == "SELL"],
+                "kline": kline_payload,
+            },
+        }
+
+    @staticmethod
+    def _prepare_bars(raw_bars: object) -> pd.DataFrame:
+        df = pd.DataFrame(raw_bars).copy()
+        if df.empty:
+            return pd.DataFrame(columns=["date", "open", "high", "low", "close", "volume", "amount"])
+        if "date" not in df.columns and "time" in df.columns:
+            df["date"] = pd.to_datetime(df["time"], errors="coerce").dt.date
+        else:
+            df["date"] = pd.to_datetime(df["date"], errors="coerce").dt.date
+        for col in ("open", "high", "low", "close", "volume", "amount"):
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        df = df.dropna(subset=["date", "open", "high", "low", "close"]).sort_values("date").reset_index(drop=True)
+        return df
+
+    @staticmethod
+    def _debug_enabled(execution: BacktestExecutionConfig, bars: pd.DataFrame) -> bool:
+        if execution.debug_log_enabled is not None:
+            return bool(execution.debug_log_enabled)
+        if bars.empty:
+            return False
+        days = (bars["date"].iloc[-1] - bars["date"].iloc[0]).days
+        return days < int(execution.debug_auto_enable_max_days)
+
+    @staticmethod
+    def _max_buy_qty(cash: float, reference_price: float, execution: BacktestExecutionConfig) -> int:
+        if cash <= 0 or reference_price <= 0:
+            return 0
+        exec_price = reference_price * (1.0 + execution.slippage)
+        lot_size = max(int(execution.lot_size), 1)
+        estimated_fee_per_share = exec_price * execution.fee_rate
+        estimated_per_share = exec_price + estimated_fee_per_share
+        raw_qty = int(cash // estimated_per_share)
+        qty = (raw_qty // lot_size) * lot_size
+        while qty > 0:
+            gross = qty * exec_price
+            commission = max(gross * execution.fee_rate, execution.fee_min)
+            if gross + commission <= cash:
+                return qty
+            qty -= lot_size
+        return 0
+
+    @staticmethod
+    def _execute_buy(
+        symbol: str,
+        day: str,
+        qty: int,
+        reference_price: float,
+        cash_before: float,
+        reason: str,
+        execution: BacktestExecutionConfig,
+    ) -> tuple[dict, float]:
+        exec_price = reference_price * (1.0 + execution.slippage)
+        gross = qty * exec_price
+        commission = max(gross * execution.fee_rate, execution.fee_min)
+        stamp_tax = 0.0
+        total_cost = gross + commission + stamp_tax
+        trade = {
+            "date": day,
+            "symbol": symbol,
+            "side": "BUY",
+            "qty": int(qty),
+            "reason": reason,
+            "reference_price_source": "close",
+            "reference_price": float(reference_price),
+            "slippage_rate": float(execution.slippage),
+            "exec_price": float(exec_price),
+            "price": float(exec_price),
+            "gross_amount": float(gross),
+            "commission_rate": float(execution.fee_rate),
+            "commission_min": float(execution.fee_min),
+            "commission": float(commission),
+            "fee": float(commission),
+            "stamp_tax_rate": 0.0,
+            "stamp_tax": float(stamp_tax),
+            "total_cost": float(total_cost),
+            "net_proceeds": 0.0,
+            "cash_before": float(cash_before),
+            "cash_after": float(cash_before - total_cost),
+        }
+        return trade, -total_cost
+
+    @staticmethod
+    def _execute_sell(
+        symbol: str,
+        day: str,
+        qty: int,
+        reference_price: float,
+        cash_before: float,
+        avg_cost: float,
+        reason: str,
+        execution: BacktestExecutionConfig,
+    ) -> tuple[dict, float]:
+        exec_price = reference_price * (1.0 - execution.slippage)
+        gross = qty * exec_price
+        commission = max(gross * execution.fee_rate, execution.fee_min)
+        stamp_tax_rate = execution.stock_stamp_tax_rate if execution.instrument_type == "stock" else 0.0
+        stamp_tax = gross * stamp_tax_rate
+        net = gross - commission - stamp_tax
+        pnl = net - qty * avg_cost
+        trade = {
+            "date": day,
+            "symbol": symbol,
+            "side": "SELL",
+            "qty": int(qty),
+            "reason": reason,
+            "reference_price_source": "stop_price" if reason in {"hard_stop", "chandelier_stop"} else "close",
+            "reference_price": float(reference_price),
+            "slippage_rate": float(execution.slippage),
+            "exec_price": float(exec_price),
+            "price": float(exec_price),
+            "gross_amount": float(gross),
+            "commission_rate": float(execution.fee_rate),
+            "commission_min": float(execution.fee_min),
+            "commission": float(commission),
+            "fee": float(commission),
+            "stamp_tax_rate": float(stamp_tax_rate),
+            "stamp_tax": float(stamp_tax),
+            "total_cost": 0.0,
+            "net_proceeds": float(net),
+            "pnl": float(pnl),
+            "cash_before": float(cash_before),
+            "cash_after": float(cash_before + net),
+        }
+        return trade, net
+
+    @staticmethod
+    def _resolve_sell_reference_price(
+        exit_traces: list[dict],
+        close_price: float,
+        position: PositionState,
+    ) -> tuple[str, float]:
+        for trace in exit_traces:
+            if not bool(trace.get("passed", False)):
+                continue
+            for key in ("left_trace", "right_trace"):
+                value_trace = trace.get(key, {})
+                if not isinstance(value_trace, dict):
+                    continue
+                if value_trace.get("type") == "state_value" and value_trace.get("name") in {"hard_stop", "chandelier_stop"}:
+                    name = str(value_trace.get("name"))
+                    value = value_trace.get("value")
+                    if value is not None and float(value) > 0:
+                        return name, float(value)
+        if position.hard_stop > 0 and close_price <= position.hard_stop:
+            return "hard_stop", position.hard_stop
+        if position.chandelier_stop > 0 and close_price <= position.chandelier_stop:
+            return "chandelier_stop", position.chandelier_stop
+        return "exit_conditions_passed", close_price
+
+    @staticmethod
+    def _format_condition_trace(day: str, side: str, traces: list[dict]) -> list[dict]:
+        out: list[dict] = []
+        for trace in traces:
+            out.append(
+                {
+                    "date": day,
+                    "side": side,
+                    "condition_id": trace.get("condition_id"),
+                    "condition_index": trace.get("condition_index"),
+                    "left_value": trace.get("left_value"),
+                    "operator": trace.get("operator"),
+                    "right_value": trace.get("right_value"),
+                    "passed": bool(trace.get("passed", False)),
+                }
+            )
+        return out
+
+    @staticmethod
+    def _position_snapshot(position: PositionState) -> dict:
+        return {
+            "qty": int(position.qty),
+            "entry_price": float(position.entry_price),
+            "avg_cost": float(position.avg_cost),
+            "entry_date": position.entry_date,
+            "atr_at_entry": float(position.atr_at_entry),
+            "hard_stop": float(position.hard_stop),
+            "highest_high_since_entry": float(position.highest_high_since_entry),
+            "chandelier_stop": float(position.chandelier_stop),
+        }
+
+    @staticmethod
+    def _row_to_dict(row: pd.Series) -> dict:
+        out = {}
+        for key, value in row.items():
+            if isinstance(value, date):
+                out[str(key)] = value.isoformat()
+            elif hasattr(value, "item"):
+                out[str(key)] = value.item()
+            else:
+                out[str(key)] = value
+        return out
+
+    @staticmethod
+    def _trade_point(trade: dict) -> dict:
+        return {
+            "date": trade.get("date"),
+            "symbol": trade.get("symbol"),
+            "qty": trade.get("qty"),
+            "price": trade.get("exec_price"),
+            "amount": trade.get("total_cost") if trade.get("side") == "BUY" else trade.get("net_proceeds"),
+            "reason": trade.get("reason"),
+        }
+
+    @staticmethod
+    def _buy_and_hold_benchmark(bars: pd.DataFrame, initial_capital: float, lot_size: int) -> dict:
+        if bars.empty:
+            return {"name": "buy_and_hold", "series": []}
+        first_close = float(bars.iloc[0]["close"])
+        qty = int((initial_capital // first_close) // lot_size) * lot_size if first_close > 0 else 0
+        cash = initial_capital - qty * first_close
+        series = [
+            {"date": row["date"].isoformat(), "equity": float(cash + qty * float(row["close"]))}
+            for _, row in bars.iterrows()
+        ]
+        return {"name": "buy_and_hold", "qty": int(qty), "series": series}
+
+    @staticmethod
+    def _build_kline_payload(bars: pd.DataFrame, trades: list[dict]) -> dict:
+        if bars.empty:
+            return {"dates": [], "candles": [], "ma": {}, "buy_points": [], "sell_points": []}
+
+        data = bars.copy()
+        dates = [row["date"].isoformat() for _, row in data.iterrows()]
+        candles = [
+            [
+                float(row["open"]),
+                float(row["close"]),
+                float(row["low"]),
+                float(row["high"]),
+            ]
+            for _, row in data.iterrows()
+        ]
+        close = pd.to_numeric(data["close"], errors="coerce")
+        ma: dict[str, list[float | None]] = {}
+        for period in (5, 10, 20, 30, 60, 120, 200):
+            series = close.rolling(period, min_periods=period).mean()
+            ma[str(period)] = [float(v) if pd.notna(v) else None for v in series.tolist()]
+
+        buy_points = []
+        sell_points = []
+        for trade in trades:
+            point = {
+                "date": str(trade.get("date", "")),
+                "price": float(trade.get("exec_price", 0.0) or 0.0),
+                "reference_price": float(trade.get("reference_price", 0.0) or 0.0),
+                "qty": int(trade.get("qty", 0) or 0),
+                "amount": trade.get("total_cost") if str(trade.get("side", "")).upper() == "BUY" else trade.get("net_proceeds"),
+                "reason": trade.get("reason", ""),
+            }
+            if str(trade.get("side", "")).upper() == "BUY":
+                buy_points.append(point)
+            elif str(trade.get("side", "")).upper() == "SELL":
+                sell_points.append(point)
+
+        return {
+            "dates": dates,
+            "candles": candles,
+            "ma": ma,
+            "buy_points": buy_points,
+            "sell_points": sell_points,
+        }

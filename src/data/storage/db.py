@@ -100,6 +100,20 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_backtests_created ON backtests(created_at);
 
+                CREATE TABLE IF NOT EXISTS rule_strategies (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL DEFAULT '',
+                    description TEXT NOT NULL DEFAULT '',
+                    schema_version INTEGER NOT NULL DEFAULT 1,
+                    trade_mode TEXT NOT NULL DEFAULT 'single_symbol_all_in',
+                    payload_json TEXT NOT NULL,
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_rule_strategies_active_updated
+                    ON rule_strategies(is_active, updated_at);
+
                 CREATE TABLE IF NOT EXISTS optimization_jobs (
                     job_id TEXT PRIMARY KEY,
                     status TEXT,
@@ -354,6 +368,84 @@ class Database:
             d = dict(row)
             d["positions"] = json.loads(d["positions"]) if d.get("positions") else {}
             return d
+
+    # ------------------------------------------------------------------
+    # rule_strategies
+    # ------------------------------------------------------------------
+    def save_rule_strategy(self, strategy: dict, overwrite: bool = False) -> dict:
+        strategy_id = str(strategy.get("id", "")).strip()
+        if not strategy_id:
+            raise ValueError("rule strategy id is required")
+
+        with self._connect() as conn:
+            if not overwrite:
+                row = conn.execute(
+                    "SELECT id FROM rule_strategies WHERE id = ? AND is_active = 1",
+                    (strategy_id,),
+                ).fetchone()
+                if row:
+                    raise FileExistsError(f"rule strategy already exists: {strategy_id}")
+
+            conn.execute(
+                """INSERT INTO rule_strategies
+                   (id, name, description, schema_version, trade_mode, payload_json, is_active)
+                   VALUES (?, ?, ?, ?, ?, ?, 1)
+                   ON CONFLICT(id) DO UPDATE SET
+                     name=excluded.name,
+                     description=excluded.description,
+                     schema_version=excluded.schema_version,
+                     trade_mode=excluded.trade_mode,
+                     payload_json=excluded.payload_json,
+                     is_active=1,
+                     updated_at=CURRENT_TIMESTAMP""",
+                (
+                    strategy_id,
+                    str(strategy.get("name", strategy_id) or strategy_id),
+                    str(strategy.get("description", "") or ""),
+                    int(strategy.get("schema_version", 1) or 1),
+                    str(strategy.get("trade_mode", "single_symbol_all_in") or "single_symbol_all_in"),
+                    json.dumps(strategy, ensure_ascii=False),
+                ),
+            )
+        saved = self.get_rule_strategy(strategy_id)
+        if saved is None:
+            raise RuntimeError(f"failed to save rule strategy: {strategy_id}")
+        return saved
+
+    def get_rule_strategy(self, strategy_id: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM rule_strategies
+                   WHERE id = ? AND is_active = 1""",
+                (strategy_id,),
+            ).fetchone()
+        return self._rule_strategy_row(row) if row else None
+
+    def list_rule_strategies(self) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM rule_strategies
+                   WHERE is_active = 1
+                   ORDER BY updated_at DESC, id ASC"""
+            ).fetchall()
+        return [self._rule_strategy_row(row) for row in rows]
+
+    def delete_rule_strategy(self, strategy_id: str) -> bool:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """UPDATE rule_strategies
+                   SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+                   WHERE id = ? AND is_active = 1""",
+                (strategy_id,),
+            )
+            return cur.rowcount > 0
+
+    @staticmethod
+    def _rule_strategy_row(row: sqlite3.Row) -> dict:
+        d = dict(row)
+        payload = json.loads(d["payload_json"]) if d.get("payload_json") else {}
+        d["strategy"] = payload
+        return d
 
     # ------------------------------------------------------------------
     # backtests

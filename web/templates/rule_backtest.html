@@ -1,0 +1,568 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-panel">
+  <h2>规则回测</h2>
+  <p class="context-hint">基于结构化策略 YAML 的单标的全仓买卖回测。成本参数使用系统默认值。</p>
+
+  <div class="bt-form-row rule-main-row">
+    <label>策略
+      <select id="strategySelect"></select>
+    </label>
+    <button id="newStrategyBtn" type="button" class="ghost-btn">新增策略</button>
+    <label>标的
+      <select id="symbolSelect"></select>
+    </label>
+    <label>开始日期 <input id="startDate" type="date" value="2025-01-01"></label>
+    <label>结束日期 <input id="endDate" type="date"></label>
+    <label>初始资金 <input id="initialCapital" type="number" value="1000000" min="10000" step="10000"></label>
+    <button id="runBtn" type="button">运行</button>
+  </div>
+
+  <div id="strategyEditor" class="rule-strategy-modal" hidden>
+    <div class="rule-strategy-dialog" role="dialog" aria-modal="true" aria-labelledby="strategyDialogTitle">
+      <div class="rule-strategy-dialog-head">
+        <div>
+          <h3 id="strategyDialogTitle">新增策略</h3>
+          <p class="context-hint">填写策略名称，系统自动生成策略 ID。买入条件和卖出条件均为全部满足。</p>
+        </div>
+        <button id="closeStrategyBtn" type="button" class="ghost-btn">关闭</button>
+      </div>
+
+      <label class="rule-strategy-name-field">策略名称
+        <input id="newStrategyName" type="text" placeholder="例如：收盘价上穿/跌破 SMA60">
+      </label>
+
+      <div class="rule-condition-stack">
+        <div class="rule-condition-panel">
+          <div class="rule-condition-head">
+            <h4>买入条件（全部满足）</h4>
+            <button id="addEntryConditionBtn" type="button" class="ghost-btn">+ 条件</button>
+          </div>
+          <div id="entryConditions"></div>
+        </div>
+        <div class="rule-condition-panel">
+          <div class="rule-condition-head">
+            <h4>卖出条件（全部满足）</h4>
+            <button id="addExitConditionBtn" type="button" class="ghost-btn">+ 条件</button>
+          </div>
+          <div id="exitConditions"></div>
+        </div>
+      </div>
+
+      <div class="rule-strategy-dialog-actions">
+        <span id="strategySaveStatus"></span>
+        <button id="cancelStrategyBtn" type="button" class="ghost-btn">取消</button>
+        <button id="saveStrategyBtn" type="button">保存策略</button>
+      </div>
+    </div>
+  </div>
+
+  <p id="status" class="status-banner">加载中...</p>
+
+  <div class="table-panel rule-metric-panel">
+    <h3>回测指标</h3>
+    <div class="table-shell">
+      <table class="rule-metric-table">
+        <thead>
+          <tr>
+            <th>总收益</th>
+            <th>年化收益</th>
+            <th>最大回撤</th>
+            <th>夏普</th>
+            <th>胜率</th>
+            <th>盈亏比</th>
+            <th>交易数</th>
+            <th>佣金</th>
+            <th>印花税</th>
+          </tr>
+        </thead>
+        <tbody id="summaryBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="viz-panel">
+    <h3>资产 K 线</h3>
+    <div id="klineChart" class="chart-lg chart-kline"></div>
+  </div>
+
+  <div class="table-panel">
+    <h3>交易明细</h3>
+    <div class="table-shell">
+      <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th>方向</th>
+            <th>数量</th>
+            <th>参考价</th>
+            <th>成交价</th>
+            <th>佣金</th>
+            <th>印花税</th>
+            <th>原因</th>
+          </tr>
+        </thead>
+        <tbody id="tradesBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="content-panel">
+    <h3>Debug 日志</h3>
+    <p id="debugInfo" class="context-hint">暂无结果。</p>
+    <pre id="debugPreview" style="white-space:pre-wrap;max-height:360px;overflow:auto;"></pre>
+  </div>
+</section>
+
+<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script>
+const fmtPct = (v) => Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : "-";
+const fmtNum = (v, digits = 2) => Number.isFinite(v) ? Number(v).toFixed(digits) : "-";
+const klineChart = echarts.init(document.getElementById("klineChart"));
+const KLINE_MA_PERIODS = [5, 10, 20, 30, 60, 120, 200];
+const KLINE_MA_COLORS = {
+  5: "#7c3aed",
+  10: "#0d7a71",
+  20: "#c7834c",
+  30: "#2563eb",
+  60: "#b42318",
+  120: "#475569",
+  200: "#111827"
+};
+let metaCache = { strategies: [], instruments: [], indicators: [] };
+let conditionSeq = 0;
+const PRICE_FIELDS = ["open", "high", "low", "close", "volume", "amount"];
+const STATE_VALUES = ["entry_price", "hard_stop", "highest_high_since_entry", "chandelier_stop"];
+
+async function loadMeta() {
+  const resp = await fetch("/rule-backtest/api/meta");
+  if (!resp.ok) throw new Error(await resp.text());
+  const meta = await resp.json();
+  metaCache = meta;
+  const strategySelect = document.getElementById("strategySelect");
+  strategySelect.innerHTML = "";
+  for (const item of meta.strategies || []) {
+    const opt = document.createElement("option");
+    opt.value = item.id;
+    opt.textContent = `${item.name || item.id}${item.valid ? "" : "（配置错误）"}`;
+    opt.disabled = !item.valid;
+    strategySelect.appendChild(opt);
+  }
+  const symbolSelect = document.getElementById("symbolSelect");
+  symbolSelect.innerHTML = "";
+  for (const item of (meta.instruments || []).filter(x => x.enabled)) {
+    const opt = document.createElement("option");
+    opt.value = item.symbol;
+    opt.textContent = `${item.symbol} ${item.name || ""}${item.has_market_data ? "" : "（无本地行情）"}`;
+    opt.dataset.type = item.asset_type || "etf";
+    symbolSelect.appendChild(opt);
+  }
+  document.getElementById("status").textContent = "就绪。";
+}
+
+function indicatorOptions() {
+  return (metaCache.indicators || [])
+    .map(item => `<option value="${item.id}">${item.label || item.id}</option>`)
+    .join("");
+}
+
+function fieldOptions(selected = "close") {
+  return PRICE_FIELDS.map(f => `<option value="${f}" ${f === selected ? "selected" : ""}>${f}</option>`).join("");
+}
+
+function stateOptions(selected = "hard_stop") {
+  return STATE_VALUES.map(v => `<option value="${v}" ${v === selected ? "selected" : ""}>${v}</option>`).join("");
+}
+
+function addCondition(side) {
+  const id = `cond_${++conditionSeq}`;
+  const wrap = document.createElement("div");
+  wrap.className = "rule-condition-row";
+  wrap.dataset.conditionId = id;
+  wrap.innerHTML = `
+    <div class="rule-value-editor" data-side="left">
+      ${valueEditorHtml("left")}
+    </div>
+    <select class="rule-operator">
+      <option value=">=">&gt;=</option>
+      <option value="<=">&lt;=</option>
+    </select>
+    <div class="rule-value-editor" data-side="right">
+      ${valueEditorHtml("right")}
+    </div>
+    <button type="button" class="ghost-btn rule-remove-condition">删除</button>
+  `;
+  document.getElementById(side === "entry" ? "entryConditions" : "exitConditions").appendChild(wrap);
+  bindConditionRow(wrap);
+}
+
+function valueEditorHtml(side) {
+  return `
+    <select class="value-type">
+      <option value="price">价格字段</option>
+      <option value="indicator">指标</option>
+      <option value="state_value">状态值</option>
+      <option value="literal">常数</option>
+    </select>
+    <div class="value-detail"></div>
+  `;
+}
+
+function bindConditionRow(row) {
+  row.querySelector(".rule-remove-condition").addEventListener("click", () => row.remove());
+  for (const editor of row.querySelectorAll(".rule-value-editor")) {
+    const typeEl = editor.querySelector(".value-type");
+    typeEl.addEventListener("change", () => renderValueDetail(editor));
+    renderValueDetail(editor);
+  }
+}
+
+function renderValueDetail(editor) {
+  const type = editor.querySelector(".value-type").value;
+  const detail = editor.querySelector(".value-detail");
+  if (type === "price") {
+    detail.innerHTML = `<select class="value-field">${fieldOptions("close")}</select>`;
+  } else if (type === "literal") {
+    detail.innerHTML = `<input class="value-literal" type="number" value="0" step="0.0001">`;
+  } else if (type === "state_value") {
+    detail.innerHTML = `
+      <select class="value-state">${stateOptions("hard_stop")}</select>
+      <span class="state-params"></span>
+    `;
+    const stateEl = detail.querySelector(".value-state");
+    stateEl.addEventListener("change", () => renderStateParams(detail));
+    renderStateParams(detail);
+  } else {
+    detail.innerHTML = `
+      <select class="value-indicator">${indicatorOptions()}</select>
+      <span class="indicator-params"></span>
+    `;
+    const indicatorEl = detail.querySelector(".value-indicator");
+    indicatorEl.addEventListener("change", () => renderIndicatorParams(detail));
+    renderIndicatorParams(detail);
+  }
+}
+
+function renderStateParams(detail) {
+  const name = detail.querySelector(".value-state").value;
+  const target = detail.querySelector(".state-params");
+  if (name === "hard_stop") {
+    target.innerHTML = `
+      <label>ATR <input data-param="atr_period" type="number" value="20" min="1" step="1"></label>
+      <label>倍数 <input data-param="atr_mul" type="number" value="1.5" step="0.1"></label>
+    `;
+  } else if (name === "chandelier_stop") {
+    target.innerHTML = `
+      <label>ATR <input data-param="atr_period" type="number" value="20" min="1" step="1"></label>
+      <label>倍数 <input data-param="atr_mul" type="number" value="2.5" step="0.1"></label>
+    `;
+  } else {
+    target.innerHTML = "";
+  }
+}
+
+function renderIndicatorParams(detail) {
+  const id = detail.querySelector(".value-indicator").value;
+  const indicator = (metaCache.indicators || []).find(x => x.id === id);
+  const params = indicator?.params || {};
+  const target = detail.querySelector(".indicator-params");
+  target.innerHTML = Object.entries(params).map(([name, spec]) => {
+    const value = spec.default ?? (spec.type === "price_field" ? "close" : "");
+    if (spec.type === "price_field") {
+      return `<label>${name} <select data-param="${name}">${fieldOptions(value)}</select></label>`;
+    }
+    const step = spec.type === "int" ? "1" : "0.0001";
+    return `<label>${name} <input data-param="${name}" type="number" value="${value}" min="${spec.min ?? ""}" step="${step}"></label>`;
+  }).join(" ");
+}
+
+function collectValue(editor) {
+  const type = editor.querySelector(".value-type").value;
+  if (type === "price") {
+    return { type: "price", field: editor.querySelector(".value-field").value };
+  }
+  if (type === "literal") {
+    return { type: "literal", value: Number(editor.querySelector(".value-literal").value || 0) };
+  }
+  if (type === "state_value") {
+    const name = editor.querySelector(".value-state").value;
+    const params = {};
+    for (const el of editor.querySelectorAll("[data-param]")) {
+      params[el.dataset.param] = Number(el.value);
+    }
+    return Object.keys(params).length ? { type: "state_value", name, params } : { type: "state_value", name };
+  }
+  const name = editor.querySelector(".value-indicator").value;
+  const params = {};
+  for (const el of editor.querySelectorAll("[data-param]")) {
+    const raw = el.value;
+    params[el.dataset.param] = el.tagName === "SELECT" ? raw : Number(raw);
+  }
+  return { type: "indicator", name, params };
+}
+
+function collectConditions(containerId) {
+  return [...document.getElementById(containerId).querySelectorAll(".rule-condition-row")].map((row, idx) => ({
+    id: `${containerId}_${idx + 1}`,
+    type: "condition",
+    left: collectValue(row.querySelector('.rule-value-editor[data-side="left"]')),
+    operator: row.querySelector(".rule-operator").value,
+    right: collectValue(row.querySelector('.rule-value-editor[data-side="right"]'))
+  }));
+}
+
+function buildNewStrategy() {
+  const name = document.getElementById("newStrategyName").value.trim();
+  if (!name) throw new Error("策略名称不能为空");
+  return {
+    schema_version: 1,
+    name,
+    trade_mode: "single_symbol_all_in",
+    entry: { type: "group", combinator: "all", children: collectConditions("entryConditions") },
+    exit: { type: "group", combinator: "all", children: collectConditions("exitConditions") }
+  };
+}
+
+async function saveStrategy() {
+  const status = document.getElementById("strategySaveStatus");
+  let strategy;
+  try {
+    strategy = buildNewStrategy();
+  } catch (err) {
+    status.textContent = err.message;
+    return;
+  }
+  status.textContent = "保存中...";
+  const resp = await fetch("/rule-backtest/api/strategies", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ strategy, overwrite: false })
+  });
+  if (!resp.ok) {
+    status.textContent = `保存失败：${await resp.text()}`;
+    return;
+  }
+  const saved = await resp.json();
+  status.textContent = `已保存：${saved.id}`;
+  await loadMeta();
+  document.getElementById("strategySelect").value = saved.id;
+  closeStrategyModal();
+}
+
+function payload() {
+  const symbolSelect = document.getElementById("symbolSelect");
+  const selected = symbolSelect.options[symbolSelect.selectedIndex];
+  return {
+    strategy_id: document.getElementById("strategySelect").value,
+    symbol: symbolSelect.value,
+    start_date: document.getElementById("startDate").value,
+    end_date: document.getElementById("endDate").value,
+    initial_capital: Number(document.getElementById("initialCapital").value || 1000000),
+    slippage: 0.002,
+    fee_rate: 0.0000854,
+    fee_min: 5,
+    lot_size: 100,
+    instrument_type: selected?.dataset.type || "",
+    debug_log_enabled: null
+  };
+}
+
+function renderResult(result) {
+  const s = result.summary || {};
+  document.getElementById("summaryBody").innerHTML = `
+    <tr>
+      <td>${fmtPct(s.total_return)}</td>
+      <td>${fmtPct(s.annual_return)}</td>
+      <td>${fmtPct(s.max_drawdown)}</td>
+      <td>${fmtNum(s.sharpe, 3)}</td>
+      <td>${fmtPct(s.win_rate)}</td>
+      <td>${fmtNum(s.profit_factor, 2)}</td>
+      <td>${s.trade_count || 0}</td>
+      <td>${fmtNum(s.total_commission)}</td>
+      <td>${fmtNum(s.total_stamp_tax)}</td>
+    </tr>`;
+
+  document.getElementById("tradesBody").innerHTML = (result.trades || []).map(t => `
+    <tr>
+      <td>${t.date || ""}</td>
+      <td>${t.side || ""}</td>
+      <td>${t.qty || 0}</td>
+      <td>${fmtNum(t.reference_price, 4)}</td>
+      <td>${fmtNum(t.exec_price, 4)}</td>
+      <td>${fmtNum(t.commission)}</td>
+      <td>${fmtNum(t.stamp_tax)}</td>
+      <td>${t.reason || ""}</td>
+    </tr>`).join("");
+
+  const debugLog = result.debug_log || [];
+  document.getElementById("debugInfo").textContent = `debug 日志 ${debugLog.length} 天。`;
+  document.getElementById("debugPreview").textContent = debugLog.length ? JSON.stringify(debugLog.slice(0, 3), null, 2) : "";
+  renderKline(result.charts?.kline || {});
+}
+
+function tradeSeries(points, name, color, symbol) {
+  return {
+    name,
+    type: "scatter",
+    data: (points || []).map(p => [p.date, p.price, p]),
+    symbol,
+    symbolSize: 22,
+    itemStyle: {
+      color,
+      borderColor: "#ffffff",
+      borderWidth: 2.5,
+      shadowBlur: 10,
+      shadowColor: "rgba(17, 35, 42, 0.28)"
+    },
+    label: {
+      show: true,
+      formatter: name,
+      position: name.includes("买") ? "top" : "bottom",
+      color,
+      fontWeight: 800,
+      fontSize: 11,
+      textBorderColor: "#ffffff",
+      textBorderWidth: 3
+    },
+    tooltip: {
+      formatter: (p) => {
+        const raw = p.data?.[2] || {};
+        return [
+          `${name} ${raw.date || ""}`,
+          `成交价：${fmtNum(raw.price, 4)}`,
+          `参考价：${fmtNum(raw.reference_price, 4)}`,
+          `数量：${raw.qty || 0}`,
+          `原因：${raw.reason || ""}`
+        ].join("<br/>");
+      }
+    },
+    z: 8
+  };
+}
+
+function renderKline(kline) {
+  const dates = kline.dates || [];
+  const candles = kline.candles || [];
+  if (!dates.length || !candles.length) {
+    klineChart.clear();
+    return;
+  }
+  const maSeries = KLINE_MA_PERIODS.map(period => ({
+    name: `MA${period}`,
+    type: "line",
+    data: kline.ma?.[String(period)] || [],
+    symbol: "none",
+    smooth: true,
+    lineStyle: { width: 1.05, color: KLINE_MA_COLORS[period] || "#666" }
+  }));
+  klineChart.setOption({
+    animation: false,
+    axisPointer: { link: [{ xAxisIndex: "all" }] },
+    tooltip: {
+      trigger: "axis",
+      axisPointer: { type: "cross" },
+      formatter: (params) => {
+        if (!params || !params.length) return "-";
+        const lines = [String(params[0].axisValue || "")];
+        for (const p of params) {
+          if (p.seriesType === "candlestick") {
+            const raw = Array.isArray(p.data) ? p.data : [];
+            lines.push(`开：${fmtNum(raw[0], 4)}`);
+            lines.push(`收：${fmtNum(raw[1], 4)}`);
+            lines.push(`低：${fmtNum(raw[2], 4)}`);
+            lines.push(`高：${fmtNum(raw[3], 4)}`);
+          } else if (p.seriesType === "line") {
+            lines.push(`${p.seriesName}：${fmtNum(p.value, 4)}`);
+          }
+        }
+        return lines.join("<br/>");
+      }
+    },
+    legend: {
+      top: 4,
+      data: ["K", ...KLINE_MA_PERIODS.map(p => `MA${p}`), "买入", "卖出"],
+      selected: { MA120: false, MA200: false }
+    },
+    grid: { left: 62, right: 28, top: 42, bottom: 58 },
+    dataZoom: [
+      { type: "inside", xAxisIndex: 0, start: 0, end: 100, throttle: 30 },
+      { type: "slider", xAxisIndex: 0, start: 0, end: 100, height: 24, bottom: 8 }
+    ],
+    xAxis: { type: "category", data: dates, boundaryGap: false, axisLine: { onZero: false } },
+    yAxis: { type: "value", scale: true, splitArea: { show: true }, axisLabel: { formatter: v => fmtNum(v, 2) } },
+    series: [
+      {
+        name: "K",
+        type: "candlestick",
+        data: candles,
+        itemStyle: {
+          color: "#d14343",
+          color0: "#00a76f",
+          borderColor: "#d14343",
+          borderColor0: "#00a76f"
+        }
+      },
+      ...maSeries,
+      tradeSeries(kline.buy_points, "买入", "#2563eb", "pin"),
+      tradeSeries(kline.sell_points, "卖出", "#f59e0b", "pin")
+    ]
+  }, true);
+}
+
+async function runBacktest() {
+  const status = document.getElementById("status");
+  status.textContent = "运行中...";
+  const resp = await fetch("/rule-backtest/api/run", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload())
+  });
+  if (!resp.ok) {
+    status.textContent = `失败：${await resp.text()}`;
+    return;
+  }
+  const result = await resp.json();
+  renderResult(result);
+  status.textContent = `完成：${result.symbol} ${result.start_date || ""} 至 ${result.end_date || ""}`;
+}
+
+function resetStrategyEditor() {
+  document.getElementById("newStrategyName").value = "";
+  document.getElementById("strategySaveStatus").textContent = "";
+  document.getElementById("entryConditions").innerHTML = "";
+  document.getElementById("exitConditions").innerHTML = "";
+  addCondition("entry");
+  addCondition("exit");
+}
+
+function openStrategyModal() {
+  resetStrategyEditor();
+  document.getElementById("strategyEditor").hidden = false;
+  document.body.classList.add("modal-open");
+  requestAnimationFrame(() => document.getElementById("newStrategyName").focus());
+}
+
+function closeStrategyModal() {
+  document.getElementById("strategyEditor").hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+document.getElementById("runBtn").addEventListener("click", runBacktest);
+document.getElementById("newStrategyBtn").addEventListener("click", openStrategyModal);
+document.getElementById("addEntryConditionBtn").addEventListener("click", () => addCondition("entry"));
+document.getElementById("addExitConditionBtn").addEventListener("click", () => addCondition("exit"));
+document.getElementById("saveStrategyBtn").addEventListener("click", saveStrategy);
+document.getElementById("cancelStrategyBtn").addEventListener("click", closeStrategyModal);
+document.getElementById("closeStrategyBtn").addEventListener("click", closeStrategyModal);
+document.getElementById("strategyEditor").addEventListener("click", (event) => {
+  if (event.target.id === "strategyEditor") closeStrategyModal();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !document.getElementById("strategyEditor").hidden) closeStrategyModal();
+});
+loadMeta().catch(err => {
+  document.getElementById("status").textContent = `加载失败：${err.message}`;
+});
+window.addEventListener("resize", () => klineChart.resize());
+</script>
+{% endblock %}

@@ -16,6 +16,7 @@ from app.routers import (
     market_view,
     overview,
     parameter_optimization,
+    rule_backtest,
     strategy_history,
     trades,
 )
@@ -104,6 +105,7 @@ app.include_router(config.router)
 app.include_router(strategy_history.router)
 app.include_router(parameter_optimization.router)
 app.include_router(backtest.router)
+app.include_router(rule_backtest.router)
 app.include_router(trades.router)
 app.include_router(logs.router)
 app.include_router(instruments.router)

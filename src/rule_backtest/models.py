@@ -1,0 +1,62 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import date
+from typing import Literal
+
+
+PriceField = Literal["open", "high", "low", "close", "volume", "amount"]
+Operator = Literal[">=", "<="]
+InstrumentType = Literal["etf", "stock"]
+
+
+@dataclass(frozen=True, slots=True)
+class BacktestExecutionConfig:
+    initial_capital: float = 1_000_000.0
+    signal_timing: str = "close"
+    fill_timing: str = "close"
+    fee_rate: float = 0.0000854
+    fee_min: float = 5.0
+    slippage: float = 0.002
+    lot_size: int = 100
+    instrument_type: InstrumentType = "etf"
+    stock_stamp_tax_rate: float = 0.001
+    debug_log_enabled: bool | None = None
+    debug_auto_enable_max_days: int = 31
+
+
+@dataclass(frozen=True, slots=True)
+class RuleBacktestRequest:
+    strategy: dict
+    symbol: str
+    bars: object
+    start_date: date | None = None
+    end_date: date | None = None
+    execution: BacktestExecutionConfig = field(default_factory=BacktestExecutionConfig)
+    run_id: str | None = None
+
+
+@dataclass(slots=True)
+class PositionState:
+    qty: int = 0
+    entry_price: float = 0.0
+    avg_cost: float = 0.0
+    entry_date: str | None = None
+    atr_at_entry: float = 0.0
+    hard_stop: float = 0.0
+    highest_high_since_entry: float = 0.0
+    chandelier_stop: float = 0.0
+
+    @property
+    def is_open(self) -> bool:
+        return self.qty > 0
+
+    def reset(self) -> None:
+        self.qty = 0
+        self.entry_price = 0.0
+        self.avg_cost = 0.0
+        self.entry_date = None
+        self.atr_at_entry = 0.0
+        self.hard_stop = 0.0
+        self.highest_high_since_entry = 0.0
+        self.chandelier_stop = 0.0
