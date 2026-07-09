@@ -1,21 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
 <section class="page-panel">
-  <h2>规则回测</h2>
-  <p class="context-hint">基于结构化策略 YAML 的单标的全仓买卖回测。成本参数使用系统默认值。</p>
+  <h2>策略管理</h2>
+  <p class="context-hint">统一管理结构化买卖策略。单标的回测已移至标的查看页。</p>
 
   <div class="bt-form-row rule-main-row">
-    <label>策略
-      <select id="strategySelect"></select>
-    </label>
     <button id="newStrategyBtn" type="button" class="ghost-btn">新增策略</button>
-    <label>标的
-      <select id="symbolSelect"></select>
-    </label>
-    <label>开始日期 <input id="startDate" type="date" value="2025-01-01"></label>
-    <label>结束日期 <input id="endDate" type="date"></label>
-    <label>初始资金 <input id="initialCapital" type="number" value="1000000" min="10000" step="10000"></label>
-    <button id="runBtn" type="button">运行</button>
   </div>
 
   <div id="strategyEditor" class="rule-strategy-modal" hidden>
@@ -58,106 +48,100 @@
   </div>
 
   <p id="status" class="status-banner">加载中...</p>
-
-  <div class="table-panel rule-metric-panel">
-    <h3>回测指标</h3>
-    <div class="table-shell">
-      <table class="rule-metric-table">
-        <thead>
-          <tr>
-            <th>总收益</th>
-            <th>年化收益</th>
-            <th>最大回撤</th>
-            <th>夏普</th>
-            <th>胜率</th>
-            <th>盈亏比</th>
-            <th>交易数</th>
-            <th>佣金</th>
-            <th>印花税</th>
-          </tr>
-        </thead>
-        <tbody id="summaryBody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="viz-panel">
-    <h3>资产 K 线</h3>
-    <div id="klineChart" class="chart-lg chart-kline"></div>
-  </div>
-
-  <div class="table-panel">
-    <h3>交易明细</h3>
-    <div class="table-shell">
-      <table>
-        <thead>
-          <tr>
-            <th>日期</th>
-            <th>方向</th>
-            <th>数量</th>
-            <th>参考价</th>
-            <th>成交价</th>
-            <th>佣金</th>
-            <th>印花税</th>
-            <th>原因</th>
-          </tr>
-        </thead>
-        <tbody id="tradesBody"></tbody>
-      </table>
-    </div>
-  </div>
-
-  <div class="content-panel">
-    <h3>Debug 日志</h3>
-    <p id="debugInfo" class="context-hint">暂无结果。</p>
-    <pre id="debugPreview" style="white-space:pre-wrap;max-height:360px;overflow:auto;"></pre>
-  </div>
+  <div id="strategyGrid" class="strategy-card-grid"></div>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script>
-const fmtPct = (v) => Number.isFinite(v) ? `${(v * 100).toFixed(2)}%` : "-";
-const fmtNum = (v, digits = 2) => Number.isFinite(v) ? Number(v).toFixed(digits) : "-";
-const klineChart = echarts.init(document.getElementById("klineChart"));
-const KLINE_MA_PERIODS = [5, 10, 20, 30, 60, 120, 200];
-const KLINE_MA_COLORS = {
-  5: "#7c3aed",
-  10: "#0d7a71",
-  20: "#c7834c",
-  30: "#2563eb",
-  60: "#b42318",
-  120: "#475569",
-  200: "#111827"
-};
 let metaCache = { strategies: [], instruments: [], indicators: [] };
 let conditionSeq = 0;
 const PRICE_FIELDS = ["open", "high", "low", "close", "volume", "amount"];
 const STATE_VALUES = ["entry_price", "hard_stop", "highest_high_since_entry", "chandelier_stop"];
+
+function esc(v) {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 async function loadMeta() {
   const resp = await fetch("/rule-backtest/api/meta");
   if (!resp.ok) throw new Error(await resp.text());
   const meta = await resp.json();
   metaCache = meta;
-  const strategySelect = document.getElementById("strategySelect");
-  strategySelect.innerHTML = "";
-  for (const item of meta.strategies || []) {
-    const opt = document.createElement("option");
-    opt.value = item.id;
-    opt.textContent = `${item.name || item.id}${item.valid ? "" : "（配置错误）"}`;
-    opt.disabled = !item.valid;
-    strategySelect.appendChild(opt);
+  renderStrategyCards();
+  document.getElementById("status").textContent = `共 ${meta.strategies?.length || 0} 个策略。`;
+}
+
+function indicatorLabel(name) {
+  const item = (metaCache.indicators || []).find(x => x.id === name);
+  return item?.label || name || "-";
+}
+
+function paramText(params) {
+  const entries = Object.entries(params || {});
+  return entries.length ? `(${entries.map(([k, v]) => `${k}=${v}`).join(", ")})` : "";
+}
+
+function valueText(value) {
+  if (!value || typeof value !== "object") return "-";
+  if (value.type === "price") return `价格.${value.field || "-"}`;
+  if (value.type === "literal") return String(value.value ?? 0);
+  if (value.type === "state_value") return `状态.${value.name || "-"}${paramText(value.params)}`;
+  if (value.type === "indicator") return `${indicatorLabel(value.name)}${paramText(value.params)}`;
+  return value.type || "-";
+}
+
+function conditionLines(group) {
+  const children = Array.isArray(group?.children) ? group.children : [];
+  if (!children.length) return '<li class="rule-empty-condition">暂无条件</li>';
+  return children.map((item) => `
+    <li>
+      <span>${esc(valueText(item.left))}</span>
+      <strong>${esc(item.operator || "")}</strong>
+      <span>${esc(valueText(item.right))}</span>
+    </li>
+  `).join("");
+}
+
+function renderStrategyCards() {
+  const grid = document.getElementById("strategyGrid");
+  const strategies = metaCache.strategies || [];
+  if (!strategies.length) {
+    grid.innerHTML = '<div class="content-panel">暂无策略。点击“新增策略”创建第一个规则策略。</div>';
+    return;
   }
-  const symbolSelect = document.getElementById("symbolSelect");
-  symbolSelect.innerHTML = "";
-  for (const item of (meta.instruments || []).filter(x => x.enabled)) {
-    const opt = document.createElement("option");
-    opt.value = item.symbol;
-    opt.textContent = `${item.symbol} ${item.name || ""}${item.has_market_data ? "" : "（无本地行情）"}`;
-    opt.dataset.type = item.asset_type || "etf";
-    symbolSelect.appendChild(opt);
-  }
-  document.getElementById("status").textContent = "就绪。";
+  grid.innerHTML = strategies.map((item) => {
+    const strategy = item.strategy || {};
+    return `
+      <article class="strategy-card ${item.valid ? "" : "is-invalid"}">
+        <div class="strategy-card-head">
+          <div>
+            <h3>${esc(item.name || item.id)}</h3>
+            <p>${esc(item.description || "无描述")}</p>
+          </div>
+          <span class="strategy-card-badge">${esc(item.valid ? item.storage || "strategy" : "配置错误")}</span>
+        </div>
+        <div class="strategy-rule-columns">
+          <section>
+            <h4>买入条件</h4>
+            <ul>${conditionLines(strategy.entry)}</ul>
+          </section>
+          <section>
+            <h4>卖出条件</h4>
+            <ul>${conditionLines(strategy.exit)}</ul>
+          </section>
+        </div>
+        ${item.errors?.length ? `<p class="strategy-card-error">${esc(item.errors.join("；"))}</p>` : ""}
+        <div class="strategy-card-foot">
+          <span>ID：${esc(item.id)}</span>
+          <span>${esc(item.updated_at || item.created_at || "")}</span>
+        </div>
+      </article>
+    `;
+  }).join("");
 }
 
 function indicatorOptions() {
@@ -345,185 +329,7 @@ async function saveStrategy() {
   const saved = await resp.json();
   status.textContent = `已保存：${saved.id}`;
   await loadMeta();
-  document.getElementById("strategySelect").value = saved.id;
   closeStrategyModal();
-}
-
-function payload() {
-  const symbolSelect = document.getElementById("symbolSelect");
-  const selected = symbolSelect.options[symbolSelect.selectedIndex];
-  return {
-    strategy_id: document.getElementById("strategySelect").value,
-    symbol: symbolSelect.value,
-    start_date: document.getElementById("startDate").value,
-    end_date: document.getElementById("endDate").value,
-    initial_capital: Number(document.getElementById("initialCapital").value || 1000000),
-    slippage: 0.002,
-    fee_rate: 0.0000854,
-    fee_min: 5,
-    lot_size: 100,
-    instrument_type: selected?.dataset.type || "",
-    debug_log_enabled: null
-  };
-}
-
-function renderResult(result) {
-  const s = result.summary || {};
-  document.getElementById("summaryBody").innerHTML = `
-    <tr>
-      <td>${fmtPct(s.total_return)}</td>
-      <td>${fmtPct(s.annual_return)}</td>
-      <td>${fmtPct(s.max_drawdown)}</td>
-      <td>${fmtNum(s.sharpe, 3)}</td>
-      <td>${fmtPct(s.win_rate)}</td>
-      <td>${fmtNum(s.profit_factor, 2)}</td>
-      <td>${s.trade_count || 0}</td>
-      <td>${fmtNum(s.total_commission)}</td>
-      <td>${fmtNum(s.total_stamp_tax)}</td>
-    </tr>`;
-
-  document.getElementById("tradesBody").innerHTML = (result.trades || []).map(t => `
-    <tr>
-      <td>${t.date || ""}</td>
-      <td>${t.side || ""}</td>
-      <td>${t.qty || 0}</td>
-      <td>${fmtNum(t.reference_price, 4)}</td>
-      <td>${fmtNum(t.exec_price, 4)}</td>
-      <td>${fmtNum(t.commission)}</td>
-      <td>${fmtNum(t.stamp_tax)}</td>
-      <td>${t.reason || ""}</td>
-    </tr>`).join("");
-
-  const debugLog = result.debug_log || [];
-  document.getElementById("debugInfo").textContent = `debug 日志 ${debugLog.length} 天。`;
-  document.getElementById("debugPreview").textContent = debugLog.length ? JSON.stringify(debugLog.slice(0, 3), null, 2) : "";
-  renderKline(result.charts?.kline || {});
-}
-
-function tradeSeries(points, name, color, symbol) {
-  return {
-    name,
-    type: "scatter",
-    data: (points || []).map(p => [p.date, p.price, p]),
-    symbol,
-    symbolSize: 22,
-    itemStyle: {
-      color,
-      borderColor: "#ffffff",
-      borderWidth: 2.5,
-      shadowBlur: 10,
-      shadowColor: "rgba(17, 35, 42, 0.28)"
-    },
-    label: {
-      show: true,
-      formatter: name,
-      position: name.includes("买") ? "top" : "bottom",
-      color,
-      fontWeight: 800,
-      fontSize: 11,
-      textBorderColor: "#ffffff",
-      textBorderWidth: 3
-    },
-    tooltip: {
-      formatter: (p) => {
-        const raw = p.data?.[2] || {};
-        return [
-          `${name} ${raw.date || ""}`,
-          `成交价：${fmtNum(raw.price, 4)}`,
-          `参考价：${fmtNum(raw.reference_price, 4)}`,
-          `数量：${raw.qty || 0}`,
-          `原因：${raw.reason || ""}`
-        ].join("<br/>");
-      }
-    },
-    z: 8
-  };
-}
-
-function renderKline(kline) {
-  const dates = kline.dates || [];
-  const candles = kline.candles || [];
-  if (!dates.length || !candles.length) {
-    klineChart.clear();
-    return;
-  }
-  const maSeries = KLINE_MA_PERIODS.map(period => ({
-    name: `MA${period}`,
-    type: "line",
-    data: kline.ma?.[String(period)] || [],
-    symbol: "none",
-    smooth: true,
-    lineStyle: { width: 1.05, color: KLINE_MA_COLORS[period] || "#666" }
-  }));
-  klineChart.setOption({
-    animation: false,
-    axisPointer: { link: [{ xAxisIndex: "all" }] },
-    tooltip: {
-      trigger: "axis",
-      axisPointer: { type: "cross" },
-      formatter: (params) => {
-        if (!params || !params.length) return "-";
-        const lines = [String(params[0].axisValue || "")];
-        for (const p of params) {
-          if (p.seriesType === "candlestick") {
-            const raw = Array.isArray(p.data) ? p.data : [];
-            lines.push(`开：${fmtNum(raw[0], 4)}`);
-            lines.push(`收：${fmtNum(raw[1], 4)}`);
-            lines.push(`低：${fmtNum(raw[2], 4)}`);
-            lines.push(`高：${fmtNum(raw[3], 4)}`);
-          } else if (p.seriesType === "line") {
-            lines.push(`${p.seriesName}：${fmtNum(p.value, 4)}`);
-          }
-        }
-        return lines.join("<br/>");
-      }
-    },
-    legend: {
-      top: 4,
-      data: ["K", ...KLINE_MA_PERIODS.map(p => `MA${p}`), "买入", "卖出"],
-      selected: { MA120: false, MA200: false }
-    },
-    grid: { left: 62, right: 28, top: 42, bottom: 58 },
-    dataZoom: [
-      { type: "inside", xAxisIndex: 0, start: 0, end: 100, throttle: 30 },
-      { type: "slider", xAxisIndex: 0, start: 0, end: 100, height: 24, bottom: 8 }
-    ],
-    xAxis: { type: "category", data: dates, boundaryGap: false, axisLine: { onZero: false } },
-    yAxis: { type: "value", scale: true, splitArea: { show: true }, axisLabel: { formatter: v => fmtNum(v, 2) } },
-    series: [
-      {
-        name: "K",
-        type: "candlestick",
-        data: candles,
-        itemStyle: {
-          color: "#d14343",
-          color0: "#00a76f",
-          borderColor: "#d14343",
-          borderColor0: "#00a76f"
-        }
-      },
-      ...maSeries,
-      tradeSeries(kline.buy_points, "买入", "#2563eb", "pin"),
-      tradeSeries(kline.sell_points, "卖出", "#f59e0b", "pin")
-    ]
-  }, true);
-}
-
-async function runBacktest() {
-  const status = document.getElementById("status");
-  status.textContent = "运行中...";
-  const resp = await fetch("/rule-backtest/api/run", {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify(payload())
-  });
-  if (!resp.ok) {
-    status.textContent = `失败：${await resp.text()}`;
-    return;
-  }
-  const result = await resp.json();
-  renderResult(result);
-  status.textContent = `完成：${result.symbol} ${result.start_date || ""} 至 ${result.end_date || ""}`;
 }
 
 function resetStrategyEditor() {
@@ -547,7 +353,6 @@ function closeStrategyModal() {
   document.body.classList.remove("modal-open");
 }
 
-document.getElementById("runBtn").addEventListener("click", runBacktest);
 document.getElementById("newStrategyBtn").addEventListener("click", openStrategyModal);
 document.getElementById("addEntryConditionBtn").addEventListener("click", () => addCondition("entry"));
 document.getElementById("addExitConditionBtn").addEventListener("click", () => addCondition("exit"));
@@ -563,6 +368,5 @@ document.addEventListener("keydown", (event) => {
 loadMeta().catch(err => {
   document.getElementById("status").textContent = `加载失败：${err.message}`;
 });
-window.addEventListener("resize", () => klineChart.resize());
 </script>
 {% endblock %}

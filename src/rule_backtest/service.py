@@ -76,13 +76,18 @@ class RuleBacktestService:
             raise ValueError("symbol is required")
 
         strategy = self.strategy_loader.load(strategy_id)
+        start_date = self._parse_date(payload.get("start_date"))
+        end_date = self._parse_date(payload.get("end_date"))
+        if start_date is not None and end_date is not None and start_date > end_date:
+            raise ValueError("start_date cannot be later than end_date")
+
         bars = self.market_store.load_history(symbol)
-        bars = self._filter_bars(
+        trading_bars = self._filter_bars(
             bars=bars,
-            start_date=self._parse_date(payload.get("start_date")),
-            end_date=self._parse_date(payload.get("end_date")),
+            start_date=start_date,
+            end_date=end_date,
         )
-        if bars.empty:
+        if trading_bars.empty:
             raise ValueError(f"symbol has no market data in range: {symbol}")
 
         instrument_type = str(payload.get("instrument_type", "") or "").strip().lower()
@@ -103,6 +108,8 @@ class RuleBacktestService:
             strategy=strategy,
             symbol=symbol,
             bars=bars,
+            start_date=start_date,
+            end_date=end_date,
             execution=execution,
             run_id=datetime.now().strftime("%Y%m%d%H%M%S%f"),
         )

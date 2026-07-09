@@ -110,6 +110,53 @@ class RuleBacktestEngineTest(unittest.TestCase):
         self.assertEqual(1, len(kline["buy_points"]))
         self.assertEqual(1, len(kline["sell_points"]))
 
+    def test_indicator_warmup_uses_history_before_backtest_start(self) -> None:
+        bars = make_bars(([10.0] * 40) + [12.0, 12.0, 12.0])
+        strategy = {
+            "id": "close_vs_sma40",
+            "entry": {
+                "type": "group",
+                "combinator": "all",
+                "children": [
+                    {
+                        "left": {"type": "price", "field": "close"},
+                        "operator": ">=",
+                        "right": {
+                            "type": "indicator",
+                            "name": "sma",
+                            "params": {"field": "close", "period": 40},
+                        },
+                    }
+                ],
+            },
+            "exit": {
+                "type": "group",
+                "combinator": "all",
+                "children": [
+                    {
+                        "left": {"type": "literal", "value": 0},
+                        "operator": ">=",
+                        "right": {"type": "literal", "value": 1},
+                    }
+                ],
+            },
+        }
+
+        result = SingleSymbolAllInBacktestEngine().run(
+            RuleBacktestRequest(
+                strategy=strategy,
+                symbol="TEST",
+                bars=bars,
+                start_date=date(2026, 2, 10),
+                execution=BacktestExecutionConfig(slippage=0.0, fee_rate=0.0, fee_min=0.0),
+            )
+        )
+
+        self.assertEqual("2026-02-10", result["start_date"])
+        self.assertEqual("2026-02-10", result["trades"][0]["date"])
+        self.assertEqual(3, len(result["daily_nav"]))
+        self.assertEqual(3, len(result["charts"]["kline"]["dates"]))
+
     def test_hard_stop_sells_at_stop_price_with_cost_fields(self) -> None:
         bars = make_bars([100.0, 90.0], highs=[101.0, 91.0], lows=[99.0, 89.0])
         strategy = literal_entry_strategy(

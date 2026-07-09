@@ -46,6 +46,23 @@ class FakeBackfillService:
             "fetched_start": start_date.isoformat(),
         }
 
+    def backfill_daily_histories(
+        self,
+        items: list[dict],
+        end_date: date,
+        adjust: str,
+        **kwargs,
+    ) -> list[dict]:
+        results = []
+        for item in items:
+            symbol = str(item.get("symbol") or "")
+            try:
+                result = self.backfill_daily_history(symbol, item["start_date"], end_date, adjust)
+                results.append({"ok": True, "result": result})
+            except Exception as exc:
+                results.append({"ok": False, "symbol": symbol, "error": str(exc)})
+        return results
+
     def close(self) -> None:
         self.closed = True
 
@@ -64,6 +81,47 @@ class BlockingBackfillService:
             "added_rows": 1,
             "fetched_start": start_date.isoformat(),
         }
+
+    def backfill_daily_histories(
+        self,
+        items: list[dict],
+        end_date: date,
+        adjust: str,
+        **kwargs,
+    ) -> list[dict]:
+        return [
+            {
+                "ok": True,
+                "result": self.backfill_daily_history(
+                    str(item.get("symbol") or ""),
+                    item["start_date"],
+                    end_date,
+                    adjust,
+                ),
+            }
+            for item in items
+        ]
+
+    def close(self) -> None:
+        pass
+
+
+class AllFailedBackfillService:
+    def backfill_daily_histories(
+        self,
+        items: list[dict],
+        end_date: date,
+        adjust: str,
+        **kwargs,
+    ) -> list[dict]:
+        return [
+            {
+                "ok": False,
+                "symbol": str(item.get("symbol") or ""),
+                "error": "无日/周/月K线查询批量查询权限",
+            }
+            for item in items
+        ]
 
     def close(self) -> None:
         pass
@@ -143,6 +201,28 @@ class BulkBackfillJobManagerTest(unittest.TestCase):
 
         release.set()
         self.assertEqual(wait_for_terminal(manager)["status"], "completed")
+
+    def test_marks_job_failed_when_every_symbol_fails(self) -> None:
+        manager = BulkBackfillJobManager(
+            data_service_factory=lambda provider_priority: AllFailedBackfillService(),
+            runtime_store_obj=FakeRuntimeStore(),
+        )
+
+        started, status = manager.start(
+            items=[{"symbol": "000001.SZ", "start_date": date(2026, 7, 1)}],
+            end_date=date(2026, 7, 7),
+            adjust="qfq",
+            provider_priority=None,
+        )
+
+        self.assertTrue(started)
+        self.assertEqual(status["status"], "running")
+
+        done = wait_for_terminal(manager)
+
+        self.assertEqual(done["status"], "failed")
+        self.assertEqual(done["summary"]["failed"], 1)
+        self.assertIn("批量查询权限", done["error"])
 
 
 class InstrumentAddJobManagerTest(unittest.TestCase):

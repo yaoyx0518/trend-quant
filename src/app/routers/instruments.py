@@ -134,9 +134,13 @@ class BulkBackfillJobManager:
                     "total": len(items),
                     "finished": 0,
                     "updated": 0,
+                    "up_to_date": 0,
                     "no_data": 0,
                     "failed": 0,
                     "added_rows": 0,
+                    "attempt": 1,
+                    "max_attempts": 4,
+                    "retrying": 0,
                 },
                 "results": [],
                 "adjust": adjust,
@@ -175,38 +179,60 @@ class BulkBackfillJobManager:
     ) -> None:
         data_service = self._data_service_factory(provider_priority)
         try:
-            for index, item in enumerate(items, start=1):
-                symbol = str(item.get("symbol") or "").strip().upper()
-                start_date = item.get("start_date")
+            def _on_progress(update: dict) -> None:
                 with self._lock:
                     if self._status.get("job_id") != job_id:
                         return
-                    self._status["current_symbol"] = symbol
-                    self._status["message"] = f"正在补齐 {symbol}（{index}/{len(items)}）"
-
-                try:
-                    result = data_service.backfill_daily_history(
-                        symbol=symbol,
-                        start_date=start_date,
-                        end_date=end_date,
-                        adjust=adjust,
+                    event = str(update.get("event") or "")
+                    summary = self._status["summary"]
+                    summary["attempt"] = int(update.get("attempt") or summary.get("attempt") or 1)
+                    summary["max_attempts"] = int(update.get("max_attempts") or summary.get("max_attempts") or 4)
+                    if event == "retry_sleep":
+                        summary["retrying"] = int(update.get("remaining") or 0)
+                    else:
+                        summary["retrying"] = int(summary.get("retrying") or 0)
+                    self._status["progress_current"] = int(
+                        update.get("finished") or self._status.get("progress_current") or 0
                     )
-                    result["adjust"] = adjust
-                    result["symbol"] = symbol
-                    result["request_adjusted_to_earliest_available"] = bool(
-                        result.get("fetched_start")
-                        and result.get("requested_start")
-                        and str(result.get("fetched_start")) > str(result.get("requested_start"))
-                    )
-                    result_payload = {"ok": True, "result": result}
-                except Exception as exc:
-                    logger.exception("Instrument bulk backfill failed for %s", symbol)
-                    result_payload = {
-                        "ok": False,
-                        "symbol": symbol,
-                        "error": str(exc),
-                    }
+                    self._status["progress_total"] = int(update.get("total") or len(items))
+                    if event == "attempt_start":
+                        self._status["message"] = (
+                            f"第 {summary['attempt']}/{summary['max_attempts']} 轮批量补齐，"
+                            f"待处理 {int(update.get('remaining') or 0)} 个标的。"
+                        )
+                    elif event == "request_start":
+                        symbols = list(update.get("symbols") or [])
+                        self._status["current_symbol"] = symbols[0] if symbols else None
+                        self._status["message"] = (
+                            f"正在批量请求第 {summary['attempt']}/{summary['max_attempts']} 轮 "
+                            f"第 {int(update.get('chunk_index') or 0)}/{int(update.get('chunk_total') or 0)} 批，"
+                            f"本批 {len(symbols)} 个标的。"
+                        )
+                    elif event == "item_done":
+                        symbol = str(update.get("symbol") or "")
+                        self._status["current_symbol"] = symbol or None
+                        self._status["message"] = (
+                            f"已完成 {self._status['progress_current']}/{self._status['progress_total']}：{symbol}"
+                        )
+                    elif event == "retry_sleep":
+                        self._status["current_symbol"] = None
+                        self._status["message"] = (
+                            f"本轮有 {int(update.get('remaining') or 0)} 个标的失败，"
+                            f"{float(update.get('wait_seconds') or 0):.1f} 秒后只重试失败标的。"
+                        )
 
+            result_payloads = data_service.backfill_daily_histories(
+                items=items,
+                end_date=end_date,
+                adjust=adjust,
+                max_retries=3,
+                batch_size=100,
+                request_interval_seconds=2.0,
+                retry_delay_seconds=2.0,
+                progress_callback=_on_progress,
+            )
+
+            for result_payload in result_payloads:
                 with self._lock:
                     if self._status.get("job_id") != job_id:
                         return
@@ -217,6 +243,8 @@ class BulkBackfillJobManager:
                         status = str(result.get("status") or "")
                         if status == "no_data":
                             summary["no_data"] = int(summary.get("no_data", 0)) + 1
+                        elif status == "up_to_date":
+                            summary["up_to_date"] = int(summary.get("up_to_date", 0)) + 1
                         else:
                             summary["updated"] = int(summary.get("updated", 0)) + 1
                         summary["added_rows"] = int(summary.get("added_rows", 0)) + int(
@@ -225,22 +253,44 @@ class BulkBackfillJobManager:
                     else:
                         summary["failed"] = int(summary.get("failed", 0)) + 1
 
-                    self._status["progress_current"] = index
                     self._status.setdefault("results", []).append(result_payload)
 
             with self._lock:
                 if self._status.get("job_id") != job_id:
                     return
                 summary = self._status["summary"]
-                self._status["status"] = "completed"
+                all_failed = (
+                    int(summary.get("total") or len(items)) > 0
+                    and int(summary.get("failed") or 0) == int(summary.get("total") or len(items))
+                    and int(summary.get("updated") or 0) == 0
+                    and int(summary.get("up_to_date") or 0) == 0
+                    and int(summary.get("no_data") or 0) == 0
+                )
+                first_error = ""
+                if all_failed:
+                    for result_payload in self._status.get("results") or []:
+                        if not result_payload.get("ok"):
+                            first_error = str(result_payload.get("error") or "")
+                            break
+                self._status["status"] = "failed" if all_failed else "completed"
+                self._status["progress_current"] = int(summary.get("total") or len(items))
+                self._status["progress_total"] = int(summary.get("total") or len(items))
                 self._status["current_symbol"] = None
                 self._status["finished_at"] = datetime.now().isoformat()
-                self._status["message"] = (
-                    f"后台补齐完成：共 {summary.get('total', 0)} 个标的，"
-                    f"失败 {summary.get('failed', 0)} 个，"
-                    f"未获取到数据 {summary.get('no_data', 0)} 个，"
-                    f"新增 {int(summary.get('added_rows', 0)):,} 行。"
-                )
+                if all_failed:
+                    self._status["error"] = first_error or "所有标的补齐失败"
+                    self._status["message"] = (
+                        f"后台补齐失败：共 {summary.get('total', 0)} 个标的全部失败。"
+                        f"{first_error}"
+                    )
+                else:
+                    self._status["message"] = (
+                        f"后台补齐完成：共 {summary.get('total', 0)} 个标的，"
+                        f"已最新 {summary.get('up_to_date', 0)} 个，"
+                        f"失败 {summary.get('failed', 0)} 个，"
+                        f"未获取到数据 {summary.get('no_data', 0)} 个，"
+                        f"新增 {int(summary.get('added_rows', 0)):,} 行。"
+                    )
                 final_status = self._copy_status()
             self._runtime_store.write_json(f"advice/instrument_bulk_backfill_{job_id}.json", final_status)
         except Exception as exc:

@@ -9,13 +9,24 @@
     <label>代码
       <input id="mvSymbolInput" type="text" placeholder="如 518850 或 518850.SS">
     </label>
-    <label>开始
+    <button id="mvRefreshBtn" type="button">刷新</button>
+  </div>
+
+  <div class="market-backtest-bar">
+    <div class="market-backtest-bar__title">
+      <span>规则回测</span>
+      <strong id="mvBacktestRangeLabel">选择策略与区间</strong>
+    </div>
+    <label>策略
+      <select id="mvBacktestStrategy"></select>
+    </label>
+    <label>开始日期
       <input id="mvStartDate" type="date">
     </label>
-    <label>结束
+    <label>结束日期
       <input id="mvEndDate" type="date">
     </label>
-    <button id="mvRefreshBtn" type="button">刷新</button>
+    <button id="mvRunBacktestBtn" type="button">运行回测</button>
   </div>
 
   <div class="viz-panel market-chart-panel">
@@ -23,6 +34,7 @@
       <h3 id="mvChartTitle">日 K</h3>
       <div id="mvRangeMeta" class="market-range-meta"></div>
     </div>
+    <div id="mvBacktestSummary" class="market-backtest-summary" hidden></div>
     <div id="mvPriceChart" class="chart-kline market-price-chart"></div>
 
     <div id="mvTrendWrap" class="market-subchart-wrap">
@@ -60,20 +72,69 @@
       <div id="mvMacdChart" class="chart-md market-subchart"></div>
     </div>
   </div>
+
+  <div class="table-panel market-trades-panel">
+    <div class="market-table-head">
+      <h3>交易明细</h3>
+      <p id="mvTradeMeta" class="context-hint">运行回测后显示。</p>
+    </div>
+    <div class="table-shell">
+      <table class="market-trades-table">
+        <colgroup>
+          <col class="trade-col-date">
+          <col class="trade-col-side">
+          <col class="trade-col-qty">
+          <col class="trade-col-price">
+          <col class="trade-col-price">
+          <col class="trade-col-pnl">
+          <col class="trade-col-fee">
+          <col class="trade-col-tax">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th class="text-center">方向</th>
+            <th class="num-cell">数量</th>
+            <th class="num-cell">参考价</th>
+            <th class="num-cell">成交价</th>
+            <th class="num-cell">交易收益</th>
+            <th class="num-cell">佣金</th>
+            <th class="num-cell">印花税</th>
+          </tr>
+        </thead>
+        <tbody id="mvTradesBody">
+          <tr><td colspan="8">暂无交易明细。</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="content-panel market-debug-panel">
+    <h3>Debug 日志</h3>
+    <p id="mvDebugInfo" class="context-hint">暂无结果。</p>
+    <pre id="mvDebugPreview" style="white-space:pre-wrap;max-height:360px;overflow:auto;"></pre>
+  </div>
 </section>
 
 <script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
 <script>
 (() => {
-  document.getElementById('mvStartDate')?.closest('label')?.remove();
-  document.getElementById('mvEndDate')?.closest('label')?.remove();
-
   const symbolSearchEl = document.getElementById('mvSymbolSearch');
   const symbolOptionsEl = document.getElementById('mvSymbolOptions');
   const symbolInputEl = document.getElementById('mvSymbolInput');
+  const backtestStrategyEl = document.getElementById('mvBacktestStrategy');
+  const backtestStartEl = document.getElementById('mvStartDate');
+  const backtestEndEl = document.getElementById('mvEndDate');
+  const runBacktestBtnEl = document.getElementById('mvRunBacktestBtn');
+  const backtestRangeLabelEl = document.getElementById('mvBacktestRangeLabel');
   const refreshBtnEl = document.getElementById('mvRefreshBtn');
   const chartTitleEl = document.getElementById('mvChartTitle');
   const rangeMetaEl = document.getElementById('mvRangeMeta');
+  const backtestSummaryEl = document.getElementById('mvBacktestSummary');
+  const tradeMetaEl = document.getElementById('mvTradeMeta');
+  const tradesBodyEl = document.getElementById('mvTradesBody');
+  const debugInfoEl = document.getElementById('mvDebugInfo');
+  const debugPreviewEl = document.getElementById('mvDebugPreview');
   const trendControlsEl = document.getElementById('mvTrendControls');
   const trendShortEl = document.getElementById('mvTrendShort');
   const trendMidEl = document.getElementById('mvTrendMid');
@@ -96,14 +157,18 @@
     5: '#7c3aed',
     10: '#0d7a71',
     20: '#c7834c',
+    40: '#2563eb',
     60: '#b42318',
     120: '#475569',
     200: '#111827',
   });
-  const maPeriods = ['5', '10', '20', '60', '120', '200'];
+  const maPeriods = ['5', '10', '20', '40', '60', '120', '200'];
   let currentCandles = [];
   let currentZoom = null;
+  let currentPayload = null;
+  let currentBacktest = null;
   let allSymbols = [];
+  let ruleMeta = { strategies: [] };
   const priceAxisSplitCount = 6;
 
   function esc(v) {
@@ -119,6 +184,46 @@
     const n = Number(v);
     if (!Number.isFinite(n)) return '-';
     return n.toFixed(digits);
+  }
+
+  function pct(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '-';
+    return `${(n * 100).toFixed(2)}%`;
+  }
+
+  function money(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '-';
+    return n.toFixed(2);
+  }
+
+  function normalizeCandleValues(raw, param) {
+    if (!Array.isArray(raw)) return [];
+    if (raw.length >= 5) {
+      const first = Number(raw[0]);
+      const dataIndex = Number(param?.dataIndex);
+      const axisValue = String(param?.axisValue ?? param?.name ?? '');
+      if ((Number.isFinite(first) && Number.isFinite(dataIndex) && first === dataIndex) || String(raw[0]) === axisValue) {
+        return raw.slice(1, 5);
+      }
+    }
+    return raw.slice(0, 4);
+  }
+
+  function candleTooltipValues(param) {
+    const fromValue = normalizeCandleValues(param?.value, param);
+    if (fromValue.length >= 4 && fromValue.every((v) => Number.isFinite(Number(v)))) {
+      return fromValue;
+    }
+    return normalizeCandleValues(param?.data, param);
+  }
+
+  function paramDataIndex(param, dates) {
+    const idx = Number(param?.dataIndex);
+    if (Number.isInteger(idx) && idx >= 0) return idx;
+    const axisValue = String(param?.axisValue ?? param?.name ?? '');
+    return Array.isArray(dates) ? dates.indexOf(axisValue) : -1;
   }
 
   function compact(v) {
@@ -151,6 +256,31 @@
       start: Math.max(0, Math.min(100, (idx / (dates.length - 1)) * 100)),
       end: 100,
     };
+  }
+
+  function zoomForDateRange(dates, startDate, endDate) {
+    if (!Array.isArray(dates) || dates.length <= 1) return { start: 0, end: 100 };
+    const startText = String(startDate || dates[0] || '');
+    const endText = String(endDate || dates[dates.length - 1] || '');
+    let startIdx = dates.findIndex((d) => d >= startText);
+    if (startIdx < 0) startIdx = 0;
+    let endIdx = -1;
+    for (let i = dates.length - 1; i >= 0; i -= 1) {
+      if (dates[i] <= endText) {
+        endIdx = i;
+        break;
+      }
+    }
+    if (endIdx < 0) endIdx = dates.length - 1;
+    if (endIdx < startIdx) endIdx = startIdx;
+    return {
+      start: Math.max(0, Math.min(100, (startIdx / (dates.length - 1)) * 100)),
+      end: Math.max(0, Math.min(100, (endIdx / (dates.length - 1)) * 100)),
+    };
+  }
+
+  function updateBacktestRangeLabel() {
+    backtestRangeLabelEl.textContent = `${backtestStartEl.value || '最早'} ~ ${backtestEndEl.value || '最新'}`;
   }
 
   function zoomFromEvent(params) {
@@ -269,12 +399,58 @@
     return [...maSeries, ...bollSeries];
   }
 
+  function tradeSeries(points, name, color, symbol) {
+    return {
+      name,
+      type: 'scatter',
+      data: (points || []).map((p) => [p.date, p.price, p]),
+      symbol,
+      symbolSize: 22,
+      itemStyle: {
+        color,
+        borderColor: '#ffffff',
+        borderWidth: 2.5,
+        shadowBlur: 10,
+        shadowColor: 'rgba(17, 35, 42, 0.28)',
+      },
+      label: {
+        show: true,
+        formatter: name,
+        position: name.includes('买') ? 'top' : 'bottom',
+        color,
+        fontWeight: 800,
+        fontSize: 11,
+        textBorderColor: '#ffffff',
+        textBorderWidth: 3,
+      },
+      tooltip: {
+        formatter: (p) => {
+          const raw = p.data?.[2] || {};
+          return [
+            `${name} ${raw.date || ''}`,
+            `成交价：${num(raw.price, 4)}`,
+            `参考价：${num(raw.reference_price, 4)}`,
+            `数量：${raw.qty || 0}`,
+          ].join('<br/>');
+        },
+      },
+      z: 8,
+    };
+  }
+
   function renderPrice(payload, zoom) {
     const dates = payload.dates || [];
     const candles = payload.candles || [];
     const indicators = payload.indicators || {};
     currentCandles = candles;
     const overlays = mainOverlaySeries(indicators);
+    const klineBacktest = currentBacktest?.charts?.kline || {};
+    const backtestSeries = currentBacktest
+      ? [
+        tradeSeries(klineBacktest.buy_points, '买入', '#2563eb', 'pin'),
+        tradeSeries(klineBacktest.sell_points, '卖出', '#f59e0b', 'pin'),
+      ]
+      : [];
     const range = computeLogPriceRange(candles, zoom);
     priceChart.setOption({
       animation: false,
@@ -287,22 +463,28 @@
           const lines = [String(params[0].axisValue || '')];
           for (const p of params) {
             if (p.seriesType === 'candlestick') {
-              const raw = Array.isArray(p.data) ? p.data : [];
+              const raw = candleTooltipValues(p);
               lines.push(`开：${num(raw[0])}`);
               lines.push(`收：${num(raw[1])}`);
               lines.push(`低：${num(raw[2])}`);
               lines.push(`高：${num(raw[3])}`);
+              const idx = paramDataIndex(p, dates);
+              lines.push(`ATR20：${num(indicators.atr?.['20']?.[idx])}`);
             } else if (p.seriesType === 'line') {
               lines.push(`${p.seriesName}：${num(p.value)}`);
+            } else if (p.seriesType === 'scatter') {
+              const raw = p.data?.[2] || {};
+              lines.push(`${p.seriesName}：${num(raw.price, 4)} / ${raw.qty || 0}`);
             }
           }
           return lines.join('<br/>');
         },
       },
       legend: {
-        data: ['K', ...overlays.map((item) => item.name)],
+        data: ['K', ...overlays.map((item) => item.name), ...backtestSeries.map((item) => item.name)],
         top: 4,
         selected: {
+          MA60: false,
           MA120: false,
           MA200: false,
           BOLL上轨: false,
@@ -336,6 +518,7 @@
           },
         },
         ...overlays,
+        ...backtestSeries,
       ],
     }, true);
   }
@@ -531,12 +714,83 @@
     }, true);
   }
 
+  function renderBacktestSummary(result) {
+    const s = result?.summary || {};
+    const cards = [
+      ['总收益', pct(s.total_return), 'return'],
+      ['年化收益', pct(s.annual_return), 'return'],
+      ['最大回撤', pct(s.max_drawdown), 'risk'],
+      ['夏普', num(s.sharpe, 3), 'score'],
+      ['卡玛比', num(s.calmar, 3), 'score'],
+      ['胜率', pct(s.win_rate), 'score'],
+      ['盈亏比', num(s.profit_factor, 2), 'score'],
+      ['交易数', String(s.trade_count || 0), 'neutral'],
+    ];
+    backtestSummaryEl.hidden = false;
+    backtestSummaryEl.innerHTML = cards.map(([label, value, tone]) => {
+      const n = Number(String(value).replace('%', ''));
+      const cls = tone === 'risk'
+        ? 'metric-risk'
+        : (tone !== 'neutral' && Number.isFinite(n) && n > 0 ? 'metric-positive' : '');
+      return `<div><span>${esc(label)}</span><strong class="${cls}">${esc(value)}</strong></div>`;
+    }).join('');
+  }
+
+  function tradePnlCell(trade) {
+    if (String(trade?.side || '').toUpperCase() !== 'SELL') return '';
+    const value = Number(trade?.pnl);
+    if (!Number.isFinite(value)) return '';
+    const cls = value >= 0 ? 'pnl-profit' : 'pnl-loss';
+    const sign = value > 0 ? '+' : '';
+    return `<span class="${cls}">${sign}${money(value)}</span>`;
+  }
+
+  function renderBacktestTrades(result) {
+    const trades = [...(result?.trades || [])].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    tradeMetaEl.textContent = trades.length
+      ? `${result.strategy_id || ''} | ${result.start_date || '-'} ~ ${result.end_date || '-'} | ${trades.length} 笔`
+      : '本次回测无交易。';
+    tradesBodyEl.innerHTML = trades.length ? trades.map((t) => `
+      <tr>
+        <td>${esc(t.date || '')}</td>
+        <td class="text-center">${esc(t.side || '')}</td>
+        <td class="num-cell">${esc(t.qty || 0)}</td>
+        <td class="num-cell">${num(t.reference_price, 4)}</td>
+        <td class="num-cell">${num(t.exec_price, 4)}</td>
+        <td class="num-cell">${tradePnlCell(t)}</td>
+        <td class="num-cell">${money(t.commission)}</td>
+        <td class="num-cell">${money(t.stamp_tax)}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="8">本次回测无交易。</td></tr>';
+  }
+
+  function renderBacktestDebug(result) {
+    const debugLog = result?.debug_log || [];
+    debugInfoEl.textContent = debugLog.length ? `debug 日志 ${debugLog.length} 天。` : '暂无 debug 日志。';
+    debugPreviewEl.textContent = debugLog.length ? JSON.stringify(debugLog.slice(0, 3), null, 2) : '';
+  }
+
+  function renderBacktestResult(result) {
+    currentBacktest = result;
+    renderBacktestSummary(result);
+    renderBacktestTrades(result);
+    renderBacktestDebug(result);
+    if (currentPayload) {
+      currentZoom = zoomForDateRange(currentPayload.dates || [], result.start_date, result.end_date);
+      renderAll(currentPayload, true);
+    }
+  }
+
   function renderAll(payload, preserveZoom = false) {
     const dates = payload.dates || [];
     const zoom = preserveZoom && currentZoom ? currentZoom : oneYearZoom(dates);
     currentZoom = zoom;
+    currentPayload = payload;
     applyTrendConfigToInputs(payload.meta?.trend_config || {});
     applyRsiConfigToInputs(payload.meta?.rsi_config || {});
+    if (!backtestStartEl.value && payload.meta?.start) backtestStartEl.value = payload.meta.start;
+    if (!backtestEndEl.value && payload.meta?.end) backtestEndEl.value = payload.meta.end;
+    updateBacktestRangeLabel();
     chartTitleEl.textContent = `${payload.display_label || payload.display_name || payload.symbol || ''} 日 K`;
     rangeMetaEl.textContent = `${payload.meta?.start || '-'} ~ ${payload.meta?.end || '-'} | ${Number(payload.meta?.rows || 0).toLocaleString()} 根`;
     renderPrice(payload, zoom);
@@ -619,6 +873,18 @@
     await loadDaily(allSymbols[0].symbol);
   }
 
+  async function loadRuleMeta() {
+    const resp = await fetch('/rule-backtest/api/meta');
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || '策略列表加载失败');
+    ruleMeta = data || { strategies: [] };
+    const strategies = (ruleMeta.strategies || []).filter((item) => item.valid);
+    backtestStrategyEl.innerHTML = strategies.length
+      ? strategies.map((item) => `<option value="${esc(item.id)}">${esc(item.name || item.id)}</option>`).join('')
+      : '<option value="">暂无可用策略</option>';
+    runBacktestBtnEl.disabled = !strategies.length;
+  }
+
   function selectedSymbol() {
     const matched = findSymbolByInput(symbolSearchEl.value);
     return String(matched?.symbol || symbolInputEl.value || '').trim();
@@ -633,6 +899,7 @@
     }
     refreshBtnEl.disabled = true;
     try {
+      const previousSymbol = currentPayload?.symbol || '';
       const params = new URLSearchParams();
       params.set('symbol', target);
       appendTrendParams(params);
@@ -648,6 +915,17 @@
         category_path: data.meta?.category_path || '',
       };
       applySelectedSymbol(matched);
+      if (previousSymbol && previousSymbol !== data.symbol) {
+        currentBacktest = null;
+        backtestSummaryEl.hidden = true;
+        backtestStartEl.value = data.meta?.start || '';
+        backtestEndEl.value = data.meta?.end || '';
+        updateBacktestRangeLabel();
+        tradeMetaEl.textContent = '运行回测后显示。';
+        tradesBodyEl.innerHTML = '<tr><td colspan="8">暂无交易明细。</td></tr>';
+        debugInfoEl.textContent = '暂无结果。';
+        debugPreviewEl.textContent = '';
+      }
       renderAll(data, false);
     } catch (err) {
       chartTitleEl.textContent = `加载失败：${err.message}`;
@@ -657,10 +935,47 @@
     }
   }
 
+  async function runRuleBacktest() {
+    const symbol = selectedSymbol();
+    const strategyId = backtestStrategyEl.value;
+    if (!symbol || !strategyId) return;
+    runBacktestBtnEl.disabled = true;
+    runBacktestBtnEl.textContent = '回测中';
+    try {
+      const resp = await fetch('/rule-backtest/api/run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          strategy_id: strategyId,
+          symbol,
+          start_date: backtestStartEl.value,
+          end_date: backtestEndEl.value,
+          initial_capital: 1000000,
+          slippage: 0.002,
+          fee_rate: 0.0000854,
+          fee_min: 5,
+          lot_size: 100,
+          debug_log_enabled: null,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '回测失败');
+      renderBacktestResult(data);
+    } catch (err) {
+      tradeMetaEl.textContent = `回测失败：${err.message}`;
+    } finally {
+      runBacktestBtnEl.disabled = !(ruleMeta.strategies || []).some((item) => item.valid);
+      runBacktestBtnEl.textContent = '运行回测';
+    }
+  }
+
   for (const chart of charts) {
     chart.on('dataZoom', updatePriceYAxis);
   }
   refreshBtnEl.addEventListener('click', () => loadDaily());
+  runBacktestBtnEl.addEventListener('click', runRuleBacktest);
+  backtestStartEl.addEventListener('change', updateBacktestRangeLabel);
+  backtestEndEl.addEventListener('change', updateBacktestRangeLabel);
   trendControlsEl.addEventListener('submit', (event) => {
     event.preventDefault();
     loadDaily();
@@ -696,7 +1011,7 @@
   });
   window.addEventListener('resize', () => charts.forEach((chart) => chart.resize()));
 
-  loadSymbols().catch((err) => {
+  Promise.all([loadRuleMeta(), loadSymbols()]).catch((err) => {
     chartTitleEl.textContent = `加载失败：${err.message}`;
     rangeMetaEl.textContent = '';
   });

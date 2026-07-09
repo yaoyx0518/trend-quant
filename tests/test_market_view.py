@@ -40,9 +40,11 @@ class MarketViewIndicatorTest(unittest.TestCase):
 
         indicators = compute_market_indicators(df)
 
-        for group in ("ma", "boll", "macd", "bias", "volume_ma"):
+        for group in ("ma", "atr", "boll", "macd", "bias", "volume_ma"):
             for series in indicators[group].values():
                 self.assertEqual(len(series), len(df), group)
+        self.assertIn("40", indicators["ma"])
+        self.assertIn("20", indicators["atr"])
         self.assertEqual(len(indicators["rsi"]["series"]), len(df))
         self.assertEqual(indicators["rsi"]["period"], 14)
         self.assertEqual(len(indicators["trend"]["score"]), len(df))
@@ -60,22 +62,46 @@ class MarketViewIndicatorTest(unittest.TestCase):
         self.assertEqual(len(payload["volumes"]), len(df))
         self.assertEqual(payload["display_name"], "Gold")
         indicators = payload["indicators"]
-        for group_name in ("ma", "boll", "macd", "bias", "volume_ma"):
+        for group_name in ("ma", "atr", "boll", "macd", "bias", "volume_ma"):
             for series in indicators[group_name].values():
                 self.assertEqual(len(series), len(payload["dates"]), group_name)
+        self.assertIn("40", indicators["ma"])
+        self.assertIn("20", indicators["atr"])
         self.assertEqual(len(indicators["rsi"]["series"]), len(payload["dates"]))
         self.assertEqual(len(indicators["trend"]["score"]), len(payload["dates"]))
         self.assertEqual(len(indicators["trend"]["ma"]["5"]), len(payload["dates"]))
         self.assertEqual(len(indicators["trend"]["ma"]["10"]), len(payload["dates"]))
+
+    def test_build_market_payload_preserves_candlestick_ohlc_order(self) -> None:
+        df = pd.DataFrame(
+            [
+                {
+                    "time": "2026-06-17",
+                    "open": 521.0,
+                    "high": 586.04,
+                    "low": 521.0,
+                    "close": 586.04,
+                    "volume": 568000,
+                    "amount": 31598894526,
+                }
+            ]
+        )
+
+        payload = build_market_payload("603986.SS", df, "兆易创新")
+
+        self.assertEqual(payload["candles"][0], [521.0, 586.04, 521.0, 586.04])
 
     def test_moving_average_waits_for_full_window(self) -> None:
         df = sample_daily_bars()
 
         payload = build_market_payload("518850.SS", df)
         ma20 = payload["indicators"]["ma"]["20"]
+        ma40 = payload["indicators"]["ma"]["40"]
 
         self.assertTrue(all(value is None for value in ma20[:19]))
         self.assertIsNotNone(ma20[19])
+        self.assertTrue(all(value is None for value in ma40[:39]))
+        self.assertIsNotNone(ma40[39])
 
     def test_trend_indicator_aligns_and_respects_custom_core_periods(self) -> None:
         df = sample_daily_bars(100)

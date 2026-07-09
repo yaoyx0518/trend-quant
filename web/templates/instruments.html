@@ -639,9 +639,10 @@
   function summaryText(summary) {
     const total = Number(summary?.total || 0);
     const failed = Number(summary?.failed || 0);
+    const upToDate = Number(summary?.up_to_date || 0);
     const noData = Number(summary?.no_data || 0);
     const addedRows = Number(summary?.added_rows || 0);
-    return `共 ${total} 个标的，未获取到数据 ${noData} 个，失败 ${failed} 个，新增 ${addedRows.toLocaleString()} 行。`;
+    return `共 ${total} 个标的，已最新 ${upToDate} 个，未获取到数据 ${noData} 个，失败 ${failed} 个，新增 ${addedRows.toLocaleString()} 行。`;
   }
 
   function dismissedCompletionJobId() {

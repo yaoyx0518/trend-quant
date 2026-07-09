@@ -14,12 +14,14 @@ from rule_backtest.value_resolver import ValueResolver
 
 class SingleSymbolAllInBacktestEngine:
     def run(self, request: RuleBacktestRequest) -> dict:
-        bars = self._prepare_bars(request.bars)
+        all_bars = self._prepare_bars(request.bars)
+        bars = all_bars
         if request.start_date is not None:
             bars = bars[bars["date"] >= request.start_date]
         if request.end_date is not None:
             bars = bars[bars["date"] <= request.end_date]
-        bars = bars.reset_index(drop=True)
+        if bars.empty:
+            raise ValueError(f"symbol has no market data in range: {request.symbol}")
 
         run_id = request.run_id or datetime.now().strftime("%Y%m%d%H%M%S%f")
         strategy = request.strategy
@@ -40,13 +42,13 @@ class SingleSymbolAllInBacktestEngine:
         for idx, row in bars.iterrows():
             day = row["date"]
             day_str = day.isoformat()
-            day_bars = bars.iloc[: idx + 1].copy()
+            day_bars = all_bars.iloc[: idx + 1].copy()
             close_price = float(row["close"])
             debug_day: dict = {
                 "date": day_str,
                 "raw_bar": self._row_to_dict(row),
                 "history_window": {
-                    "start": bars.iloc[0]["date"].isoformat(),
+                    "start": all_bars.iloc[0]["date"].isoformat(),
                     "end": day_str,
                     "rows": int(len(day_bars)),
                 },

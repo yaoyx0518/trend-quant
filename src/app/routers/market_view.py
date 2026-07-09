@@ -20,7 +20,8 @@ templates = Jinja2Templates(directory="web/templates")
 
 DEFAULT_LIMIT = 20000
 MAX_LIMIT = 50000
-MA_PERIODS = (5, 10, 20, 30, 60, 120, 200)
+MA_PERIODS = (5, 10, 20, 30, 40, 60, 120, 200)
+ATR_PERIODS = (20,)
 BIAS_PERIODS = (6, 12, 24)
 VOL_MA_PERIODS = (5, 10)
 TREND_MA_PERIODS = (5, 10)
@@ -321,9 +322,14 @@ def compute_market_indicators(
         "series": _series(_rsi(close, rsi_period)),
         "period": rsi_period,
     }
+    atr_values = {
+        str(period): _series(atr(df, period=period))
+        for period in ATR_PERIODS
+    }
 
     return {
         "ma": ma,
+        "atr": atr_values,
         "boll": boll,
         "macd": macd,
         "bias": bias,
@@ -396,6 +402,7 @@ def build_market_payload(
             "start": dates[0] if dates else None,
             "end": dates[-1] if dates else None,
             "ma_periods": list(MA_PERIODS),
+            "atr_periods": list(ATR_PERIODS),
             "bias_periods": list(BIAS_PERIODS),
             "volume_ma_periods": list(VOL_MA_PERIODS),
             "trend_config": indicators.get("trend", {}).get("config", {}),

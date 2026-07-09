@@ -37,7 +37,7 @@ async def rule_backtest_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
         name="rule_backtest.html",
         request=request,
-        context={"title": "规则回测"},
+        context={"title": "策略管理"},
     )
 
 
