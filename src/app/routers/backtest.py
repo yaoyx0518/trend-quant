@@ -52,8 +52,8 @@ class BacktestRunRequest(BaseModel):
     benchmark_symbol: str = Field(default=DEFAULT_BENCHMARK_SYMBOL)
     symbol_param_overrides: dict[str, dict[str, float]] = Field(default_factory=dict)
     n_short: int = Field(default=5)
-    n_mid: int = Field(default=20)
-    n_long: int = Field(default=40)
+    n_mid: int = Field(default=10)
+    n_long: int = Field(default=20)
     entry_threshold_min: float = Field(default=10)
     entry_threshold_max: float = Field(default=20)
     entry_threshold: float | None = Field(default=None)
@@ -182,8 +182,8 @@ async def run_backtest(payload: BacktestRunRequest) -> dict:
             strategy_overrides["sell_signals"] = sell_signals
 
         n_short = int(strategy_overrides.get("n_short", 5))
-        n_mid = int(strategy_overrides.get("n_mid", 20))
-        n_long = int(strategy_overrides.get("n_long", 40))
+        n_mid = int(strategy_overrides.get("n_mid", 10))
+        n_long = int(strategy_overrides.get("n_long", 20))
         entry_threshold = float(strategy_overrides.get("entry_threshold", 10.0))
         max_holdings = int(strategy_overrides.get("max_holdings", 5))
         mom_short = int(strategy_overrides.get("momentum_window_short", 10))

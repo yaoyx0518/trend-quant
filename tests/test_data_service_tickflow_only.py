@@ -123,7 +123,7 @@ class PermissionDeniedBatchProvider(FakeTickFlowProvider):
 
 class DataServiceTickFlowOnlyTest(unittest.TestCase):
     def test_ignores_fallback_providers(self) -> None:
-        service = DataService(provider_priority=["tickflow", "yahoo", "akshare"])
+        service = DataService(provider_priority=["tickflow", "legacy_provider"])
 
         self.assertEqual(service.provider_priority, ["tickflow"])
         self.assertEqual(list(service.providers), ["tickflow"])

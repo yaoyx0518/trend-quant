@@ -26,7 +26,12 @@
     <label>结束日期
       <input id="mvEndDate" type="date">
     </label>
-    <button id="mvRunBacktestBtn" type="button">运行回测</button>
+    <div class="market-backtest-action">
+      <button id="mvRunBacktestBtn" type="button">运行回测</button>
+      <div id="mvBacktestProgress" class="market-backtest-progress" hidden>
+        <progress id="mvBacktestProgressBar" aria-label="回测进度" max="100" value="24" style="width:240px;height:16px;"></progress>
+      </div>
+    </div>
   </div>
 
   <div class="viz-panel market-chart-panel">
@@ -87,6 +92,7 @@
           <col class="trade-col-price">
           <col class="trade-col-price">
           <col class="trade-col-pnl">
+          <col class="trade-col-hold">
           <col class="trade-col-fee">
           <col class="trade-col-tax">
         </colgroup>
@@ -98,12 +104,13 @@
             <th class="num-cell">参考价</th>
             <th class="num-cell">成交价</th>
             <th class="num-cell">交易收益</th>
+            <th class="num-cell">持有天数</th>
             <th class="num-cell">佣金</th>
             <th class="num-cell">印花税</th>
           </tr>
         </thead>
         <tbody id="mvTradesBody">
-          <tr><td colspan="8">暂无交易明细。</td></tr>
+          <tr><td colspan="9">暂无交易明细。</td></tr>
         </tbody>
       </table>
     </div>
@@ -126,6 +133,8 @@
   const backtestStartEl = document.getElementById('mvStartDate');
   const backtestEndEl = document.getElementById('mvEndDate');
   const runBacktestBtnEl = document.getElementById('mvRunBacktestBtn');
+  const backtestProgressEl = document.getElementById('mvBacktestProgress');
+  const backtestProgressBarEl = document.getElementById('mvBacktestProgressBar');
   const backtestRangeLabelEl = document.getElementById('mvBacktestRangeLabel');
   const refreshBtnEl = document.getElementById('mvRefreshBtn');
   const chartTitleEl = document.getElementById('mvChartTitle');
@@ -169,6 +178,8 @@
   let currentBacktest = null;
   let allSymbols = [];
   let ruleMeta = { strategies: [] };
+  let backtestProgressTimer = null;
+  let backtestProgressHideTimer = null;
   const priceAxisSplitCount = 6;
 
   function esc(v) {
@@ -196,6 +207,36 @@
     const n = Number(v);
     if (!Number.isFinite(n)) return '-';
     return n.toFixed(2);
+  }
+
+  function setBacktestProgress(percent, state = 'running') {
+    const value = Math.max(0, Math.min(100, Number(percent) || 0));
+    backtestProgressEl.hidden = false;
+    backtestProgressEl.classList.toggle('is-complete', state === 'complete');
+    backtestProgressEl.classList.toggle('is-error', state === 'error');
+    backtestProgressBarEl.value = value;
+  }
+
+  function startBacktestProgress() {
+    clearInterval(backtestProgressTimer);
+    clearTimeout(backtestProgressHideTimer);
+    let progress = 24;
+    setBacktestProgress(progress);
+    backtestProgressTimer = setInterval(() => {
+      progress = Math.min(90, progress + 4);
+      setBacktestProgress(progress);
+    }, 420);
+  }
+
+  function finishBacktestProgress(ok) {
+    clearInterval(backtestProgressTimer);
+    backtestProgressTimer = null;
+    setBacktestProgress(100, ok ? 'complete' : 'error');
+    clearTimeout(backtestProgressHideTimer);
+    backtestProgressHideTimer = setTimeout(() => {
+      backtestProgressEl.hidden = true;
+      backtestProgressBarEl.value = 0;
+    }, ok ? 1200 : 2400);
   }
 
   function normalizeCandleValues(raw, param) {
@@ -745,8 +786,45 @@
     return `<span class="${cls}">${sign}${money(value)}</span>`;
   }
 
+  function calendarHoldingDays(buyDate, sellDate) {
+    const buy = new Date(`${buyDate}T00:00:00`);
+    const sell = new Date(`${sellDate}T00:00:00`);
+    if (Number.isNaN(buy.getTime()) || Number.isNaN(sell.getTime())) return null;
+    return Math.max(0, Math.round((sell.getTime() - buy.getTime()) / 86400000));
+  }
+
+  function tradingHoldingDays(buyDate, sellDate) {
+    const dates = currentPayload?.dates || [];
+    const buyIdx = dates.indexOf(buyDate);
+    const sellIdx = dates.indexOf(sellDate);
+    if (buyIdx >= 0 && sellIdx >= 0 && sellIdx >= buyIdx) return sellIdx - buyIdx;
+    return calendarHoldingDays(buyDate, sellDate);
+  }
+
+  function attachHoldingDays(rawTrades) {
+    const openBuys = [];
+    return rawTrades.map((trade) => {
+      const side = String(trade?.side || '').toUpperCase();
+      if (side === 'BUY') {
+        openBuys.push(trade);
+        return { ...trade, holding_days: null };
+      }
+      if (side !== 'SELL') return { ...trade, holding_days: null };
+      const buy = openBuys.shift();
+      const days = buy ? tradingHoldingDays(buy.date, trade.date) : null;
+      return { ...trade, holding_days: days };
+    });
+  }
+
+  function holdingDaysCell(trade) {
+    if (String(trade?.side || '').toUpperCase() !== 'SELL') return '';
+    const days = Number(trade?.holding_days);
+    return Number.isFinite(days) ? String(days) : '-';
+  }
+
   function renderBacktestTrades(result) {
-    const trades = [...(result?.trades || [])].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    const trades = attachHoldingDays(result?.trades || [])
+      .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
     tradeMetaEl.textContent = trades.length
       ? `${result.strategy_id || ''} | ${result.start_date || '-'} ~ ${result.end_date || '-'} | ${trades.length} 笔`
       : '本次回测无交易。';
@@ -758,10 +836,11 @@
         <td class="num-cell">${num(t.reference_price, 4)}</td>
         <td class="num-cell">${num(t.exec_price, 4)}</td>
         <td class="num-cell">${tradePnlCell(t)}</td>
+        <td class="num-cell">${holdingDaysCell(t)}</td>
         <td class="num-cell">${money(t.commission)}</td>
         <td class="num-cell">${money(t.stamp_tax)}</td>
       </tr>
-    `).join('') : '<tr><td colspan="8">本次回测无交易。</td></tr>';
+    `).join('') : '<tr><td colspan="9">本次回测无交易。</td></tr>';
   }
 
   function renderBacktestDebug(result) {
@@ -922,7 +1001,7 @@
         backtestEndEl.value = data.meta?.end || '';
         updateBacktestRangeLabel();
         tradeMetaEl.textContent = '运行回测后显示。';
-        tradesBodyEl.innerHTML = '<tr><td colspan="8">暂无交易明细。</td></tr>';
+        tradesBodyEl.innerHTML = '<tr><td colspan="9">暂无交易明细。</td></tr>';
         debugInfoEl.textContent = '暂无结果。';
         debugPreviewEl.textContent = '';
       }
@@ -941,6 +1020,8 @@
     if (!symbol || !strategyId) return;
     runBacktestBtnEl.disabled = true;
     runBacktestBtnEl.textContent = '回测中';
+    startBacktestProgress();
+    let ok = false;
     try {
       const resp = await fetch('/rule-backtest/api/run', {
         method: 'POST',
@@ -961,9 +1042,11 @@
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || '回测失败');
       renderBacktestResult(data);
+      ok = true;
     } catch (err) {
       tradeMetaEl.textContent = `回测失败：${err.message}`;
     } finally {
+      finishBacktestProgress(ok);
       runBacktestBtnEl.disabled = !(ruleMeta.strategies || []).some((item) => item.valid);
       runBacktestBtnEl.textContent = '运行回测';
     }

@@ -143,7 +143,7 @@ def _strategy_history_payload() -> list[dict]:
                 "要求当前无持仓。",
             ],
             "buy_filter": [
-                f"趋势评分窗口：n_short={int(trend_v1.get('n_short', 5))}, n_mid={int(trend_v1.get('n_mid', 20))}, n_long={int(trend_v1.get('n_long', 40))}。",
+                f"趋势评分窗口：n_short={int(trend_v1.get('n_short', 5))}, n_mid={int(trend_v1.get('n_mid', 10))}, n_long={int(trend_v1.get('n_long', 20))}。",
                 "价格确认高于 MA(mid)。",
             ],
             "sell_signal": [

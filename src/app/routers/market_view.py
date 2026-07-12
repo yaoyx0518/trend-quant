@@ -100,6 +100,26 @@ def _metadata_sort_key(meta: dict | None, symbol: str) -> tuple:
     )
 
 
+def _market_symbol_item(symbol: str, name_map: dict[str, str], metadata: dict | None) -> dict:
+    name = str((metadata or {}).get("name") or name_map.get(symbol, ""))
+    display_name = format_symbol_display(symbol, name)
+    display_label = _display_with_category(display_name, metadata)
+    category_path = _category_path(metadata)
+    factor_tags = list((metadata or {}).get("factor_tags") or [])
+    return {
+        "symbol": symbol,
+        "name": name,
+        "display_name": display_name,
+        "display_label": display_label,
+        "category_l1": str((metadata or {}).get("category_l1") or ""),
+        "category_l2": str((metadata or {}).get("category_l2") or ""),
+        "category_l3": str((metadata or {}).get("category_l3") or ""),
+        "category_path": category_path,
+        "factor_tags": factor_tags,
+        "sort_order": int((metadata or {}).get("sort_order") or 999999),
+    }
+
+
 def _num(value: object) -> float | None:
     try:
         n = float(value)  # type: ignore[arg-type]
@@ -163,8 +183,8 @@ def _trend_config(overrides: dict | None = None) -> dict:
 
 def _validate_trend_config(cfg: dict) -> None:
     n_short = int(cfg.get("n_short", 5))
-    n_mid = int(cfg.get("n_mid", 20))
-    n_long = int(cfg.get("n_long", 40))
+    n_mid = int(cfg.get("n_mid", 10))
+    n_long = int(cfg.get("n_long", 20))
     atr_period = int(cfg.get("atr_period", 20))
     if min(n_short, n_mid, n_long, atr_period) <= 0:
         raise HTTPException(status_code=400, detail="趋势值参数必须为正整数")
@@ -175,8 +195,8 @@ def _validate_trend_config(cfg: dict) -> None:
 def compute_trend_indicator(df: pd.DataFrame, cfg: dict) -> dict:
     _validate_trend_config(cfg)
     n_short = int(cfg.get("n_short", 5))
-    n_mid = int(cfg.get("n_mid", 20))
-    n_long = int(cfg.get("n_long", 40))
+    n_mid = int(cfg.get("n_mid", 10))
+    n_long = int(cfg.get("n_long", 20))
     atr_period = int(cfg.get("atr_period", 20))
     min_bars = max(n_long, atr_period) + 2
 
@@ -269,8 +289,8 @@ def compute_trend_indicator(df: pd.DataFrame, cfg: dict) -> dict:
         "confidence": _series(confidence_full),
         "config": {
             "n_short": int(cfg.get("n_short", 5)),
-            "n_mid": int(cfg.get("n_mid", 20)),
-            "n_long": int(cfg.get("n_long", 40)),
+            "n_mid": int(cfg.get("n_mid", 10)),
+            "n_long": int(cfg.get("n_long", 20)),
             "atr_period": int(cfg.get("atr_period", 20)),
         },
     }
@@ -428,27 +448,7 @@ async def list_market_symbols() -> dict:
     metadata_by_symbol = db.get_instrument_metadata_map()
     symbols = db.list_market_symbols()
     items = [
-        {
-            "symbol": symbol,
-            "name": str((metadata_by_symbol.get(symbol) or {}).get("name") or name_map.get(symbol, "")),
-            "display_name": format_symbol_display(
-                symbol,
-                str((metadata_by_symbol.get(symbol) or {}).get("name") or name_map.get(symbol, "")),
-            ),
-            "display_label": _display_with_category(
-                format_symbol_display(
-                    symbol,
-                    str((metadata_by_symbol.get(symbol) or {}).get("name") or name_map.get(symbol, "")),
-                ),
-                metadata_by_symbol.get(symbol),
-            ),
-            "category_l1": str((metadata_by_symbol.get(symbol) or {}).get("category_l1") or ""),
-            "category_l2": str((metadata_by_symbol.get(symbol) or {}).get("category_l2") or ""),
-            "category_l3": str((metadata_by_symbol.get(symbol) or {}).get("category_l3") or ""),
-            "category_path": _category_path(metadata_by_symbol.get(symbol)),
-            "factor_tags": list((metadata_by_symbol.get(symbol) or {}).get("factor_tags") or []),
-            "sort_order": int((metadata_by_symbol.get(symbol) or {}).get("sort_order") or 999999),
-        }
+        _market_symbol_item(symbol, name_map, metadata_by_symbol.get(symbol))
         for symbol in symbols
     ]
     items.sort(key=lambda item: _metadata_sort_key(metadata_by_symbol.get(item["symbol"]), item["symbol"]))

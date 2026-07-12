@@ -50,7 +50,7 @@ class MomentumTopNStrategyV2(BaseStrategy):
     def required_history_bars(self, cfg: dict) -> int:
         required = [
             int(cfg.get("lookback_days", 120)),
-            int(cfg.get("n_long", 40)),
+            int(cfg.get("n_long", 20)),
             int(cfg.get("atr_period", 20)),
             int(cfg.get("momentum_window_short", 10)),
             int(cfg.get("momentum_window_long", 20)),

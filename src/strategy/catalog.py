@@ -190,8 +190,8 @@ def build_strategy_catalog(strategy_cfg: dict) -> dict:
                 "summary": "带止损规则的单标的趋势评分策略",
                 "params": {
                     "n_short": int(trend_cfg.get("n_short", 5)),
-                    "n_mid": int(trend_cfg.get("n_mid", 20)),
-                    "n_long": int(trend_cfg.get("n_long", 40)),
+                    "n_mid": int(trend_cfg.get("n_mid", 10)),
+                    "n_long": int(trend_cfg.get("n_long", 20)),
                     "entry_threshold_min": float(trend_entry_min),
                     "entry_threshold_max": float(trend_entry_max),
                 },
@@ -202,8 +202,8 @@ def build_strategy_catalog(strategy_cfg: dict) -> dict:
                 "summary": "在 v2 基础上增加买入日 trend_score 上限（<=20）",
                 "params": {
                     "n_short": int(momentum_v3_cfg.get("n_short", 5)),
-                    "n_mid": int(momentum_v3_cfg.get("n_mid", 20)),
-                    "n_long": int(momentum_v3_cfg.get("n_long", 40)),
+                    "n_mid": int(momentum_v3_cfg.get("n_mid", 10)),
+                    "n_long": int(momentum_v3_cfg.get("n_long", 20)),
                     "entry_threshold": float(momentum_v3_cfg.get("entry_threshold", 10.0)),
                     "max_holdings": int(momentum_v3_cfg.get("max_holdings", 5)),
                     "momentum_window_short": int(momentum_v3_cfg.get("momentum_window_short", 10)),
@@ -225,8 +225,8 @@ def build_strategy_catalog(strategy_cfg: dict) -> dict:
                 "summary": "使用 MA20+MA60 买入过滤和 max(MA30,MA40,MA60) 退出的前 N 动量策略",
                 "params": {
                     "n_short": int(momentum_v2_cfg.get("n_short", 5)),
-                    "n_mid": int(momentum_v2_cfg.get("n_mid", 20)),
-                    "n_long": int(momentum_v2_cfg.get("n_long", 40)),
+                    "n_mid": int(momentum_v2_cfg.get("n_mid", 10)),
+                    "n_long": int(momentum_v2_cfg.get("n_long", 20)),
                     "entry_threshold": float(momentum_v2_cfg.get("entry_threshold", 10.0)),
                     "max_holdings": int(momentum_v2_cfg.get("max_holdings", 5)),
                     "momentum_window_short": int(momentum_v2_cfg.get("momentum_window_short", 10)),
@@ -247,8 +247,8 @@ def build_strategy_catalog(strategy_cfg: dict) -> dict:
                 "summary": "按周调仓的前 N 动量与趋势混合排名策略",
                 "params": {
                     "n_short": int(momentum_v1_cfg.get("n_short", 5)),
-                    "n_mid": int(momentum_v1_cfg.get("n_mid", 20)),
-                    "n_long": int(momentum_v1_cfg.get("n_long", 40)),
+                    "n_mid": int(momentum_v1_cfg.get("n_mid", 10)),
+                    "n_long": int(momentum_v1_cfg.get("n_long", 20)),
                     "entry_threshold": float(momentum_v1_cfg.get("entry_threshold", 10.0)),
                     "max_holdings": int(momentum_v1_cfg.get("max_holdings", 5)),
                     "momentum_window_short": int(momentum_v1_cfg.get("momentum_window_short", 10)),

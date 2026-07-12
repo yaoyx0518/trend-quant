@@ -61,11 +61,6 @@ apt-get install -y -qq \
     ufw \
     apache2-utils
 
-# 安装 Chromium（efinance 部分接口依赖，失败不中断）
-apt-get install -y -qq chromium-browser chromium-chromedriver 2>/dev/null || \
-apt-get install -y -qq chromium chromium-driver 2>/dev/null || \
-log_warn "Chromium 安装失败，如数据抓取异常请手动安装"
-
 # =============================================================================
 # 2. 克隆/更新代码
 # =============================================================================

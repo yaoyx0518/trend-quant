@@ -52,6 +52,35 @@ def literal_entry_strategy(exit_rule: dict) -> dict:
 
 
 class RuleBacktestEngineTest(unittest.TestCase):
+    def test_exit_conditions_are_or_connected_even_for_legacy_all_strategy(self) -> None:
+        bars = make_bars([100.0, 100.0])
+        strategy = literal_entry_strategy(
+            {
+                "left": {"type": "literal", "value": 0},
+                "operator": ">=",
+                "right": {"type": "literal", "value": 1},
+            }
+        )
+        strategy["exit"]["children"].append(
+            {
+                "left": {"type": "literal", "value": 1},
+                "operator": ">=",
+                "right": {"type": "literal", "value": 1},
+            }
+        )
+
+        result = SingleSymbolAllInBacktestEngine().run(
+            RuleBacktestRequest(
+                strategy=strategy,
+                symbol="TEST",
+                bars=bars,
+                execution=BacktestExecutionConfig(slippage=0.0, fee_rate=0.0, fee_min=0.0),
+            )
+        )
+
+        self.assertEqual(["BUY", "SELL"], [trade["side"] for trade in result["trades"]])
+        self.assertEqual("2026-01-02", result["trades"][1]["date"])
+
     def test_sma20_entry_and_exit_strategy(self) -> None:
         bars = make_bars(([10.0] * 20) + ([12.0] * 5) + ([8.0] * 5))
         strategy = {
@@ -316,6 +345,8 @@ class RuleBacktestLoaderServiceTest(unittest.TestCase):
             self.assertEqual("test_created_strategy", saved["id"])
             self.assertEqual("Test Created Strategy", loaded["name"])
             self.assertEqual(20, loaded["entry"]["children"][0]["right"]["params"]["period"])
+            self.assertEqual("all", loaded["entry"]["combinator"])
+            self.assertEqual("any", loaded["exit"]["combinator"])
 
     def test_loader_saves_new_strategy_to_db_when_available(self) -> None:
         strategy = {

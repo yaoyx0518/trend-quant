@@ -154,14 +154,27 @@ class MarketViewIndicatorTest(unittest.TestCase):
 
 
 class FakeMarketViewDb:
-    def __init__(self, df: pd.DataFrame) -> None:
+    def __init__(
+        self,
+        df: pd.DataFrame,
+        symbols: list[str] | None = None,
+        metadata_map: dict[str, dict] | None = None,
+    ) -> None:
         self.df = df
+        self.symbols = symbols or ["518850.SS"]
+        self.metadata_map = metadata_map or {}
 
     def load_market_data(self, symbol: str) -> pd.DataFrame:
         return self.df.copy()
 
     def get_instrument_metadata(self, symbol: str) -> dict | None:
-        return None
+        return self.metadata_map.get(symbol)
+
+    def get_instrument_metadata_map(self) -> dict[str, dict]:
+        return self.metadata_map
+
+    def list_market_symbols(self) -> list[str]:
+        return self.symbols
 
 
 class MarketViewApiTest(unittest.IsolatedAsyncioTestCase):

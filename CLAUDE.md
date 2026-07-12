@@ -33,7 +33,7 @@ All persistent state lives in `data/trend_quant.db` (SQLite). Access is through 
 
 ### Data Provider Chain
 
-`DataService` (`src/data/service.py`) maintains a priority-ordered provider list (default: `efinance`, then `akshare`). Each provider implements `IDataProvider` and returns normalized OHLCV DataFrames. If the primary fails, the next is tried automatically. `SignalEngine` and backtests consume data through `MarketStore`, which reads/writes the SQLite `market_data` table.
+`DataService` (`src/data/service.py`) uses TickFlow as its only provider and returns normalized OHLCV DataFrames. TickFlow failures are surfaced directly without a fallback. `SignalEngine` and backtests consume data through `MarketStore`, which reads/writes the SQLite `market_data` table.
 
 ### Signal Engine Flow (`src/engine/signal_engine.py`)
 

@@ -37,8 +37,23 @@ class LoggingSettings:
 
 
 @dataclass(slots=True)
+class TickFlowSettings:
+    """Limits for the currently subscribed TickFlow CN Starter plan."""
+
+    plan: str
+    api_base_url: str
+    daily_kline_batch_size: int
+    daily_kline_batch_requests_per_minute: int
+    daily_kline_batch_max_workers: int
+    daily_kline_single_requests_per_minute: int
+    quote_max_symbols_per_request: int
+    quote_requests_per_minute: int
+
+
+@dataclass(slots=True)
 class Settings:
     app: AppSettings
+    tickflow: TickFlowSettings
     runtime: RuntimeSettings
     logging: LoggingSettings
 
@@ -56,6 +71,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
     raw = _load_yaml(path)
 
     app_raw = raw.get("app", {})
+    tickflow_raw = raw.get("tickflow", {})
     runtime_raw = raw.get("runtime", {})
     logging_raw = raw.get("logging", {})
 
@@ -79,6 +95,28 @@ def load_settings(config_path: Path | None = None) -> Settings:
             notify_retry_times=int(app_raw.get("notify_retry_times", 2)),
             notify_retry_interval_seconds=int(app_raw.get("notify_retry_interval_seconds", 5)),
             lot_size=int(app_raw.get("lot_size", 100)),
+        ),
+        tickflow=TickFlowSettings(
+            plan=str(tickflow_raw.get("plan", "starter")).strip().lower(),
+            api_base_url=str(tickflow_raw.get("api_base_url", "https://api.tickflow.org")).strip(),
+            daily_kline_batch_size=max(1, min(int(tickflow_raw.get("daily_kline_batch_size", 100)), 100)),
+            daily_kline_batch_requests_per_minute=max(
+                1,
+                int(tickflow_raw.get("daily_kline_batch_requests_per_minute", 30)),
+            ),
+            daily_kline_batch_max_workers=max(
+                1,
+                int(tickflow_raw.get("daily_kline_batch_max_workers", 1)),
+            ),
+            daily_kline_single_requests_per_minute=max(
+                1,
+                int(tickflow_raw.get("daily_kline_single_requests_per_minute", 60)),
+            ),
+            quote_max_symbols_per_request=max(
+                1,
+                int(tickflow_raw.get("quote_max_symbols_per_request", 50)),
+            ),
+            quote_requests_per_minute=max(1, int(tickflow_raw.get("quote_requests_per_minute", 60))),
         ),
         runtime=RuntimeSettings(
             account_equity_default=float(runtime_raw.get("account_equity_default", 200000)),

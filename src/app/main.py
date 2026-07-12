@@ -18,6 +18,7 @@ from app.routers import (
     parameter_optimization,
     rule_backtest,
     strategy_history,
+    subject_market,
     trades,
 )
 from audit.app_logger import get_logger, setup_logging
@@ -97,6 +98,17 @@ app = FastAPI(title="Trend ETF System", version="0.1.0", lifespan=lifespan)
 static_dir = Path("web/static")
 style_file = static_dir / "style.css"
 app.state.asset_version = str(int(style_file.stat().st_mtime)) if style_file.exists() else "1"
+
+
+@app.middleware("http")
+async def refresh_asset_version(request, call_next):
+    """Ensure rendered pages reference the latest local stylesheet revision."""
+    request.app.state.asset_version = (
+        str(int(style_file.stat().st_mtime)) if style_file.exists() else "1"
+    )
+    return await call_next(request)
+
+
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -110,3 +122,4 @@ app.include_router(trades.router)
 app.include_router(logs.router)
 app.include_router(instruments.router)
 app.include_router(market_view.router)
+app.include_router(subject_market.router)

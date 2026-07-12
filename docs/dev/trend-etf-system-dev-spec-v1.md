@@ -30,8 +30,7 @@ src/
   data/
     models.py
     provider_base.py
-    provider_efinance.py
-    provider_akshare.py
+    provider_tickflow.py
     storage/
       db.py
       market_store.py
@@ -85,8 +84,7 @@ class IDataProvider(Protocol):
 
 实现：
 
-- `EfinanceProvider`（主）
-- `AkshareProvider`（备）
+- `TickFlowProvider`（唯一）
 
 ### 3.2 IStrategy
 
@@ -136,7 +134,7 @@ class INotifier(Protocol):
 - 调度时点
 - 通知渠道开关
 - 日志级别
-- 数据源优先级（efinance -> akshare）
+- 数据源优先级（tickflow）
 
 ## 5. 运行时状态与文件
 

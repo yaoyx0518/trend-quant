@@ -17,8 +17,8 @@ def safe_float(value: object, default: float = 0.0) -> float:
 
 def calculate_trend_score_snapshot(bars: pd.DataFrame, cfg: dict) -> dict:
     n_short = int(cfg.get("n_short", 5))
-    n_mid = int(cfg.get("n_mid", 20))
-    n_long = int(cfg.get("n_long", 40))
+    n_mid = int(cfg.get("n_mid", 10))
+    n_long = int(cfg.get("n_long", 20))
     atr_period = int(cfg.get("atr_period", 20))
     min_bars = max(n_long, atr_period) + 2
 

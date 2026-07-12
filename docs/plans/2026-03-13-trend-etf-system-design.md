@@ -21,7 +21,7 @@
 
 ## 2. 已确认关键决策
 
-- 数据源：`efinance` 优先，`akshare` 备选，接口层可插拔
+- 数据源：`tickflow`（Starter）为唯一生产数据源
 - 复权口径：前复权
 - 回测频率：日频
 - 回测成交：当日收盘价（叠加滑点与手续费）
@@ -86,4 +86,3 @@
   - `docs/PRD-trend-etf-system-v1.md`
   - `docs/dev/trend-etf-system-dev-spec-v1.md`
 - 定稿后进入开发实施。
-

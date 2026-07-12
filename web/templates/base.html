@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{{ title }} | 趋势 ETF 系统</title>
-  <link rel="stylesheet" href="/static/style.css?v={{ request.app.state.asset_version|default('1', true) if request is defined else '1' }}">
+  <link rel="stylesheet" href="/static/style.css?v={{ request.app.state.asset_version|default('1', true) if request is defined else '1' }}-20260711-layout-fix-3">
 </head>
 <body>
   {% set path = request.url.path if request is defined else '' %}
@@ -23,6 +23,7 @@
         <a href="/backtest" class="{% if path.startswith('/backtest') %}is-active{% endif %}">回测</a>
         <a href="/rule-backtest" class="{% if path.startswith('/rule-backtest') %}is-active{% endif %}">策略管理</a>
         <a href="/market-view" class="{% if path.startswith('/market-view') %}is-active{% endif %}">标的查看</a>
+        <a href="/subject-market" class="{% if path.startswith('/subject-market') %}is-active{% endif %}">标的看板</a>
         <a href="/instruments" class="{% if path.startswith('/instruments') %}is-active{% endif %}">标的管理</a>
         <a href="/trades" class="{% if path.startswith('/trades') %}is-active{% endif %}">手工交易</a>
         <a href="/logs" class="{% if path.startswith('/logs') %}is-active{% endif %}">日志</a>

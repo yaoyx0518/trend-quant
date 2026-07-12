@@ -194,7 +194,7 @@ class BaseStrategy(ABC):
 
     def required_history_bars(self, cfg: dict) -> int:
         lookback = int(cfg.get("lookback_days", 120))
-        n_long = int(cfg.get("n_long", 40))
+        n_long = int(cfg.get("n_long", 20))
         atr_period = int(cfg.get("atr_period", 20))
         return max(lookback, n_long, atr_period, 40)
 

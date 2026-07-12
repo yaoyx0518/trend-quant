@@ -201,6 +201,7 @@ class Database:
                 );
                 CREATE INDEX IF NOT EXISTS idx_instrument_categories_parent
                     ON instrument_categories(parent_path, priority, name);
+
                 """
             )
 
@@ -877,6 +878,45 @@ class Database:
 
     def get_instrument_metadata_map(self) -> dict[str, dict]:
         return {item["symbol"]: item for item in self.list_instrument_metadata()}
+
+    def load_market_dashboard_history(self, days: int = 90) -> list[dict]:
+        """Return recent adjusted daily bars for fully classified managed instruments."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT symbol, name, time, open, high, low, close, volume, amount,
+                          category_l1, category_l2, category_l3,
+                          priority_l1, priority_l2, priority_l3, sort_order
+                   FROM (
+                       SELECT d.symbol, m.name, d.time, d.open, d.high, d.low, d.close, d.volume, d.amount,
+                              m.category_l1, m.category_l2, m.category_l3,
+                              m.priority_l1, m.priority_l2, m.priority_l3, m.sort_order,
+                              ROW_NUMBER() OVER (PARTITION BY d.symbol ORDER BY d.time DESC) AS rn
+                       FROM market_data_qfq d
+                       JOIN instrument_metadata m ON m.symbol = d.symbol
+                       WHERE TRIM(COALESCE(m.category_l1, '')) <> ''
+                         AND TRIM(COALESCE(m.category_l2, '')) <> ''
+                         AND TRIM(COALESCE(m.category_l3, '')) <> ''
+                   )
+                   WHERE rn <= ?
+                   ORDER BY category_l1, category_l2, category_l3, symbol, time""",
+                (max(1, int(days)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_market_dashboard_revision(self) -> tuple[str, int, str]:
+        """Small revision token used to invalidate the in-process subject-board cache."""
+        with self._connect() as conn:
+            market = conn.execute(
+                "SELECT MAX(time) AS latest_time, COUNT(*) AS row_count FROM market_data_qfq"
+            ).fetchone()
+            metadata = conn.execute(
+                "SELECT MAX(updated_at) AS latest_metadata FROM instrument_metadata"
+            ).fetchone()
+        return (
+            str(market["latest_time"] or "") if market else "",
+            int(market["row_count"] or 0) if market else 0,
+            str(metadata["latest_metadata"] or "") if metadata else "",
+        )
 
     def save_instrument_categories(self, categories: list[dict[str, Any]]) -> int:
         records: list[tuple] = []

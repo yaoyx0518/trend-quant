@@ -44,19 +44,33 @@ class StrategyConfigValidator:
             if not isinstance(group, dict):
                 errors.append(f"{side} must be a group")
                 continue
-            self._normalize_group(group, path=side, errors=errors, warnings=warnings)
+            self._normalize_group(
+                group,
+                path=side,
+                errors=errors,
+                warnings=warnings,
+                expected_combinator="all" if side == "entry" else "any",
+            )
 
         return ValidationResult(ok=not errors, errors=errors, warnings=warnings, normalized=normalized)
 
-    def _normalize_group(self, group: dict, path: str, errors: list[str], warnings: list[str]) -> None:
+    def _normalize_group(
+        self,
+        group: dict,
+        path: str,
+        errors: list[str],
+        warnings: list[str],
+        expected_combinator: str,
+    ) -> None:
         group["type"] = str(group.get("type", "group")).strip() or "group"
         if group["type"] != "group":
             errors.append(f"{path}.type must be group")
-        group["combinator"] = str(group.get("combinator", "all")).strip().lower() or "all"
-        if group["combinator"] not in {"all", "any"}:
+        configured_combinator = str(group.get("combinator", expected_combinator)).strip().lower() or expected_combinator
+        if configured_combinator not in {"all", "any"}:
             errors.append(f"{path}.combinator must be all or any")
-        if group["combinator"] == "any":
-            warnings.append(f"{path}.combinator=any is accepted by model but not exposed in first UI")
+        elif configured_combinator != expected_combinator:
+            warnings.append(f"{path}.combinator is fixed to {expected_combinator}")
+        group["combinator"] = expected_combinator
 
         children = group.get("children")
         if not isinstance(children, list) or not children:

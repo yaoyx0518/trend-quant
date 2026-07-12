@@ -1,11 +1,255 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="page-panel">
+<style>
+.rule-strategy-page .strategy-toolbar {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  justify-content: space-between;
+  margin: 22px 0 16px;
+  padding: 14px 16px;
+  border: 1px solid rgba(20, 41, 51, 0.1);
+  border-radius: 8px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.94), rgba(236, 246, 242, 0.84));
+}
+
+.rule-strategy-page .strategy-toolbar > div {
+  display: grid;
+  gap: 4px;
+}
+
+.rule-strategy-page .strategy-toolbar-kicker {
+  color: var(--accent-strong);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.rule-strategy-page .strategy-list {
+  display: grid;
+  gap: 18px;
+  margin-top: 18px;
+}
+
+.rule-strategy-page .strategy-row {
+  position: relative;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(20, 41, 51, 0.12);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(248, 252, 249, 0.92));
+  box-shadow: 0 16px 34px rgba(17, 35, 42, 0.07);
+}
+
+.rule-strategy-page .strategy-row::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 5px;
+  background: linear-gradient(180deg, var(--accent), var(--accent-warm));
+}
+
+.rule-strategy-page .strategy-row-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 14px;
+  align-items: start;
+  min-width: 0;
+  padding-left: 4px;
+}
+
+.rule-strategy-page .strategy-row-title h3 {
+  margin: 0 0 8px;
+  font-size: 1.18rem;
+  letter-spacing: 0;
+}
+
+.rule-strategy-page .strategy-row-title p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.rule-strategy-page .strategy-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  justify-content: flex-end;
+  max-width: 520px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.rule-strategy-page .strategy-card-badge {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 1px solid rgba(20, 41, 51, 0.08);
+  border-radius: 999px;
+  color: var(--text-soft);
+  background: rgba(229, 238, 233, 0.78);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rule-strategy-page .strategy-row-rules {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 14px;
+  min-width: 0;
+}
+
+.rule-strategy-page .strategy-rule-panel {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid rgba(20, 41, 51, 0.1);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.rule-strategy-page .strategy-rule-panel-buy {
+  border-left: 4px solid var(--accent);
+}
+
+.rule-strategy-page .strategy-rule-panel-sell {
+  border-left: 4px solid var(--accent-warm);
+}
+
+.rule-strategy-page .strategy-rule-panel-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.rule-strategy-page .rule-side-label {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.rule-strategy-page .strategy-condition-list {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.rule-strategy-page .strategy-condition-item {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 42px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid rgba(20, 41, 51, 0.08);
+  border-radius: 8px;
+  background: rgba(248, 252, 249, 0.9);
+}
+
+.rule-strategy-page .strategy-condition-index {
+  display: inline-grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.rule-strategy-page .strategy-condition-item strong {
+  display: inline-grid;
+  min-width: 36px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(20, 41, 51, 0.06);
+  font-size: 12px;
+}
+
+.rule-strategy-page .strategy-condition-left,
+.rule-strategy-page .strategy-condition-right {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.rule-strategy-page .strategy-condition-empty {
+  padding: 18px 12px;
+  border: 1px dashed rgba(20, 41, 51, 0.16);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.rule-strategy-page .strategy-edit-btn {
+  min-width: 76px;
+}
+
+@media (max-width: 1100px) {
+  .rule-strategy-page .strategy-row-head {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .rule-strategy-page .strategy-row-meta {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 720px) {
+  .rule-strategy-page .strategy-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .rule-strategy-page .strategy-row-head,
+  .rule-strategy-page .strategy-row-rules {
+    grid-template-columns: 1fr;
+  }
+
+  .rule-strategy-page .strategy-condition-item {
+    grid-template-columns: 34px minmax(0, 1fr);
+  }
+
+  .rule-strategy-page .strategy-condition-item strong {
+    grid-column: 1;
+  }
+
+  .rule-strategy-page .strategy-condition-right {
+    grid-column: 2;
+  }
+}
+</style>
+
+<section class="page-panel rule-strategy-page">
   <h2>策略管理</h2>
   <p class="context-hint">统一管理结构化买卖策略。单标的回测已移至标的查看页。</p>
 
-  <div class="bt-form-row rule-main-row">
-    <button id="newStrategyBtn" type="button" class="ghost-btn">新增策略</button>
+  <div class="strategy-toolbar">
+    <div>
+      <span class="strategy-toolbar-kicker">Rule Strategy</span>
+      <strong>买入条件在左，卖出条件在右</strong>
+    </div>
+    <button id="newStrategyBtn" type="button">新增策略</button>
   </div>
 
   <div id="strategyEditor" class="rule-strategy-modal" hidden>
@@ -13,7 +257,8 @@
       <div class="rule-strategy-dialog-head">
         <div>
           <h3 id="strategyDialogTitle">新增策略</h3>
-          <p class="context-hint">填写策略名称，系统自动生成策略 ID。买入条件和卖出条件均为全部满足。</p>
+          <p class="context-hint">填写策略名称，系统自动生成策略 ID。买入条件全部满足（AND），卖出条件任一满足（OR）。</p>
+          <p id="strategyEditorMeta" class="rule-strategy-editor-meta" hidden></p>
         </div>
         <button id="closeStrategyBtn" type="button" class="ghost-btn">关闭</button>
       </div>
@@ -32,7 +277,7 @@
         </div>
         <div class="rule-condition-panel">
           <div class="rule-condition-head">
-            <h4>卖出条件（全部满足）</h4>
+            <h4>卖出条件（任一满足）</h4>
             <button id="addExitConditionBtn" type="button" class="ghost-btn">+ 条件</button>
           </div>
           <div id="exitConditions"></div>
@@ -48,12 +293,13 @@
   </div>
 
   <p id="status" class="status-banner">加载中...</p>
-  <div id="strategyGrid" class="strategy-card-grid"></div>
+  <div id="strategyGrid" class="strategy-list"></div>
 </section>
 
 <script>
 let metaCache = { strategies: [], instruments: [], indicators: [] };
 let conditionSeq = 0;
+let editingStrategyItem = null;
 const PRICE_FIELDS = ["open", "high", "low", "close", "volume", "amount"];
 const STATE_VALUES = ["entry_price", "hard_stop", "highest_high_since_entry", "chandelier_stop"];
 
@@ -106,6 +352,23 @@ function conditionLines(group) {
   `).join("");
 }
 
+function conditionCount(group) {
+  return Array.isArray(group?.children) ? group.children.length : 0;
+}
+
+function conditionItems(group) {
+  const children = Array.isArray(group?.children) ? group.children : [];
+  if (!children.length) return '<li class="strategy-condition-empty">暂无条件</li>';
+  return children.map((item, idx) => `
+    <li class="strategy-condition-item">
+      <span class="strategy-condition-index">${String(idx + 1).padStart(2, "0")}</span>
+      <span class="strategy-condition-left">${esc(valueText(item.left))}</span>
+      <strong>${esc(item.operator || "")}</strong>
+      <span class="strategy-condition-right">${esc(valueText(item.right))}</span>
+    </li>
+  `).join("");
+}
+
 function renderStrategyCards() {
   const grid = document.getElementById("strategyGrid");
   const strategies = metaCache.strategies || [];
@@ -116,29 +379,36 @@ function renderStrategyCards() {
   grid.innerHTML = strategies.map((item) => {
     const strategy = item.strategy || {};
     return `
-      <article class="strategy-card ${item.valid ? "" : "is-invalid"}">
-        <div class="strategy-card-head">
-          <div>
+      <article class="strategy-row ${item.valid ? "" : "is-invalid"}">
+        <header class="strategy-row-head">
+          <div class="strategy-row-title">
             <h3>${esc(item.name || item.id)}</h3>
             <p>${esc(item.description || "无描述")}</p>
           </div>
-          <span class="strategy-card-badge">${esc(item.valid ? item.storage || "strategy" : "配置错误")}</span>
-        </div>
-        <div class="strategy-rule-columns">
-          <section>
-            <h4>买入条件</h4>
-            <ul>${conditionLines(strategy.entry)}</ul>
-          </section>
-          <section>
-            <h4>卖出条件</h4>
-            <ul>${conditionLines(strategy.exit)}</ul>
-          </section>
+          <div class="strategy-row-meta">
+            <span class="strategy-card-badge">${esc(item.valid ? item.storage || "strategy" : "配置错误")}</span>
+            <span>ID：${esc(item.id)}</span>
+            <span>${esc(item.updated_at || item.created_at || "")}</span>
+          </div>
+          <button type="button" class="ghost-btn strategy-edit-btn" data-strategy-id="${esc(item.id)}" title="编辑策略">编辑</button>
+        </header>
+        <div class="strategy-row-rules">
+          <div class="strategy-rule-panel strategy-rule-panel-buy">
+            <div class="strategy-rule-panel-head">
+              <span class="rule-side-label">买入条件 <em>AND</em></span>
+              <span>${conditionCount(strategy.entry)} 条</span>
+            </div>
+            <ol class="strategy-condition-list">${conditionItems(strategy.entry)}</ol>
+          </div>
+          <div class="strategy-rule-panel strategy-rule-panel-sell">
+            <div class="strategy-rule-panel-head">
+              <span class="rule-side-label">卖出条件 <em>OR</em></span>
+              <span>${conditionCount(strategy.exit)} 条</span>
+            </div>
+            <ol class="strategy-condition-list">${conditionItems(strategy.exit)}</ol>
+          </div>
         </div>
         ${item.errors?.length ? `<p class="strategy-card-error">${esc(item.errors.join("；"))}</p>` : ""}
-        <div class="strategy-card-foot">
-          <span>ID：${esc(item.id)}</span>
-          <span>${esc(item.updated_at || item.created_at || "")}</span>
-        </div>
       </article>
     `;
   }).join("");
@@ -158,7 +428,7 @@ function stateOptions(selected = "hard_stop") {
   return STATE_VALUES.map(v => `<option value="${v}" ${v === selected ? "selected" : ""}>${v}</option>`).join("");
 }
 
-function addCondition(side) {
+function addCondition(side, condition = null) {
   const id = `cond_${++conditionSeq}`;
   const wrap = document.createElement("div");
   wrap.className = "rule-condition-row";
@@ -178,6 +448,7 @@ function addCondition(side) {
   `;
   document.getElementById(side === "entry" ? "entryConditions" : "exitConditions").appendChild(wrap);
   bindConditionRow(wrap);
+  if (condition) setConditionRowValue(wrap, condition);
 }
 
 function valueEditorHtml(side) {
@@ -225,6 +496,49 @@ function renderValueDetail(editor) {
     indicatorEl.addEventListener("change", () => renderIndicatorParams(detail));
     renderIndicatorParams(detail);
   }
+}
+
+function setValueParams(container, params = {}) {
+  for (const el of container.querySelectorAll("[data-param]")) {
+    if (Object.prototype.hasOwnProperty.call(params, el.dataset.param)) {
+      el.value = params[el.dataset.param];
+    }
+  }
+}
+
+function setValueEditor(editor, value = {}) {
+  const type = value?.type || "price";
+  const typeEl = editor.querySelector(".value-type");
+  typeEl.value = ["price", "indicator", "state_value", "literal"].includes(type) ? type : "price";
+  renderValueDetail(editor);
+  if (typeEl.value === "price") {
+    const fieldEl = editor.querySelector(".value-field");
+    if (fieldEl && value.field) fieldEl.value = value.field;
+    return;
+  }
+  if (typeEl.value === "literal") {
+    const literalEl = editor.querySelector(".value-literal");
+    if (literalEl) literalEl.value = value.value ?? 0;
+    return;
+  }
+  if (typeEl.value === "state_value") {
+    const stateEl = editor.querySelector(".value-state");
+    if (stateEl && value.name) stateEl.value = value.name;
+    renderStateParams(editor.querySelector(".value-detail"));
+    setValueParams(editor, value.params || {});
+    return;
+  }
+  const indicatorEl = editor.querySelector(".value-indicator");
+  if (indicatorEl && value.name) indicatorEl.value = value.name;
+  renderIndicatorParams(editor.querySelector(".value-detail"));
+  setValueParams(editor, value.params || {});
+}
+
+function setConditionRowValue(row, condition = {}) {
+  const operatorEl = row.querySelector(".rule-operator");
+  operatorEl.value = condition.operator === "<=" ? "<=" : ">=";
+  setValueEditor(row.querySelector('.rule-value-editor[data-side="left"]'), condition.left || {});
+  setValueEditor(row.querySelector('.rule-value-editor[data-side="right"]'), condition.right || {});
 }
 
 function renderStateParams(detail) {
@@ -295,15 +609,17 @@ function collectConditions(containerId) {
   }));
 }
 
-function buildNewStrategy() {
+function buildStrategyFromEditor() {
   const name = document.getElementById("newStrategyName").value.trim();
   if (!name) throw new Error("策略名称不能为空");
+  const base = editingStrategyItem?.strategy ? { ...editingStrategyItem.strategy } : {};
   return {
-    schema_version: 1,
+    ...base,
+    schema_version: base.schema_version || 1,
     name,
-    trade_mode: "single_symbol_all_in",
+    trade_mode: base.trade_mode || "single_symbol_all_in",
     entry: { type: "group", combinator: "all", children: collectConditions("entryConditions") },
-    exit: { type: "group", combinator: "all", children: collectConditions("exitConditions") }
+    exit: { type: "group", combinator: "any", children: collectConditions("exitConditions") }
   };
 }
 
@@ -311,7 +627,7 @@ async function saveStrategy() {
   const status = document.getElementById("strategySaveStatus");
   let strategy;
   try {
-    strategy = buildNewStrategy();
+    strategy = buildStrategyFromEditor();
   } catch (err) {
     status.textContent = err.message;
     return;
@@ -320,7 +636,7 @@ async function saveStrategy() {
   const resp = await fetch("/rule-backtest/api/strategies", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ strategy, overwrite: false })
+    body: JSON.stringify({ strategy, overwrite: Boolean(editingStrategyItem) })
   });
   if (!resp.ok) {
     status.textContent = `保存失败：${await resp.text()}`;
@@ -333,6 +649,11 @@ async function saveStrategy() {
 }
 
 function resetStrategyEditor() {
+  editingStrategyItem = null;
+  document.getElementById("strategyDialogTitle").textContent = "新增策略";
+  document.getElementById("saveStrategyBtn").textContent = "保存策略";
+  document.getElementById("strategyEditorMeta").hidden = true;
+  document.getElementById("strategyEditorMeta").textContent = "";
   document.getElementById("newStrategyName").value = "";
   document.getElementById("strategySaveStatus").textContent = "";
   document.getElementById("entryConditions").innerHTML = "";
@@ -341,8 +662,31 @@ function resetStrategyEditor() {
   addCondition("exit");
 }
 
-function openStrategyModal() {
+function fillConditions(containerId, side, group) {
+  document.getElementById(containerId).innerHTML = "";
+  const children = Array.isArray(group?.children) ? group.children : [];
+  if (!children.length) {
+    addCondition(side);
+    return;
+  }
+  children.forEach((condition) => addCondition(side, condition));
+}
+
+function openStrategyModal(item = null) {
   resetStrategyEditor();
+  if (item) {
+    editingStrategyItem = item;
+    const strategy = item.strategy || {};
+    document.getElementById("strategyDialogTitle").textContent = "编辑策略";
+    document.getElementById("saveStrategyBtn").textContent = "保存修改";
+    document.getElementById("newStrategyName").value = item.name || strategy.name || item.id || "";
+    const meta = document.getElementById("strategyEditorMeta");
+    meta.textContent = `ID：${item.id} · 存储：${item.storage || "strategy"}`;
+    meta.hidden = false;
+    fillConditions("entryConditions", "entry", strategy.entry);
+    fillConditions("exitConditions", "exit", strategy.exit);
+    document.getElementById("strategySaveStatus").textContent = "";
+  }
   document.getElementById("strategyEditor").hidden = false;
   document.body.classList.add("modal-open");
   requestAnimationFrame(() => document.getElementById("newStrategyName").focus());
@@ -353,7 +697,13 @@ function closeStrategyModal() {
   document.body.classList.remove("modal-open");
 }
 
-document.getElementById("newStrategyBtn").addEventListener("click", openStrategyModal);
+document.getElementById("newStrategyBtn").addEventListener("click", () => openStrategyModal());
+document.getElementById("strategyGrid").addEventListener("click", (event) => {
+  const btn = event.target.closest(".strategy-edit-btn");
+  if (!btn) return;
+  const item = (metaCache.strategies || []).find(x => String(x.id) === String(btn.dataset.strategyId));
+  if (item) openStrategyModal(item);
+});
 document.getElementById("addEntryConditionBtn").addEventListener("click", () => addCondition("entry"));
 document.getElementById("addExitConditionBtn").addEventListener("click", () => addCondition("exit"));
 document.getElementById("saveStrategyBtn").addEventListener("click", saveStrategy);

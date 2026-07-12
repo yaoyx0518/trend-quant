@@ -16,11 +16,12 @@ class ConditionEngine:
         bars: pd.DataFrame,
         position: PositionState,
         debug: bool = False,
+        combinator: str | None = None,
     ) -> tuple[bool, list[dict]]:
         if not isinstance(group, dict):
             return False, []
         children = group.get("children", []) or []
-        combinator = str(group.get("combinator", "all")).strip().lower()
+        combinator = combinator or str(group.get("combinator", "all")).strip().lower()
         traces: list[dict] = []
         results: list[bool] = []
         for idx, child in enumerate(children):

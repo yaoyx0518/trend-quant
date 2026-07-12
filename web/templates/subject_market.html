@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="index-board-page">
+  <header class="index-board-hero">
+    <div>
+      <p class="index-board-kicker">SUBJECT MARKET / DAILY</p>
+      <h1>标的看板</h1>
+      <p>默认展示一级类目下的二级类目聚合。点击二级类目展开三级类目，再点击三级类目展开具体标的；所有聚合均按每个交易日的成交额加权。</p>
+    </div>
+    <div class="index-board-legend"><span class="dot positive"></span>强势 <span class="dot negative"></span>弱势</div>
+  </header>
+  <div id="subjectBoardStatus" class="context-hint">正在按类目层级汇总本地标的日K数据…</div>
+  <div id="subjectBoard" class="index-board"></div>
+</section>
+<script>
+  const board = document.getElementById('subjectBoard');
+  const statusEl = document.getElementById('subjectBoardStatus');
+  let nodeSequence = 0;
+  const fmtAmount = (value) => {
+    if (value == null || !Number.isFinite(value)) return '—';
+    if (Math.abs(value) >= 1e8) return `${(value / 1e8).toFixed(1)}亿`;
+    if (Math.abs(value) >= 1e4) return `${(value / 1e4).toFixed(0)}万`;
+    return value.toFixed(0);
+  };
+  const fmtScore = (value) => value == null ? '—' : value.toFixed(1);
+  const fmtChange = (value) => value == null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
+  const getChangeClass = (value) => value != null && value >= 0 ? 'is-positive' : 'is-negative';
+  const sparkline = (points, dates, upperPoints = [], lowerPoints = []) => {
+    const axisTicks = [-15, -10, -5, 0, 5, 10, 15];
+    const plotLeft = 18;
+    const clamp = (value) => Math.max(-15, Math.min(15, value));
+    const xFor = (index) => points.length > 1 ? plotLeft + index / (points.length - 1) * (100 - plotLeft) : (100 + plotLeft) / 2;
+    const series = points.map((value, index) => ({ index, value, x: xFor(index) }));
+    const values = series.filter(point => point.value != null && Number.isFinite(point.value));
+    if (values.length < 2) return '<span class="spark-empty">—</span>';
+    const y = (value) => 100 - ((clamp(value) + 15) / 30 * 84 + 8);
+    const color = (value) => value > 0 ? '#c13f3a' : value < 0 ? '#187b5f' : '#8a9891';
+    const timeTicks = [];
+    let previousMonth = '';
+    let previousWeek = '';
+    for (const point of series) {
+      const [year, month, day] = String(dates?.[point.index] || '').slice(0, 10).split('-').map(Number);
+      if (!year || !month || !day) continue;
+      const date = new Date(Date.UTC(year, month - 1, day));
+      const monthKey = `${year}-${month}`;
+      const monday = new Date(date);
+      monday.setUTCDate(date.getUTCDate() - ((date.getUTCDay() + 6) % 7));
+      const weekKey = monday.toISOString().slice(0, 10);
+      if (monthKey !== previousMonth) {
+        timeTicks.push(`<line class="spark-time-tick spark-month-tick" x1="${point.x.toFixed(1)}" y1="84" x2="${point.x.toFixed(1)}" y2="100"/>`);
+        previousMonth = monthKey;
+        previousWeek = weekKey;
+      } else if (weekKey !== previousWeek) {
+        timeTicks.push(`<line class="spark-time-tick spark-week-tick" x1="${point.x.toFixed(1)}" y1="91" x2="${point.x.toFixed(1)}" y2="100"/>`);
+        previousWeek = weekKey;
+      }
+    }
+    const segments = [];
+    for (let index = 1; index < series.length; index += 1) {
+      const previous = series[index - 1], current = series[index];
+      if (!Number.isFinite(previous.value) || !Number.isFinite(current.value)) continue;
+      if (current.index === values[values.length - 1].index) continue;
+      const from = { x: previous.x, y: y(previous.value) };
+      const to = { x: current.x, y: y(current.value) };
+      if ((previous.value > 0 && current.value < 0) || (previous.value < 0 && current.value > 0)) {
+        const ratio = -previous.value / (current.value - previous.value);
+        const crossing = { x: previous.x + (current.x - previous.x) * ratio, y: y(0) };
+        segments.push(`<line x1="${from.x.toFixed(1)}" y1="${from.y.toFixed(1)}" x2="${crossing.x.toFixed(1)}" y2="${crossing.y.toFixed(1)}" stroke="${color(previous.value)}"/>`);
+        segments.push(`<line x1="${crossing.x.toFixed(1)}" y1="${crossing.y.toFixed(1)}" x2="${to.x.toFixed(1)}" y2="${to.y.toFixed(1)}" stroke="${color(current.value)}"/>`);
+      } else {
+        segments.push(`<line x1="${from.x.toFixed(1)}" y1="${from.y.toFixed(1)}" x2="${to.x.toFixed(1)}" y2="${to.y.toFixed(1)}" stroke="${color(current.value || previous.value)}"/>`);
+      }
+    }
+    const latest = values[values.length - 1];
+    const zeroY = y(0).toFixed(1);
+    const latestClass = latest.value > 0 ? 'is-positive' : latest.value < 0 ? 'is-negative' : 'is-neutral';
+    const pointsFor = (history) => history
+      .map((value, index) => value != null && Number.isFinite(value) ? `${xFor(index).toFixed(1)},${y(value).toFixed(1)}` : '')
+      .filter(Boolean).join(' ');
+    const bandPairs = points.map((_, index) => {
+      const upper = upperPoints[index], lower = lowerPoints[index];
+      return Number.isFinite(upper) && Number.isFinite(lower) ? { index, upper, lower } : null;
+    }).filter(Boolean);
+    const band = bandPairs.length > 1 ? `${bandPairs.map(point => `${xFor(point.index).toFixed(1)},${y(point.upper).toFixed(1)}`).join(' ')} ${[...bandPairs].reverse().map(point => `${xFor(point.index).toFixed(1)},${y(point.lower).toFixed(1)}`).join(' ')}` : '';
+    const yGrid = axisTicks.filter(value => value !== 0).map(value => `<line class="spark-y-grid" x1="${plotLeft}" y1="${y(value).toFixed(1)}" x2="100" y2="${y(value).toFixed(1)}"/>`).join('');
+    const yLabels = axisTicks.map(value => `<span class="spark-y-label" style="top:${y(value).toFixed(1)}%">${value > 0 ? '+' : ''}${value}</span>`).join('');
+    const upperLine = pointsFor(upperPoints);
+    const lowerLine = pointsFor(lowerPoints);
+    return `<div class="spark-plot">${yLabels}<svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="近三月趋势 MA5"><g class="spark-y-axis">${yGrid}</g><g class="spark-time-axis">${timeTicks.join('')}</g>${band ? `<polygon class="spark-range-band" points="${band}"/>` : ''}${upperLine ? `<polyline class="spark-bound spark-bound-upper" points="${upperLine}"/>` : ''}${lowerLine ? `<polyline class="spark-bound spark-bound-lower" points="${lowerLine}"/>` : ''}<line class="spark-zero-axis" x1="${plotLeft}" y1="${zeroY}" x2="100" y2="${zeroY}"/>${segments.join('')}</svg><span class="spark-latest-dot ${latestClass}" style="left:${latest.x.toFixed(1)}%;top:${y(latest.value).toFixed(1)}%" aria-label="最新趋势值"></span></div>`;
+  };
+  const rowLabel = (item, level) => {
+    if (level === 'l2') return { name: item.category_l2, sub: `${item.child_count} 个三级类目 · ${item.member_count} 个标的 · 成交额加权` };
+    if (level === 'l3') return { name: item.category_l3, sub: `${item.child_count} 个标的 · 成交额加权` };
+    return { name: item.name || item.symbol, sub: `${item.symbol} · 具体标的` };
+  };
+  const renderRow = (item, level, depth) => {
+    const children = item.children || [];
+    const expandable = children.length > 0;
+    const childId = expandable ? `subjectChildren${++nodeSequence}` : '';
+    const label = rowLabel(item, level);
+    const scoreClass = (item.trend_score || 0) >= 0 ? 'is-positive' : 'is-negative';
+    const metrics = `<div class="index-score ${scoreClass}">${fmtScore(item.trend_score)}</div>
+      <div class="index-change ${getChangeClass(item.change_60d)}">${fmtChange(item.change_60d)}</div>
+      <div class="index-change ${getChangeClass(item.change_20d)}">${fmtChange(item.change_20d)}</div>
+      <div class="index-change ${getChangeClass(item.change_5d)}">${fmtChange(item.change_5d)}</div>
+      <div class="index-change ${getChangeClass(item.daily_change_pct)}">${fmtChange(item.daily_change_pct)}</div>
+      <div class="index-spark">${sparkline(item.trend_history || [], item.trend_dates || [], item.trend_upper_history || [], item.trend_lower_history || [])}</div>
+      <div class="index-amount">${fmtAmount(item.amount)}</div>
+      <div class="index-strength">${item.strength == null ? '—' : item.strength}</div>`;
+    const row = `<div class="index-row subject-row subject-row-${level}${expandable ? ' is-expandable' : ''}" data-depth="${depth}"${expandable ? ` data-target="${childId}" aria-expanded="false" tabindex="0" role="button"` : ''}>
+      <div class="index-name"><strong>${expandable ? '<span class="subject-caret" aria-hidden="true">›</span>' : '<span class="subject-leaf" aria-hidden="true"></span>'}${label.name}</strong><span>${label.sub}</span></div>${metrics}
+    </div>`;
+    if (!expandable) return row;
+    const nextLevel = level === 'l2' ? 'l3' : 'instrument';
+    return `${row}<div id="${childId}" class="subject-children" data-depth="${depth + 1}" hidden>${children.map(child => renderRow(child, nextLevel, depth + 1)).join('')}</div>`;
+  };
+  const renderGroup = (group) => `<section class="index-provider subject-l1"><div class="index-provider-head"><h2>${group.category_l1}</h2><span>${group.count} 个二级类目</span></div><div class="index-grid-head"><span>二级类目</span><span>趋势</span><span>60日变动</span><span>20日变动</span><span>5日变动</span><span>日变动</span><span>近3月趋势 MA5</span><span>成交额</span><span>强度</span></div><div class="subject-tree">${group.items.map(item => renderRow(item, 'l2', 0)).join('')}</div></section>`;
+  const toggleRow = (row) => {
+    const children = document.getElementById(row.dataset.target);
+    if (!children) return;
+    const expanded = row.getAttribute('aria-expanded') === 'true';
+    row.setAttribute('aria-expanded', String(!expanded));
+    row.classList.toggle('is-expanded', !expanded);
+    children.hidden = expanded;
+  };
+  board.addEventListener('click', (event) => {
+    const row = event.target.closest('.subject-row.is-expandable');
+    if (row) toggleRow(row);
+  });
+  board.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    const row = event.target.closest('.subject-row.is-expandable');
+    if (row) { event.preventDefault(); toggleRow(row); }
+  });
+  async function loadBoard() {
+    try {
+      const response = await fetch('/subject-market/api/dashboard');
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || '标的看板加载失败');
+      nodeSequence = 0;
+      board.innerHTML = (data.groups || []).map(renderGroup).join('');
+      statusEl.textContent = board.children.length
+        ? `${data.as_of || '最新交易日'} · ${data.groups.length || 0} 个一级类目、${data.secondary_count || 0} 个二级类目、${data.category_count || 0} 个三级类目。`
+        : '暂无具备完整三级分类和本地日K数据的标的。';
+    } catch (error) {
+      statusEl.textContent = error.message || '标的看板加载失败';
+    }
+  }
+  loadBoard();
+</script>
+{% endblock %}

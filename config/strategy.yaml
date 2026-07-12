@@ -3,8 +3,8 @@
   adjust: qfq
   lookback_days: 120
   n_short: 5
-  n_mid: 20
-  n_long: 40
+  n_mid: 10
+  n_long: 20
   w_bias_short: 0.4
   w_bias_mid: 0.4
   w_bias_long: 0.2

@@ -15,8 +15,6 @@ dependencies = [
   "pydantic>=2.11.0",
   "email-validator>=2.2.0",
   "httpx>=0.28.0",
-  "efinance==0.5.5.2",
-  "akshare>=1.17.0",
   "tickflow[all]==0.1.24"
 ]
 

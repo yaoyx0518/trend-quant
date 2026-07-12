@@ -7,10 +7,21 @@ from unittest.mock import MagicMock, patch
 
 import pandas as pd
 
+from core.settings import load_settings
 from data.provider_tickflow import TickFlowProvider
 
 
 class TickFlowProviderTest(unittest.TestCase):
+    def test_starter_limits_are_loaded_from_application_config(self) -> None:
+        settings = load_settings().tickflow
+
+        self.assertEqual(settings.plan, "starter")
+        self.assertEqual(settings.daily_kline_batch_size, 100)
+        self.assertEqual(settings.daily_kline_batch_requests_per_minute, 30)
+        self.assertEqual(settings.daily_kline_single_requests_per_minute, 60)
+        self.assertEqual(settings.quote_max_symbols_per_request, 50)
+        self.assertEqual(settings.quote_requests_per_minute, 60)
+
     def test_symbol_and_adjust_mapping(self) -> None:
         self.assertEqual(TickFlowProvider._to_tickflow_symbol("518850.SS"), "518850.SH")
         self.assertEqual(TickFlowProvider._to_tickflow_symbol("159915.SZ"), "159915.SZ")
@@ -18,9 +29,9 @@ class TickFlowProviderTest(unittest.TestCase):
         self.assertEqual(TickFlowProvider._adjust_type("hfq"), "backward_additive")
         self.assertEqual(TickFlowProvider._adjust_type("none"), "none")
 
-    @patch.dict(os.environ, {}, clear=True)
+    @patch.dict(os.environ, {"TICKFLOW_API_KEY": "starter-test-key"}, clear=True)
     @patch("data.provider_tickflow.TickFlow")
-    def test_daily_history_uses_free_service_and_normalizes_schema(
+    def test_daily_history_uses_starter_service_and_normalizes_schema(
         self,
         tickflow_cls: MagicMock,
     ) -> None:
@@ -48,7 +59,10 @@ class TickFlowProviderTest(unittest.TestCase):
             "qfq",
         )
 
-        tickflow_cls.assert_called_once_with(base_url="https://free-api.tickflow.org")
+        tickflow_cls.assert_called_once_with(
+            api_key="starter-test-key",
+            base_url="https://api.tickflow.org",
+        )
         _, kwargs = client.klines.get.call_args
         self.assertEqual(kwargs["period"], "1d")
         self.assertEqual(kwargs["adjust"], "forward_additive")
@@ -59,7 +73,7 @@ class TickFlowProviderTest(unittest.TestCase):
         provider.close()
         client.close.assert_called_once()
 
-    @patch.dict(os.environ, {}, clear=True)
+    @patch.dict(os.environ, {"TICKFLOW_API_KEY": "starter-test-key"}, clear=True)
     @patch("data.provider_tickflow.TickFlow")
     def test_daily_histories_use_batch_endpoint_and_map_symbols(
         self,
@@ -118,12 +132,29 @@ class TickFlowProviderTest(unittest.TestCase):
         self.assertEqual(data["159915.SZ"].iloc[0]["amount"], 200)
 
     @patch.dict(os.environ, {}, clear=True)
-    def test_free_service_does_not_claim_realtime_support(self) -> None:
+    def test_starter_service_requires_api_key(self) -> None:
         provider = TickFlowProvider()
         with self.assertRaisesRegex(RuntimeError, "TICKFLOW_API_KEY is required"):
-            provider.fetch_latest_quote("518850.SS")
+            provider.fetch_daily_history("518850.SS", date(2026, 6, 1), date(2026, 6, 25), "qfq")
         with self.assertRaisesRegex(RuntimeError, "TICKFLOW_API_KEY is required"):
+            provider.fetch_latest_quote("518850.SS")
+
+    @patch.dict(os.environ, {"TICKFLOW_API_KEY": "starter-test-key"}, clear=True)
+    def test_starter_plan_rejects_minute_history(self) -> None:
+        provider = TickFlowProvider()
+        with self.assertRaisesRegex(RuntimeError, "Starter plan does not include minute"):
             provider.fetch_minute_history("518850.SS", "30", 10, "qfq")
+
+    def test_batch_throttle_enforces_starter_minimum_interval(self) -> None:
+        provider = TickFlowProvider()
+        with (
+            patch("data.provider_tickflow.time_module.monotonic", side_effect=[100.0, 100.0]),
+            patch("data.provider_tickflow.time_module.sleep") as sleep,
+        ):
+            provider._throttle("daily_kline_batch", 2.0)
+            provider._throttle("daily_kline_batch", 2.0)
+
+        sleep.assert_called_once_with(2.0)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,7 @@ from typing import Callable
 import pandas as pd
 
 from audit.app_logger import get_logger
+from core.settings import TickFlowSettings, load_settings
 from data.provider_tickflow import TickFlowProvider
 from data.storage.market_store import MarketStore
 from data.storage.runtime_store import RuntimeStore
@@ -56,9 +57,14 @@ def _non_retryable_provider_error(errors: dict[str, str]) -> str | None:
 
 
 class DataService:
-    def __init__(self, provider_priority: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        provider_priority: list[str] | None = None,
+        tickflow_settings: TickFlowSettings | None = None,
+    ) -> None:
+        self.tickflow_settings = tickflow_settings or load_settings().tickflow
         self.providers = {
-            "tickflow": TickFlowProvider(),
+            "tickflow": TickFlowProvider(settings=self.tickflow_settings),
         }
         requested = provider_priority or ["tickflow"]
         ignored = [name for name in requested if name != "tickflow"]

@@ -146,7 +146,7 @@ def update_instruments_yaml(symbol_names: dict[str, str | None]) -> tuple[list[s
 
 
 def main() -> None:
-    service = DataService(provider_priority=["efinance", "akshare"])
+    service = DataService(provider_priority=["tickflow"])
     start_date, adjust = load_strategy_defaults()
     today = date.today()
 

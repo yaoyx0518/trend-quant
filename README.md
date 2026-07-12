@@ -56,10 +56,7 @@ src/
 
   data/
     provider_base.py         # IDataProvider 协议
-    provider_tickflow.py     # 当前唯一启用数据源
-    provider_efinance.py     # 保留代码，默认不启用
-    provider_akshare.py      # 保留代码，默认不启用
-    provider_yahoo.py        # 保留代码，默认不启用
+    provider_tickflow.py     # 当前唯一启用数据源（注册版 Starter）
     provider_utils.py        # 字段归一化工具
     service.py               # DataService（TickFlow-only，失败即报错）
     storage/
@@ -121,12 +118,12 @@ logs/
     - `fetch_latest_quote`
     - `fetch_trading_calendar`
 
-- `TickFlowProvider` / `EfinanceProvider` / `AkshareProvider` / `YahooProvider`
-  - 实现同一接口，字段标准化后返回统一 OHLCV 结构。
-  - 当前生产路径只启用 TickFlow；其它 provider 代码仅保留，不参与自动降级。
-  - TickFlow 默认使用无需 API Key 的免费服务获取历史日 K。
-  - TickFlow 实时行情需要设置环境变量 `TICKFLOW_API_KEY`。
-  - TickFlow 获取失败或返回空数据时直接抛错，阻塞流程，不再尝试 Yahoo/efinance/akshare。
+- `TickFlowProvider`
+  - 字段标准化后返回统一 OHLCV 结构；当前唯一生产数据源。
+  - TickFlow 固定使用已注册账户的 Starter 接口，必须设置环境变量 `TICKFLOW_API_KEY`。
+  - Starter：日 K 批量请求最多 100 个标的、30 次/分钟；单标的日 K 和实时行情各 60 次/分钟。
+  - Starter 不含分钟 K；调用分钟 K 会明确报出套餐能力不足。
+  - TickFlow 获取失败或返回空数据时直接抛错，阻塞流程，不进行数据源降级。
 
 - `DataService` (`src/data/service.py`)
   - 固定使用 TickFlow 获取数据。

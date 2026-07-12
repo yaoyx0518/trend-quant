@@ -27,16 +27,16 @@
   </div>
   <div id="trendParamsRow" class="bt-form-row">
     <label>n_short <input id="btNShort" type="number" value="5" min="1" step="1"></label>
-    <label>n_mid <input id="btNMid" type="number" value="20" min="1" step="1"></label>
-    <label>n_long <input id="btNLong" type="number" value="40" min="1" step="1"></label>
+    <label>n_mid <input id="btNMid" type="number" value="10" min="1" step="1"></label>
+    <label>n_long <input id="btNLong" type="number" value="20" min="1" step="1"></label>
     <label>entry_threshold_min <input id="btEntryThresholdMin" type="number" value="10" step="0.1"></label>
     <label>entry_threshold_max <input id="btEntryThresholdMax" type="number" value="20" step="0.1"></label>
   </div>
   <div id="momentumTrendParamsRow" class="bt-form-row" style="display:none;">
     <strong>趋势评分参数：</strong>
     <label>n_short <input id="btMomentumNShort" type="number" value="5" min="1" step="1"></label>
-    <label>n_mid <input id="btMomentumNMid" type="number" value="20" min="1" step="1"></label>
-    <label>n_long <input id="btMomentumNLong" type="number" value="40" min="1" step="1"></label>
+    <label>n_mid <input id="btMomentumNMid" type="number" value="10" min="1" step="1"></label>
+    <label>n_long <input id="btMomentumNLong" type="number" value="20" min="1" step="1"></label>
     <label>entry_threshold <input id="btMomentumEntryThreshold" type="number" value="10" step="0.1"></label>
   </div>
   <div id="momentumParamsRow" class="bt-form-row" style="display:none;">
@@ -645,8 +645,8 @@
       const buyFilters = new Set(normalizeIdList(p.buy_filters));
       const sellSignals = new Set(normalizeIdList(p.sell_signals));
       momentumNShortEl.value = Math.round(parseFinite(p.n_short, 5));
-      momentumNMidEl.value = Math.round(parseFinite(p.n_mid, 20));
-      momentumNLongEl.value = Math.round(parseFinite(p.n_long, 40));
+      momentumNMidEl.value = Math.round(parseFinite(p.n_mid, 10));
+      momentumNLongEl.value = Math.round(parseFinite(p.n_long, 20));
       momentumEntryThresholdEl.value = parseFinite(p.entry_threshold, 10);
       momentumMaxHoldingsEl.value = Math.round(parseFinite(p.max_holdings, 5));
       momentumShortWindowEl.value = Math.round(parseFinite(p.momentum_window_short, 10));
@@ -667,8 +667,8 @@
       return;
     }
     nShortEl.value = Math.round(parseFinite(p.n_short, 5));
-    nMidEl.value = Math.round(parseFinite(p.n_mid, 20));
-    nLongEl.value = Math.round(parseFinite(p.n_long, 40));
+    nMidEl.value = Math.round(parseFinite(p.n_mid, 10));
+    nLongEl.value = Math.round(parseFinite(p.n_long, 20));
     entryThresholdMinEl.value = parseFinite(p.entry_threshold_min, parseFinite(p.entry_threshold, 10));
     entryThresholdMaxEl.value = parseFinite(p.entry_threshold_max, 20);
   }
@@ -2263,7 +2263,6 @@
 })();
 </script>
 {% endblock %}
-
 
 
 

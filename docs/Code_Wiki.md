@@ -70,7 +70,7 @@
 │ Strategy Layer (Trend Score / Momentum TopN)                │
 ├─────────────────────────────────────────────────────────────┤
 │                    Data Layer                                │
-│   DataService → EfinanceProvider / AkshareProvider           │
+│   DataService → TickFlowProvider                              │
 │   MarketStore (SQLite) / RuntimeStore (JSON)                 │
 ├─────────────────────────────────────────────────────────────┤
 │                    Storage: SQLite (trend_quant.db)          │
@@ -325,8 +325,7 @@ class IDataProvider(Protocol):
 
 | 文件 | 类 | 优先级 | 说明 |
 |------|-----|--------|------|
-| `provider_efinance.py` | `EfinanceProvider` | 主 | 基于 efinance 库（`efinance==0.5.5.2`） |
-| `provider_akshare.py` | `AkshareProvider` | 备 | 基于 akshare 库（`akshare>=1.17.0`） |
+| `provider_tickflow.py` | `TickFlowProvider` | 唯一 | TickFlow Starter 注册接口 |
 
 #### 4.3.3 `src/data/service.py` — 数据服务编排层
 
@@ -1192,8 +1191,7 @@ app:
   host: 127.0.0.1                              # 绑定地址
   port: 8000                                   # 监听端口
   data_provider_priority:                      # 数据源优先级
-    - efinance
-    - akshare
+    - tickflow
   polling_times:                               # 盘中轮询时间 (工作日)
     - "10:00"  - "10:30"  - "11:00"  - "11:30"
     - "13:00"  - "13:30"  - "14:00"  - "14:30"
@@ -1240,8 +1238,8 @@ strategy:
 
   # Trend Score 核心参数
   n_short: 5                     # 短周期MA
-  n_mid: 20                      # 中周期MA
-  n_long: 40                     # 长周期MA
+  n_mid: 10                      # 中周期MA
+  n_long: 20                     # 长周期MA
   w_bias_short: 0.4
   w_bias_mid: 0.4
   w_bias_long: 0.2
@@ -1335,8 +1333,6 @@ strategy:
 | pydantic | >=2.11.0 | 数据验证 |
 | email-validator | >=2.2.0 | 邮件验证 |
 | httpx | >=0.28.0 | HTTP 客户端 |
-| efinance | ==0.5.5.2 | 东方财富数据源（主） |
-| akshare | >=1.17.0 | AKShare 数据源（备） |
 
 ### 9.2 构建配置
 

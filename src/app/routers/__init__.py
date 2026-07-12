@@ -7,6 +7,7 @@ from app.routers import (
     overview,
     parameter_optimization,
     strategy_history,
+    subject_market,
     trades,
 )
 
@@ -20,4 +21,5 @@ __all__ = [
     "instruments",
     "market_view",
     "strategy_history",
+    "subject_market",
 ]

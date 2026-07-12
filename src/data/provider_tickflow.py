@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time as time_module
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
@@ -8,8 +9,9 @@ from typing import Any
 import pandas as pd
 
 from audit.app_logger import get_logger
+from core.settings import TickFlowSettings
 from data.provider_base import IDataProvider
-from data.provider_utils import parse_minute_period, safe_float, standardize_ohlcv
+from data.provider_utils import safe_float, standardize_ohlcv
 
 logger = get_logger(__name__)
 
@@ -21,13 +23,25 @@ except Exception:  # pragma: no cover
 
 class TickFlowProvider(IDataProvider):
     name = "tickflow"
-    free_base_url = "https://free-api.tickflow.org"
     paid_base_url = "https://api.tickflow.org"
 
-    def __init__(self) -> None:
+    def __init__(self, settings: TickFlowSettings | None = None) -> None:
+        self.settings = settings or TickFlowSettings(
+            plan="starter",
+            api_base_url=self.paid_base_url,
+            daily_kline_batch_size=100,
+            daily_kline_batch_requests_per_minute=30,
+            daily_kline_batch_max_workers=1,
+            daily_kline_single_requests_per_minute=60,
+            quote_max_symbols_per_request=50,
+            quote_requests_per_minute=60,
+        )
+        if self.settings.plan != "starter":
+            raise ValueError(f"TickFlowProvider only supports the configured starter plan, got {self.settings.plan!r}")
         self.api_key = str(os.getenv("TICKFLOW_API_KEY", "") or "").strip()
-        self._daily_client = None
-        self._paid_client = None
+        self._client = None
+        self._rate_limit_lock = threading.Lock()
+        self._next_request_at: dict[str, float] = {}
 
     @staticmethod
     def _to_tickflow_symbol(symbol: str) -> str:
@@ -57,32 +71,28 @@ class TickFlowProvider(IDataProvider):
             "none": "none",
         }.get(str(adjust or "").strip().lower(), "forward_additive")
 
-    def _get_daily_client(self):
-        if TickFlow is None:
-            return None
-        if self._daily_client is None:
-            if self.api_key:
-                self._daily_client = TickFlow(
-                    api_key=self.api_key,
-                    base_url=os.getenv("TICKFLOW_BASE_URL", self.paid_base_url),
-                )
-            else:
-                # Construct directly instead of TickFlow.free() because SDK 0.1.24
-                # prints an emoji that can fail under the default Windows GBK console.
-                self._daily_client = TickFlow(
-                    base_url=os.getenv("TICKFLOW_FREE_BASE_URL", self.free_base_url),
-                )
-        return self._daily_client
-
-    def _get_paid_client(self):
+    def _get_client(self):
         if TickFlow is None or not self.api_key:
             return None
-        if self._paid_client is None:
-            self._paid_client = TickFlow(
+        if self._client is None:
+            self._client = TickFlow(
                 api_key=self.api_key,
-                base_url=os.getenv("TICKFLOW_BASE_URL", self.paid_base_url),
+                base_url=os.getenv("TICKFLOW_BASE_URL", self.settings.api_base_url),
             )
-        return self._paid_client
+        return self._client
+
+    def _throttle(self, operation: str, minimum_interval_seconds: float) -> None:
+        """Apply a process-local minimum interval across all requests of one operation."""
+        interval = max(0.0, float(minimum_interval_seconds))
+        if interval <= 0:
+            return
+        with self._rate_limit_lock:
+            now = time_module.monotonic()
+            next_allowed = self._next_request_at.get(operation, now)
+            wait_seconds = max(0.0, next_allowed - now)
+            self._next_request_at[operation] = max(now, next_allowed) + interval
+        if wait_seconds > 0:
+            time_module.sleep(wait_seconds)
 
     @staticmethod
     def _normalize_klines(raw: Any, symbol: str) -> pd.DataFrame:
@@ -139,11 +149,15 @@ class TickFlowProvider(IDataProvider):
     ) -> pd.DataFrame:
         if end < start:
             start, end = end, start
-        client = self._get_daily_client()
+        client = self._get_client()
         if client is None:
-            raise RuntimeError("tickflow SDK is not installed, cannot fetch daily history")
+            raise RuntimeError("TICKFLOW_API_KEY is required for TickFlow Starter daily history")
 
         try:
+            self._throttle(
+                "daily_kline_standard",
+                60.0 / self.settings.daily_kline_single_requests_per_minute,
+            )
             request_start = start - timedelta(days=1)
             raw = client.klines.get(
                 self._to_tickflow_symbol(symbol),
@@ -172,7 +186,7 @@ class TickFlowProvider(IDataProvider):
         adjust: str,
         *,
         batch_size: int = 100,
-        request_interval_seconds: float = 2.0,
+        request_interval_seconds: float = 0.0,
     ) -> tuple[dict[str, pd.DataFrame], dict[str, str]]:
         if end < start:
             start, end = end, start
@@ -180,22 +194,27 @@ class TickFlowProvider(IDataProvider):
         if not normalized_symbols:
             return {}, {}
 
-        client = self._get_daily_client()
+        client = self._get_client()
         if client is None:
-            raise RuntimeError("tickflow SDK is not installed, cannot fetch daily history")
+            raise RuntimeError("TICKFLOW_API_KEY is required for TickFlow Starter daily history")
 
         data_by_symbol: dict[str, pd.DataFrame] = {}
         errors: dict[str, str] = {}
         request_start = start - timedelta(days=1)
-        batch_limit = max(1, min(int(batch_size or 100), 100))
+        batch_limit = max(1, min(int(batch_size or 100), self.settings.daily_kline_batch_size))
+        batch_min_interval = max(
+            60.0 / self.settings.daily_kline_batch_requests_per_minute,
+            float(request_interval_seconds or 0.0),
+        )
 
         chunks = [
             normalized_symbols[index : index + batch_limit]
             for index in range(0, len(normalized_symbols), batch_limit)
         ]
-        for chunk_index, chunk in enumerate(chunks):
+        for chunk in chunks:
             tickflow_to_local = {self._to_tickflow_symbol(symbol): symbol for symbol in chunk}
             try:
+                self._throttle("daily_kline_batch", batch_min_interval)
                 raw = client.klines.batch(
                     list(tickflow_to_local.keys()),
                     period="1d",
@@ -205,7 +224,7 @@ class TickFlowProvider(IDataProvider):
                     adjust=self._adjust_type(adjust),
                     as_dataframe=False,
                     show_progress=False,
-                    max_workers=1,
+                    max_workers=self.settings.daily_kline_batch_max_workers,
                     batch_size=len(chunk),
                 )
                 raw_map = raw if isinstance(raw, dict) else {}
@@ -225,9 +244,6 @@ class TickFlowProvider(IDataProvider):
                 for symbol in chunk:
                     errors[symbol] = error_text
 
-            if request_interval_seconds > 0 and chunk_index < len(chunks) - 1:
-                time_module.sleep(float(request_interval_seconds))
-
         return data_by_symbol, errors
 
     def fetch_minute_history(
@@ -237,27 +253,15 @@ class TickFlowProvider(IDataProvider):
         count: int,
         adjust: str,
     ) -> pd.DataFrame:
-        client = self._get_paid_client()
-        if client is None:
-            raise RuntimeError("TICKFLOW_API_KEY is required for TickFlow minute history")
-        try:
-            raw = client.klines.get(
-                self._to_tickflow_symbol(symbol),
-                period=f"{parse_minute_period(period)}m",
-                count=max(int(count), 1),
-                adjust=self._adjust_type(adjust),
-                as_dataframe=True,
-            )
-            return self._normalize_klines(raw, symbol)
-        except Exception as exc:
-            logger.exception("tickflow minute fetch failed for %s", symbol)
-            raise RuntimeError(f"tickflow minute fetch failed for {symbol}: {exc}") from exc
+        del symbol, period, count, adjust
+        raise RuntimeError("TickFlow Starter plan does not include minute K-line access")
 
     def fetch_latest_quote(self, symbol: str) -> dict:
-        client = self._get_paid_client()
+        client = self._get_client()
         if client is None:
             raise RuntimeError("TICKFLOW_API_KEY is required for TickFlow latest quote")
         try:
+            self._throttle("realtime_quote", 60.0 / self.settings.quote_requests_per_minute)
             raw = client.quotes.get(symbols=[self._to_tickflow_symbol(symbol)])
             if isinstance(raw, pd.DataFrame):
                 item = raw.iloc[0].to_dict() if not raw.empty else {}
@@ -286,9 +290,9 @@ class TickFlowProvider(IDataProvider):
             raise RuntimeError(f"tickflow latest quote failed for {symbol}: {exc}") from exc
 
     def fetch_instrument_name(self, symbol: str) -> str | None:
-        client = self._get_daily_client()
+        client = self._get_client()
         if client is None:
-            raise RuntimeError("tickflow SDK is not installed, cannot fetch instrument name")
+            raise RuntimeError("TICKFLOW_API_KEY is required for TickFlow instrument name")
         try:
             item = client.instruments.get(self._to_tickflow_symbol(symbol))
             if not isinstance(item, dict):
@@ -302,15 +306,9 @@ class TickFlowProvider(IDataProvider):
         return []
 
     def close(self) -> None:
-        clients = {
-            id(client): client
-            for client in (self._daily_client, self._paid_client)
-            if client is not None
-        }
-        for client in clients.values():
+        if self._client is not None:
             try:
-                client.close()
+                self._client.close()
             except Exception as exc:
                 logger.debug("tickflow client close failed: %s", exc)
-        self._daily_client = None
-        self._paid_client = None
+        self._client = None

@@ -69,6 +69,7 @@ class SingleSymbolAllInBacktestEngine:
                     bars=day_bars,
                     position=position,
                     debug=debug_enabled,
+                    combinator="any",
                 )
                 condition_trace.extend(self._format_condition_trace(day_str, "EXIT", exit_traces))
                 if debug_enabled:
@@ -107,6 +108,7 @@ class SingleSymbolAllInBacktestEngine:
                     bars=day_bars,
                     position=position,
                     debug=debug_enabled,
+                    combinator="all",
                 )
                 condition_trace.extend(self._format_condition_trace(day_str, "ENTRY", entry_traces))
                 if debug_enabled:
