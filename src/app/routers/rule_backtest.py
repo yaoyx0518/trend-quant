@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import date
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
+from core.calendar import previous_trading_day
 from rule_backtest.service import RuleBacktestService
 
 router = APIRouter(prefix="/rule-backtest", tags=["rule-backtest"])
@@ -32,6 +35,24 @@ class RuleStrategySaveRequest(BaseModel):
     overwrite: bool = Field(default=False)
 
 
+def _cap_end_date(end_date_str: str) -> str:
+    """Ensure backtest *end_date* does not include today or future dates.
+
+    Intraday data is never persisted, so backtesting must stop at the
+    most recent confirmed trading day.
+    """
+    if not end_date_str.strip():
+        return end_date_str
+    try:
+        requested = date.fromisoformat(end_date_str.strip())
+    except (ValueError, TypeError):
+        return end_date_str
+    yesterday = previous_trading_day(date.today())
+    if requested >= date.today():
+        return yesterday.isoformat()
+    return end_date_str
+
+
 @router.get("", response_class=HTMLResponse)
 async def rule_backtest_page(request: Request) -> HTMLResponse:
     return templates.TemplateResponse(
@@ -52,6 +73,8 @@ async def get_rule_backtest_meta() -> dict:
 
 @router.post("/api/run")
 async def run_rule_backtest(payload: RuleBacktestRunRequest) -> dict:
+    # Cap end_date to previous trading day (intraday data is never persisted).
+    payload.end_date = _cap_end_date(payload.end_date)
     try:
         return service.run(payload.model_dump())
     except FileNotFoundError as exc:

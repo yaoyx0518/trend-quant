@@ -15,7 +15,28 @@ def safe_float(value: object, default: float = 0.0) -> float:
         return default
 
 
-def calculate_trend_score_snapshot(bars: pd.DataFrame, cfg: dict) -> dict:
+def calculate_trend_score_snapshot(
+    bars: pd.DataFrame,
+    cfg: dict,
+    *,
+    fixed_atr: float | None = None,
+    fixed_volume: float | None = None,
+) -> dict:
+    """Compute a single trend-score snapshot from a DataFrame of OHLCV bars.
+
+    Parameters
+    ----------
+    bars: daily bars sorted by time ascending.  Must contain columns
+        ``open, high, low, close, volume``.
+    cfg: strategy configuration dict (see strategy.yaml).
+    fixed_atr: when provided, use this ATR value instead of computing
+        it from *bars*.  Useful for intraday snapshots where the last
+        bar is synthetic and would bias the true range.
+    fixed_volume: when provided, use this as the *current* volume
+        (``vol_ratio`` and ``volume_factor`` still reference
+        ``vol_ma`` computed from *bars*).  Useful for intraday
+        snapshots where the current day's volume is incomplete.
+    """
     n_short = int(cfg.get("n_short", 5))
     n_mid = int(cfg.get("n_mid", 10))
     n_long = int(cfg.get("n_long", 20))
@@ -56,8 +77,13 @@ def calculate_trend_score_snapshot(bars: pd.DataFrame, cfg: dict) -> dict:
             "calc_details": {"rows": int(len(calc_df)), "required": int(min_bars)},
         }
 
-    atr_series = atr(calc_df, period=atr_period)
-    atr_now = safe_float(atr_series.iloc[-1], default=0.0)
+    # --- ATR -----------------------------------------------------------
+    if fixed_atr is not None and fixed_atr > 0:
+        atr_now = float(fixed_atr)
+    else:
+        atr_series = atr(calc_df, period=atr_period)
+        atr_now = safe_float(atr_series.iloc[-1], default=0.0)
+
     if atr_now <= 0:
         return {
             "ok": False,
@@ -118,7 +144,10 @@ def calculate_trend_score_snapshot(bars: pd.DataFrame, cfg: dict) -> dict:
     vol_ma = safe_float(
         calc_df["volume"].rolling(vol_ma_period, min_periods=1).mean().iloc[-1], 0.0
     )
-    current_volume = safe_float(calc_df["volume"].iloc[-1], 0.0)
+    if fixed_volume is not None and fixed_volume >= 0:
+        current_volume = float(fixed_volume)
+    else:
+        current_volume = safe_float(calc_df["volume"].iloc[-1], 0.0)
     vol_ratio = (current_volume / vol_ma) if vol_ma > 0 else 0.0
     volume_factor = 1.0 if vol_ratio >= 3.0 else max(vol_ratio / 3.0, 0.0)
 

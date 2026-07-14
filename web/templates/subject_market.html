@@ -7,15 +7,27 @@
       <h1>标的看板</h1>
       <p>默认展示一级类目下的二级类目聚合。点击二级类目展开三级类目，再点击三级类目展开具体标的；所有聚合均按每个交易日的成交额加权。</p>
     </div>
-    <div class="index-board-legend"><span class="dot positive"></span>强势 <span class="dot negative"></span>弱势</div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:10px;">
+      <div class="index-board-legend"><span class="dot positive"></span>强势 <span class="dot negative"></span>弱势</div>
+      <button id="intradayBtn" class="intraday-btn" disabled title="仅交易时段可用">🟠 获取盘中实时看板</button>
+    </div>
   </header>
+  <div id="intradayProgress" class="intraday-progress-wrap" hidden>
+    <progress id="intradayProgressBar" max="100" value="0" aria-label="盘中计算进度"></progress>
+    <span id="intradayProgressText">准备中…</span>
+  </div>
   <div id="subjectBoardStatus" class="context-hint">正在按类目层级汇总本地标的日K数据…</div>
   <div id="subjectBoard" class="index-board"></div>
 </section>
 <script>
   const board = document.getElementById('subjectBoard');
   const statusEl = document.getElementById('subjectBoardStatus');
+  const intradayBtn = document.getElementById('intradayBtn');
+  const intradayProgress = document.getElementById('intradayProgress');
+  const intradayProgressBar = document.getElementById('intradayProgressBar');
+  const intradayProgressText = document.getElementById('intradayProgressText');
   let nodeSequence = 0;
+  let isIntradayMode = false;
   const fmtAmount = (value) => {
     if (value == null || !Number.isFinite(value)) return '—';
     if (Math.abs(value) >= 1e8) return `${(value / 1e8).toFixed(1)}亿`;
@@ -99,7 +111,9 @@
     const childId = expandable ? `subjectChildren${++nodeSequence}` : '';
     const label = rowLabel(item, level);
     const scoreClass = (item.trend_score || 0) >= 0 ? 'is-positive' : 'is-negative';
-    const metrics = `<div class="index-score ${scoreClass}">${fmtScore(item.trend_score)}</div>
+    const ma5Class = (item.trend_ma5 || 0) >= 0 ? 'is-positive' : 'is-negative';
+    const metrics = `<div class="index-score ${ma5Class}">${fmtScore(item.trend_ma5)}</div>
+      <div class="index-score ${scoreClass}">${fmtScore(item.trend_score)}</div>
       <div class="index-change ${getChangeClass(item.change_60d)}">${fmtChange(item.change_60d)}</div>
       <div class="index-change ${getChangeClass(item.change_20d)}">${fmtChange(item.change_20d)}</div>
       <div class="index-change ${getChangeClass(item.change_5d)}">${fmtChange(item.change_5d)}</div>
@@ -114,7 +128,7 @@
     const nextLevel = level === 'l2' ? 'l3' : 'instrument';
     return `${row}<div id="${childId}" class="subject-children" data-depth="${depth + 1}" hidden>${children.map(child => renderRow(child, nextLevel, depth + 1)).join('')}</div>`;
   };
-  const renderGroup = (group) => `<section class="index-provider subject-l1"><div class="index-provider-head"><h2>${group.category_l1}</h2><span>${group.count} 个二级类目</span></div><div class="index-grid-head"><span>二级类目</span><span>趋势</span><span>60日变动</span><span>20日变动</span><span>5日变动</span><span>日变动</span><span>近3月趋势 MA5</span><span>成交额</span><span>强度</span></div><div class="subject-tree">${group.items.map(item => renderRow(item, 'l2', 0)).join('')}</div></section>`;
+  const renderGroup = (group) => `<section class="index-provider subject-l1"><div class="index-provider-head"><h2>${group.category_l1}</h2><span>${group.count} 个二级类目</span></div><div class="index-grid-head"><span>二级类目</span><span>趋势MA5</span><span>趋势</span><span>60日变动</span><span>20日变动</span><span>5日变动</span><span>日变动</span><span>近3月趋势 MA5</span><span>成交额</span><span>强度</span></div><div class="subject-tree">${group.items.map(item => renderRow(item, 'l2', 0)).join('')}</div></section>`;
   const toggleRow = (row) => {
     const children = document.getElementById(row.dataset.target);
     if (!children) return;
@@ -139,13 +153,102 @@
       if (!response.ok) throw new Error(data.detail || '标的看板加载失败');
       nodeSequence = 0;
       board.innerHTML = (data.groups || []).map(renderGroup).join('');
-      statusEl.textContent = board.children.length
+      isIntradayMode = false;
+      statusEl.innerHTML = board.children.length
         ? `${data.as_of || '最新交易日'} · ${data.groups.length || 0} 个一级类目、${data.secondary_count || 0} 个二级类目、${data.category_count || 0} 个三级类目。`
         : '暂无具备完整三级分类和本地日K数据的标的。';
+      statusEl.className = 'context-hint';
     } catch (error) {
       statusEl.textContent = error.message || '标的看板加载失败';
+      statusEl.className = 'context-hint';
     }
   }
+
+  // ---- Intraday button & progress -----------------------------------------
+  async function checkTradingStatus() {
+    try {
+      const resp = await fetch('/subject-market/api/trading-status');
+      const status = await resp.json();
+      if (status.is_trading_time) {
+        intradayBtn.disabled = false;
+        intradayBtn.title = '点击获取基于实时报价的盘中趋势值看板';
+      } else {
+        intradayBtn.disabled = true;
+        intradayBtn.title = status.next_session || '非交易时段';
+      }
+    } catch (e) {
+      intradayBtn.disabled = true;
+    }
+  }
+
+  intradayBtn.addEventListener('click', async () => {
+    if (intradayBtn.disabled) return;
+    intradayBtn.disabled = true;
+    intradayBtn.textContent = '⏳ 正在启动…';
+    intradayProgress.hidden = false;
+    intradayProgressBar.value = 0;
+    intradayProgressText.textContent = '正在启动盘中计算…';
+
+    try {
+      // Start the intraday job.
+      const startResp = await fetch('/subject-market/api/intraday-dashboard/start', { method: 'POST' });
+      if (!startResp.ok) {
+        const err = await startResp.json();
+        throw new Error(err.detail || '启动失败');
+      }
+      const { job_id } = await startResp.json();
+
+      // Poll progress.
+      const poll = async () => {
+        const progResp = await fetch(`/subject-market/api/intraday-dashboard/progress/${job_id}`);
+        if (!progResp.ok) throw new Error('进度查询失败');
+        const prog = await progResp.json();
+        intradayProgressBar.value = Math.round(prog.percent * 100);
+        intradayProgressText.textContent = prog.message || `${(prog.percent * 100).toFixed(0)}%`;
+        return prog;
+      };
+
+      let prog = await poll();
+      while (prog.status === 'started' || prog.status === 'running') {
+        await new Promise(r => setTimeout(r, 500));
+        prog = await poll();
+      }
+
+      if (prog.status === 'error') {
+        throw new Error(prog.message || '盘中计算失败');
+      }
+
+      // Fetch the result.
+      const resultResp = await fetch(`/subject-market/api/intraday-dashboard/result/${job_id}`);
+      if (!resultResp.ok) {
+        const err = await resultResp.json();
+        throw new Error(err.detail || '获取结果失败');
+      }
+      const data = await resultResp.json();
+
+      // Render.
+      nodeSequence = 0;
+      board.innerHTML = (data.groups || []).map(renderGroup).join('');
+      isIntradayMode = true;
+      statusEl.innerHTML = board.children.length
+        ? `<span class="intraday-dot"></span> 盘中实时 · ${data.as_of || ''} · ⚠️ 数据基于当前实时价格估算，非最终盘后确认值`
+        : '盘中无可用数据。';
+      statusEl.className = 'intraday-status-bar';
+    } catch (error) {
+      statusEl.textContent = '盘中计算失败: ' + (error.message || '未知错误');
+      statusEl.className = 'context-hint';
+    } finally {
+      intradayProgress.hidden = true;
+      intradayBtn.textContent = '🟠 获取盘中实时看板';
+      // Re-check trading status in case we crossed a boundary.
+      checkTradingStatus();
+    }
+  });
+
+  // Init.
   loadBoard();
+  checkTradingStatus();
+  // Re-check trading status every 60 seconds.
+  setInterval(checkTradingStatus, 60000);
 </script>
 {% endblock %}

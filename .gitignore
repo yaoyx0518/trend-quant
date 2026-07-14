@@ -25,3 +25,6 @@ data/*.db
 # OS
 .DS_Store
 Thumbs.db
+
+# ZCode IDE
+.zcode/

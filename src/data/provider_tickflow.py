@@ -289,6 +289,78 @@ class TickFlowProvider(IDataProvider):
             logger.exception("tickflow latest quote failed for %s", symbol)
             raise RuntimeError(f"tickflow latest quote failed for {symbol}: {exc}") from exc
 
+    def fetch_latest_quotes(self, symbols: list[str]) -> dict[str, dict]:
+        """Batch-fetch real-time quotes for multiple symbols.
+
+        Symbols are chunked by ``quote_max_symbols_per_request`` and
+        rate-limited via ``_throttle``.
+        """
+        normalized = [str(s or "").strip().upper() for s in symbols if str(s or "").strip()]
+        if not normalized:
+            return {}
+
+        client = self._get_client()
+        if client is None:
+            raise RuntimeError("TICKFLOW_API_KEY is required for TickFlow batch quotes")
+
+        chunk_size = max(1, int(self.settings.quote_max_symbols_per_request))
+        result: dict[str, dict] = {}
+        for i in range(0, len(normalized), chunk_size):
+            chunk = normalized[i : i + chunk_size]
+            tickflow_symbols = [self._to_tickflow_symbol(s) for s in chunk]
+            local_by_tickflow = {
+                self._to_tickflow_symbol(s): s for s in chunk
+            }
+            try:
+                self._throttle("realtime_quote_batch", 60.0 / self.settings.quote_requests_per_minute)
+                raw = client.quotes.get(symbols=tickflow_symbols)
+            except Exception as exc:
+                logger.exception("tickflow batch quote failed for chunk %s", chunk)
+                for s in chunk:
+                    result[s] = {"symbol": s, "error": str(exc)}
+                continue
+
+            if isinstance(raw, pd.DataFrame):
+                items = raw.to_dict("records") if not raw.empty else []
+            elif isinstance(raw, list):
+                items = raw
+            elif isinstance(raw, dict):
+                # Single symbol returned as dict — wrap.
+                items = [raw]
+            else:
+                items = []
+
+            seen: set[str] = set()
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                raw_sym = str(item.get("symbol", ""))
+                local_sym = local_by_tickflow.get(raw_sym, raw_sym)
+                if not local_sym or local_sym in seen:
+                    continue
+                seen.add(local_sym)
+                ext = item.get("ext", {}) if isinstance(item.get("ext"), dict) else {}
+                result[local_sym] = {
+                    "symbol": local_sym,
+                    "name": str(item.get("name", ext.get("name", "")) or "").strip() or None,
+                    "price": safe_float(item.get("last_price", item.get("price")), None),
+                    "open": safe_float(item.get("open"), None),
+                    "high": safe_float(item.get("high"), None),
+                    "low": safe_float(item.get("low"), None),
+                    "volume": safe_float(item.get("volume"), None),
+                    "amount": safe_float(item.get("amount"), None),
+                    "ts": str(
+                        item.get("trade_time", item.get("timestamp", datetime.now().isoformat()))
+                    ),
+                }
+
+            # Any chunk symbol not returned by the API gets an error entry.
+            for s in chunk:
+                if s not in result:
+                    result[s] = {"symbol": s, "error": "no quote returned"}
+
+        return result
+
     def fetch_instrument_name(self, symbol: str) -> str | None:
         client = self._get_client()
         if client is None:

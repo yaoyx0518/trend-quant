@@ -92,6 +92,7 @@
           <col class="trade-col-price">
           <col class="trade-col-price">
           <col class="trade-col-pnl">
+          <col class="trade-col-reason">
           <col class="trade-col-hold">
           <col class="trade-col-fee">
           <col class="trade-col-tax">
@@ -104,13 +105,14 @@
             <th class="num-cell">参考价</th>
             <th class="num-cell">成交价</th>
             <th class="num-cell">交易收益</th>
+            <th class="num-cell">离场原因</th>
             <th class="num-cell">持有天数</th>
             <th class="num-cell">佣金</th>
             <th class="num-cell">印花税</th>
           </tr>
         </thead>
         <tbody id="mvTradesBody">
-          <tr><td colspan="9">暂无交易明细。</td></tr>
+          <tr><td colspan="10">暂无交易明细。</td></tr>
         </tbody>
       </table>
     </div>
@@ -822,6 +824,17 @@
     return Number.isFinite(days) ? String(days) : '-';
   }
 
+  function exitReasonText(trade) {
+    if (String(trade?.side || '').toUpperCase() !== 'SELL') return '';
+    const reason = String(trade?.reason || '').trim();
+    const map = {
+      hard_stop: '硬止损',
+      chandelier_stop: '吊灯止损',
+      exit_conditions_passed: '卖出条件触发',
+    };
+    return map[reason] || reason || '-';
+  }
+
   function renderBacktestTrades(result) {
     const trades = attachHoldingDays(result?.trades || [])
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
@@ -836,11 +849,12 @@
         <td class="num-cell">${num(t.reference_price, 4)}</td>
         <td class="num-cell">${num(t.exec_price, 4)}</td>
         <td class="num-cell">${tradePnlCell(t)}</td>
+        <td class="num-cell">${exitReasonText(t)}</td>
         <td class="num-cell">${holdingDaysCell(t)}</td>
         <td class="num-cell">${money(t.commission)}</td>
         <td class="num-cell">${money(t.stamp_tax)}</td>
       </tr>
-    `).join('') : '<tr><td colspan="9">本次回测无交易。</td></tr>';
+    `).join('') : '<tr><td colspan="10">本次回测无交易。</td></tr>';
   }
 
   function renderBacktestDebug(result) {
@@ -870,8 +884,8 @@
     if (!backtestStartEl.value && payload.meta?.start) backtestStartEl.value = payload.meta.start;
     if (!backtestEndEl.value && payload.meta?.end) backtestEndEl.value = payload.meta.end;
     updateBacktestRangeLabel();
-    chartTitleEl.textContent = `${payload.display_label || payload.display_name || payload.symbol || ''} 日 K`;
-    rangeMetaEl.textContent = `${payload.meta?.start || '-'} ~ ${payload.meta?.end || '-'} | ${Number(payload.meta?.rows || 0).toLocaleString()} 根`;
+    chartTitleEl.innerHTML = `${payload.display_label || payload.display_name || payload.symbol || ''} 日 K${payload.meta?.is_intraday ? ' <span class="intraday-badge"><span class="intraday-dot" style="animation:intraday-pulse 1.6s ease-in-out infinite"></span>盘中</span>' : ''}`;
+    rangeMetaEl.textContent = `${payload.meta?.start || '-'} ~ ${payload.meta?.end || '-'} | ${Number(payload.meta?.rows || 0).toLocaleString()} 根${payload.meta?.is_intraday ? ' · 含盘中实时估算' : ''}`;
     renderPrice(payload, zoom);
     renderTrend(payload, zoom);
     renderVolume(payload, zoom);
@@ -981,6 +995,7 @@
       const previousSymbol = currentPayload?.symbol || '';
       const params = new URLSearchParams();
       params.set('symbol', target);
+      params.set('intraday', 'true');
       appendTrendParams(params);
       appendRsiParams(params);
       const resp = await fetch(`/market-view/api/daily?${params.toString()}`);
@@ -1001,7 +1016,7 @@
         backtestEndEl.value = data.meta?.end || '';
         updateBacktestRangeLabel();
         tradeMetaEl.textContent = '运行回测后显示。';
-        tradesBodyEl.innerHTML = '<tr><td colspan="9">暂无交易明细。</td></tr>';
+        tradesBodyEl.innerHTML = '<tr><td colspan="10">暂无交易明细。</td></tr>';
         debugInfoEl.textContent = '暂无结果。';
         debugPreviewEl.textContent = '';
       }
@@ -1093,6 +1108,17 @@
     if (event.key === 'Enter') loadDaily();
   });
   window.addEventListener('resize', () => charts.forEach((chart) => chart.resize()));
+
+  // Cap backtest end date to yesterday (intraday data not persisted).
+  (function setBacktestDateMax() {
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const maxDate = yesterday.toISOString().slice(0, 10);
+    backtestEndEl.setAttribute('max', maxDate);
+    if (backtestEndEl.value && backtestEndEl.value > maxDate) {
+      backtestEndEl.value = maxDate;
+    }
+  })();
 
   Promise.all([loadRuleMeta(), loadSymbols()]).catch((err) => {
     chartTitleEl.textContent = `加载失败：${err.message}`;

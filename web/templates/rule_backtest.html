@@ -200,7 +200,14 @@
   text-align: center;
 }
 
-.rule-strategy-page .strategy-edit-btn {
+.rule-strategy-page .strategy-row-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.rule-strategy-page .strategy-edit-btn,
+.rule-strategy-page .strategy-copy-btn {
   min-width: 76px;
 }
 
@@ -300,6 +307,7 @@
 let metaCache = { strategies: [], instruments: [], indicators: [] };
 let conditionSeq = 0;
 let editingStrategyItem = null;
+let copySourceItem = null;
 const PRICE_FIELDS = ["open", "high", "low", "close", "volume", "amount"];
 const STATE_VALUES = ["entry_price", "hard_stop", "highest_high_since_entry", "chandelier_stop"];
 
@@ -390,7 +398,10 @@ function renderStrategyCards() {
             <span>ID：${esc(item.id)}</span>
             <span>${esc(item.updated_at || item.created_at || "")}</span>
           </div>
-          <button type="button" class="ghost-btn strategy-edit-btn" data-strategy-id="${esc(item.id)}" title="编辑策略">编辑</button>
+          <div class="strategy-row-actions">
+            <button type="button" class="ghost-btn strategy-edit-btn" data-strategy-id="${esc(item.id)}" title="编辑策略">编辑</button>
+            <button type="button" class="ghost-btn strategy-copy-btn" data-strategy-id="${esc(item.id)}" title="复制策略">复制</button>
+          </div>
         </header>
         <div class="strategy-row-rules">
           <div class="strategy-rule-panel strategy-rule-panel-buy">
@@ -623,6 +634,48 @@ function buildStrategyFromEditor() {
   };
 }
 
+function valuesEqual(a, b) {
+  const ta = a?.type || "";
+  const tb = b?.type || "";
+  if (ta !== tb) return false;
+  if (ta === "price") return (a?.field || "") === (b?.field || "");
+  if (ta === "literal") return Number(a?.value ?? 0) === Number(b?.value ?? 0);
+  if (ta === "state_value") {
+    if ((a?.name || "") !== (b?.name || "")) return false;
+    const pa = a?.params || {};
+    const pb = b?.params || {};
+    const keysA = Object.keys(pa).sort();
+    const keysB = Object.keys(pb).sort();
+    return keysA.join(",") === keysB.join(",") && keysA.every(k => Number(pa[k]) === Number(pb[k]));
+  }
+  if (ta === "indicator") {
+    if ((a?.name || "") !== (b?.name || "")) return false;
+    const pa = a?.params || {};
+    const pb = b?.params || {};
+    const keysA = Object.keys(pa).sort();
+    const keysB = Object.keys(pb).sort();
+    return keysA.join(",") === keysB.join(",") && keysA.every(k => {
+      const va = pa[k];
+      const vb = pb[k];
+      if (typeof va === "number" && typeof vb === "number") return va === vb;
+      return String(va) === String(vb);
+    });
+  }
+  return false;
+}
+
+function conditionsEqual(listA, listB) {
+  if (!Array.isArray(listA) && !Array.isArray(listB)) return true;
+  if (!Array.isArray(listA) || !Array.isArray(listB)) return false;
+  if (listA.length !== listB.length) return false;
+  return listA.every((cond, idx) => {
+    const other = listB[idx];
+    return (cond?.operator || "") === (other?.operator || "")
+      && valuesEqual(cond?.left, other?.left)
+      && valuesEqual(cond?.right, other?.right);
+  });
+}
+
 async function saveStrategy() {
   const status = document.getElementById("strategySaveStatus");
   let strategy;
@@ -632,6 +685,22 @@ async function saveStrategy() {
     status.textContent = err.message;
     return;
   }
+
+  // Copy-mode validation: check that at least one condition has changed
+  if (copySourceItem) {
+    const srcStrategy = copySourceItem.strategy || {};
+    const srcEntry = Array.isArray(srcStrategy.entry?.children) ? srcStrategy.entry.children : [];
+    const srcExit = Array.isArray(srcStrategy.exit?.children) ? srcStrategy.exit.children : [];
+    const newEntry = strategy.entry?.children || [];
+    const newExit = strategy.exit?.children || [];
+    const entryUnchanged = conditionsEqual(newEntry, srcEntry);
+    const exitUnchanged = conditionsEqual(newExit, srcExit);
+    if (entryUnchanged && exitUnchanged) {
+      status.textContent = "复制策略时，买入或卖出条件至少有一处需要修改，当前条件与原策略完全相同。";
+      return;
+    }
+  }
+
   status.textContent = "保存中...";
   const resp = await fetch("/rule-backtest/api/strategies", {
     method: "POST",
@@ -650,6 +719,7 @@ async function saveStrategy() {
 
 function resetStrategyEditor() {
   editingStrategyItem = null;
+  copySourceItem = null;
   document.getElementById("strategyDialogTitle").textContent = "新增策略";
   document.getElementById("saveStrategyBtn").textContent = "保存策略";
   document.getElementById("strategyEditorMeta").hidden = true;
@@ -692,6 +762,25 @@ function openStrategyModal(item = null) {
   requestAnimationFrame(() => document.getElementById("newStrategyName").focus());
 }
 
+function openCopyStrategyModal(sourceItem) {
+  resetStrategyEditor();
+  copySourceItem = sourceItem;
+  const strategy = sourceItem.strategy || {};
+  const srcName = sourceItem.name || strategy.name || sourceItem.id || "";
+  document.getElementById("strategyDialogTitle").textContent = "复制策略";
+  document.getElementById("saveStrategyBtn").textContent = "保存副本";
+  document.getElementById("newStrategyName").value = srcName + " (副本)";
+  const meta = document.getElementById("strategyEditorMeta");
+  meta.textContent = `基于：${sourceItem.id} · 原存储：${sourceItem.storage || "strategy"}`;
+  meta.hidden = false;
+  fillConditions("entryConditions", "entry", strategy.entry);
+  fillConditions("exitConditions", "exit", strategy.exit);
+  document.getElementById("strategySaveStatus").textContent = "";
+  document.getElementById("strategyEditor").hidden = false;
+  document.body.classList.add("modal-open");
+  requestAnimationFrame(() => document.getElementById("newStrategyName").select());
+}
+
 function closeStrategyModal() {
   document.getElementById("strategyEditor").hidden = true;
   document.body.classList.remove("modal-open");
@@ -699,10 +788,18 @@ function closeStrategyModal() {
 
 document.getElementById("newStrategyBtn").addEventListener("click", () => openStrategyModal());
 document.getElementById("strategyGrid").addEventListener("click", (event) => {
-  const btn = event.target.closest(".strategy-edit-btn");
-  if (!btn) return;
-  const item = (metaCache.strategies || []).find(x => String(x.id) === String(btn.dataset.strategyId));
-  if (item) openStrategyModal(item);
+  const editBtn = event.target.closest(".strategy-edit-btn");
+  if (editBtn) {
+    const item = (metaCache.strategies || []).find(x => String(x.id) === String(editBtn.dataset.strategyId));
+    if (item) openStrategyModal(item);
+    return;
+  }
+  const copyBtn = event.target.closest(".strategy-copy-btn");
+  if (copyBtn) {
+    const item = (metaCache.strategies || []).find(x => String(x.id) === String(copyBtn.dataset.strategyId));
+    if (item) openCopyStrategyModal(item);
+    return;
+  }
 });
 document.getElementById("addEntryConditionBtn").addEventListener("click", () => addCondition("entry"));
 document.getElementById("addExitConditionBtn").addEventListener("click", () => addCondition("exit"));

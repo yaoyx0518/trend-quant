@@ -11,6 +11,9 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.instrument_display import format_symbol_display, strip_etf_suffix
+from core.calendar import is_trading_time, previous_trading_day
+from data.intraday_service import compute_intraday_trend_score
+from data.service import DataService
 from data.storage.db import get_db
 from strategy.indicators import atr, efficiency_ratio
 from strategy.trend_score_core import safe_float
@@ -466,6 +469,7 @@ async def get_market_daily(
     trend_n_long: int | None = Query(default=None, ge=1, le=500),
     trend_atr_period: int | None = Query(default=None, ge=1, le=300),
     rsi_period: int = Query(default=DEFAULT_RSI_PERIOD, ge=2, le=300),
+    intraday: bool = Query(default=False),
 ) -> dict:
     normalized_symbol = _normalize_symbol(symbol)
     if not normalized_symbol:
@@ -520,4 +524,53 @@ async def get_market_daily(
     payload["meta"]["requested_start"] = _date_only(start_ts)
     payload["meta"]["requested_end"] = _date_only(end_ts)
     payload["meta"]["limit"] = int(limit)
+    payload["meta"]["is_intraday"] = False
+
+    # --- Intraday overlay -------------------------------------------------
+    if intraday and is_trading_time():
+        try:
+            data_service = DataService()
+            quote = data_service.fetch_latest_quote(normalized_symbol)
+            if quote and quote.get("price") is not None:
+                hist = db.load_market_data(normalized_symbol, price_mode="qfq")
+                if not hist.empty:
+                    hist["time"] = pd.to_datetime(hist["time"], errors="coerce")
+                    hist = hist.dropna(subset=["time", "open", "high", "low", "close"]).sort_values("time").reset_index(drop=True)
+                    for col in ("open", "high", "low", "close", "volume", "amount"):
+                        if col in hist.columns:
+                            hist[col] = pd.to_numeric(hist[col], errors="coerce")
+
+                    intraday_result = compute_intraday_trend_score(hist, quote, trend_cfg)
+                    if intraday_result.get("ok"):
+                        # Append the intraday synthetic candle to the chart data.
+                        from data.intraday_service import build_synthetic_bar
+                        prev_vol = safe_float(hist["volume"].iloc[-1], 0.0) if len(hist) > 0 else 0.0
+                        synth = build_synthetic_bar(quote, prev_vol)
+                        synth_time = datetime.now()
+                        payload["dates"].append(_date_only(synth_time))
+                        payload["candles"].append([
+                            _num(synth["open"]),
+                            _num(synth["close"]),
+                            _num(synth["low"]),
+                            _num(synth["high"]),
+                        ])
+                        payload["volumes"].append(_num(synth["volume"]))
+                        payload["amounts"].append(_num(synth["amount"]))
+
+                        # Add intraday trend score snapshot.
+                        payload["indicators"]["trend_intraday"] = {
+                            "score": intraday_result["trend_score"],
+                            "price_direction": intraday_result["price_direction"],
+                            "confidence": intraday_result["confidence"],
+                            "atr": intraday_result["atr"],
+                            "price": intraday_result["price"],
+                            "ma_mid": intraday_result["ma_mid"],
+                            "calc_details": intraday_result.get("calc_details", {}),
+                        }
+                        payload["meta"]["is_intraday"] = True
+                        payload["meta"]["intraday_ts"] = datetime.now().isoformat()
+        except Exception:
+            # Silently fall back to EOD data if intraday fetch fails.
+            pass
+
     return payload

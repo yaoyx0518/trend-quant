@@ -9,6 +9,7 @@ from typing import Callable
 import pandas as pd
 
 from audit.app_logger import get_logger
+from core.calendar import is_trading_day as _calendar_is_trading_day
 from core.settings import TickFlowSettings, load_settings
 from data.provider_tickflow import TickFlowProvider
 from data.storage.market_store import MarketStore
@@ -149,6 +150,27 @@ class DataService:
         quote["provider"] = name
         return quote
 
+    def fetch_latest_quotes(self, symbols: list[str]) -> dict[str, dict]:
+        """Batch-fetch real-time quotes for multiple symbols."""
+        if not symbols:
+            return {}
+        name, provider = self._tickflow_provider()
+        batch_fetcher = getattr(provider, "fetch_latest_quotes", None)
+        if not callable(batch_fetcher):
+            # Fallback: call single-symbol fetch in a loop.
+            result: dict[str, dict] = {}
+            for symbol in symbols:
+                try:
+                    result[symbol] = self.fetch_latest_quote(symbol)
+                except Exception as exc:
+                    result[symbol] = {"symbol": symbol, "error": str(exc)}
+            return result
+        quotes = batch_fetcher(symbols)
+        for q in quotes.values():
+            if "error" not in q:
+                q["provider"] = name
+        return quotes
+
     def fetch_instrument_name(self, symbol: str) -> dict:
         name, provider = self._tickflow_provider()
         provider_name_fetcher = getattr(provider, "fetch_instrument_name", None)
@@ -173,14 +195,9 @@ class DataService:
         raise DataProviderError(f"TickFlow returned no instrument name for {symbol}")
 
     def is_trading_day(self, day: date) -> bool:
-        # Try provider calendars first.
-        start = day - timedelta(days=365)
-        for _, provider in self._ordered_providers():
-            calendar = provider.fetch_trading_calendar(start, day)
-            if calendar:
-                return day in set(calendar)
-        # Conservative fallback when calendar unavailable.
-        return day.weekday() < 5
+        # Use the project-level calendar which combines weekday
+        # checks with known A-share holiday exclusions.
+        return _calendar_is_trading_day(day)
 
     def ensure_daily_history(self, symbol: str, start_date: date, end_date: date, adjust: str = "qfq") -> dict:
         existing = self.market_store.load_history(symbol)
