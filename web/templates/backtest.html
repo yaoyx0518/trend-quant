@@ -283,7 +283,7 @@
 
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="/static/echarts.min.js?v={{ request.app.state.asset_version|default('1', true) if request is defined else '1' }}"></script>
 <script>
 (() => {
   const runBtn = document.getElementById('runBtn');
@@ -347,25 +347,36 @@
     .filter(Boolean);
   const initialStrategyCatalog = {{ strategy_catalog | tojson }};
 
-  const navChart = echarts.init(document.getElementById('navChart'));
-  const klineChart = echarts.init(document.getElementById('klineChart'));
-  const trendChart = echarts.init(document.getElementById('trendChart'));
-  const trendDistChart = echarts.init(document.getElementById('trendDistChart'));
-  const hybridChart = echarts.init(document.getElementById('hybridChart'));
-  const holdingsChart = echarts.init(document.getElementById('holdingsChart'));
-  const ddChart = echarts.init(document.getElementById('ddChart'));
-  const heatChart = echarts.init(document.getElementById('heatChart'));
+  let navChart = null;
+  let klineChart = null;
+  let trendChart = null;
+  let trendDistChart = null;
+  let hybridChart = null;
+  let holdingsChart = null;
+  let ddChart = null;
+  let heatChart = null;
+  try {
+    navChart = echarts.init(document.getElementById('navChart'));
+    klineChart = echarts.init(document.getElementById('klineChart'));
+    trendChart = echarts.init(document.getElementById('trendChart'));
+    trendDistChart = echarts.init(document.getElementById('trendDistChart'));
+    hybridChart = echarts.init(document.getElementById('hybridChart'));
+    holdingsChart = echarts.init(document.getElementById('holdingsChart'));
+    ddChart = echarts.init(document.getElementById('ddChart'));
+    heatChart = echarts.init(document.getElementById('heatChart'));
+    navChart.group = 'bt-time';
+    klineChart.group = 'bt-time';
+    trendChart.group = 'bt-time';
+    hybridChart.group = 'bt-time';
+    holdingsChart.group = 'bt-time';
+    ddChart.group = 'bt-time';
+    echarts.connect('bt-time');
+  } catch (err) {
+    console.warn('ECharts 初始化失败，图表将不可用：', err);
+  }
   const trendDistModuleEl = document.getElementById('trendDistModule');
   const hybridChartTitleEl = document.getElementById('hybridChartTitle');
   const hybridChartEl = document.getElementById('hybridChart');
-
-  navChart.group = 'bt-time';
-  klineChart.group = 'bt-time';
-  trendChart.group = 'bt-time';
-  hybridChart.group = 'bt-time';
-  holdingsChart.group = 'bt-time';
-  ddChart.group = 'bt-time';
-  echarts.connect('bt-time');
 
   let allTrades = [];
   let allSymbolStats = [];
@@ -726,6 +737,7 @@
   }
 
   function renderTrendDistribution(trendSeriesMap) {
+    if (!trendDistChart) return;
     const dist = buildTrendDistribution(trendSeriesMap);
     const percent = dist.total > 0
       ? dist.counts.map((c) => c / dist.total)
@@ -1075,7 +1087,7 @@
   }
 
   function updateKlineYAxisByZoom(params) {
-    if (!currentKlineCandles.length) return;
+    if (!currentKlineCandles.length || !klineChart) return;
     const dz = (params && params.batch && params.batch[0]) || params || {};
     const opt = klineChart.getOption() || {};
     const zoomCfg = (opt.dataZoom && opt.dataZoom[0]) || {};
@@ -1085,6 +1097,7 @@
     klineChart.setOption({ yAxis: { min: range.min, max: range.max } }, false);
   }
   function renderKlineSymbol(symbol) {
+    if (!klineChart) return;
     const item = klineMap[symbol];
     if (!item) {
       klineChart.clear();
@@ -1205,6 +1218,7 @@
   }
 
   function renderLinkedScoreChartsByKlineSymbol(symbol) {
+    if (!trendChart) return;
     const selectedSymbol = String(symbol || '').trim();
     const selectedTrendMap = (
       selectedSymbol && Object.prototype.hasOwnProperty.call(trendSeriesMapCache, selectedSymbol)
@@ -1320,6 +1334,7 @@
   }
 
   function renderCharts(charts, strategyId = '') {
+    if (!navChart && !ddChart) return;
     const dates = charts.dates || [];
     const benchmarkItems = benchmarkListFromPayload(charts.benchmarks, null, charts.benchmark_nav)
       .map((item) => ({
@@ -1437,6 +1452,7 @@
 
 
   function renderHoldings(holdings) {
+    if (!holdingsChart) return;
     const dates = (holdings && holdings.dates) || [];
     const seriesMap = (holdings && holdings.series) || {};
     const rawOrder = (holdings && holdings.order) || [];
@@ -1495,7 +1511,7 @@
     applyHoldingsSelection();
   }
   function renderHoldingsSelector(rawKeys) {
-    if (!holdingsSelectorEl) return;
+    if (!holdingsSelectorEl || !holdingsChart) return;
     const keys = Array.isArray(rawKeys) ? rawKeys : [];
     holdingsSelectorEl.innerHTML = keys.map((rawKey) => `
       <label><input type="checkbox" data-holdings-symbol="${escapeHtml(rawKey)}" checked> ${escapeHtml(holdingsDisplayName(rawKey))}</label>
@@ -1528,6 +1544,7 @@
   }
 
   function renderHeatmap(monthly) {
+    if (!heatChart) return;
     const years = monthly.years || [];
     const months = monthly.months || [];
     const data = monthly.data || [];
@@ -2202,14 +2219,14 @@
       progressWrapEl.style.display = 'none';
     } finally {
       runBtn.disabled = false;
-      navChart.resize();
-      klineChart.resize();
-      trendChart.resize();
-      trendDistChart.resize();
-      hybridChart.resize();
-      holdingsChart.resize();
-      ddChart.resize();
-      heatChart.resize();
+      try { navChart && navChart.resize(); } catch (_) {}
+      try { klineChart && klineChart.resize(); } catch (_) {}
+      try { trendChart && trendChart.resize(); } catch (_) {}
+      try { trendDistChart && trendDistChart.resize(); } catch (_) {}
+      try { hybridChart && hybridChart.resize(); } catch (_) {}
+      try { holdingsChart && holdingsChart.resize(); } catch (_) {}
+      try { ddChart && ddChart.resize(); } catch (_) {}
+      try { heatChart && heatChart.resize(); } catch (_) {}
     }
   }
 
@@ -2249,16 +2266,16 @@
   updateSymbolSortIndicators();
   symbolFilterEl.addEventListener('change', () => renderTrades(allTrades, symbolFilterEl.value));
   klineSymbolEl.addEventListener('change', () => renderKlineSymbol(klineSymbolEl.value));
-  klineChart.on('dataZoom', (params) => updateKlineYAxisByZoom(params));
+  try { klineChart.on('dataZoom', (params) => updateKlineYAxisByZoom(params)); } catch (_) {}
   window.addEventListener('resize', () => {
-    navChart.resize();
-    klineChart.resize();
-    trendChart.resize();
-    trendDistChart.resize();
-    hybridChart.resize();
-    holdingsChart.resize();
-    ddChart.resize();
-    heatChart.resize();
+    try { navChart && navChart.resize(); } catch (_) {}
+    try { klineChart && klineChart.resize(); } catch (_) {}
+    try { trendChart && trendChart.resize(); } catch (_) {}
+    try { trendDistChart && trendDistChart.resize(); } catch (_) {}
+    try { hybridChart && hybridChart.resize(); } catch (_) {}
+    try { holdingsChart && holdingsChart.resize(); } catch (_) {}
+    try { ddChart && ddChart.resize(); } catch (_) {}
+    try { heatChart && heatChart.resize(); } catch (_) {}
   });
 })();
 </script>

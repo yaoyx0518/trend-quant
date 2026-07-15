@@ -37,6 +37,15 @@
   const fmtScore = (value) => value == null ? '—' : value.toFixed(1);
   const fmtChange = (value) => value == null ? '—' : `${value >= 0 ? '+' : ''}${value.toFixed(2)}%`;
   const getChangeClass = (value) => value != null && value >= 0 ? 'is-positive' : 'is-negative';
+  const fmtPhase = (item) => {
+    if (item.trend_phase == null || item.trend_phase_days == null) return '<span class="index-phase-na">—</span>';
+    const phaseLabel = item.trend_phase === 'start' ? '趋势启动' : '趋势结束';
+    const phaseClass = item.trend_phase === 'start' ? 'is-positive' : 'is-negative';
+    const changeVal = item.trend_phase_change_pct != null ? item.trend_phase_change_pct.toFixed(2) : '—';
+    const changeSign = item.trend_phase_change_pct != null && item.trend_phase_change_pct >= 0 ? '+' : '';
+    const changeClass = item.trend_phase_change_pct != null ? (item.trend_phase_change_pct >= 0 ? 'is-positive' : 'is-negative') : '';
+    return `<span class="${phaseClass}">${phaseLabel}第 ${item.trend_phase_days} 天</span>，涨跌幅：<span class="${changeClass}">${changeSign}${changeVal}%</span>`;
+  };
   const sparkline = (points, dates, upperPoints = [], lowerPoints = []) => {
     const axisTicks = [-15, -10, -5, 0, 5, 10, 15];
     const plotLeft = 18;
@@ -112,7 +121,8 @@
     const label = rowLabel(item, level);
     const scoreClass = (item.trend_score || 0) >= 0 ? 'is-positive' : 'is-negative';
     const ma5Class = (item.trend_ma5 || 0) >= 0 ? 'is-positive' : 'is-negative';
-    const metrics = `<div class="index-score ${ma5Class}">${fmtScore(item.trend_ma5)}</div>
+    const metrics = `<div class="index-phase">${fmtPhase(item)}</div>
+      <div class="index-score ${ma5Class}">${fmtScore(item.trend_ma5)}</div>
       <div class="index-score ${scoreClass}">${fmtScore(item.trend_score)}</div>
       <div class="index-change ${getChangeClass(item.change_60d)}">${fmtChange(item.change_60d)}</div>
       <div class="index-change ${getChangeClass(item.change_20d)}">${fmtChange(item.change_20d)}</div>
@@ -128,7 +138,7 @@
     const nextLevel = level === 'l2' ? 'l3' : 'instrument';
     return `${row}<div id="${childId}" class="subject-children" data-depth="${depth + 1}" hidden>${children.map(child => renderRow(child, nextLevel, depth + 1)).join('')}</div>`;
   };
-  const renderGroup = (group) => `<section class="index-provider subject-l1"><div class="index-provider-head"><h2>${group.category_l1}</h2><span>${group.count} 个二级类目</span></div><div class="index-grid-head"><span>二级类目</span><span>趋势MA5</span><span>趋势</span><span>60日变动</span><span>20日变动</span><span>5日变动</span><span>日变动</span><span>近3月趋势 MA5</span><span>成交额</span><span>强度</span></div><div class="subject-tree">${group.items.map(item => renderRow(item, 'l2', 0)).join('')}</div></section>`;
+  const renderGroup = (group) => `<section class="index-provider subject-l1"><div class="index-provider-head"><h2>${group.category_l1}</h2><span>${group.count} 个二级类目</span></div><div class="index-grid-head"><span>二级类目</span><span>趋势相位</span><span>趋势MA5</span><span>趋势</span><span>60日变动</span><span>20日变动</span><span>5日变动</span><span>日变动</span><span>近3月趋势 MA5</span><span>成交额</span><span>强度</span></div><div class="subject-tree">${group.items.map(item => renderRow(item, 'l2', 0)).join('')}</div></section>`;
   const toggleRow = (row) => {
     const children = document.getElementById(row.dataset.target);
     if (!children) return;

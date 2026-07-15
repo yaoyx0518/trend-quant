@@ -2,11 +2,11 @@
 {% block content %}
 <section class="page-panel market-view-page">
   <div class="bt-form-row market-toolbar">
-    <label>标的
-      <input id="mvSymbolSearch" type="search" list="mvSymbolOptions" placeholder="输入代码、名称或分类搜索">
+    <label class="mv-symbol-search-label">标的
+      <input id="mvSymbolSearch" type="text" list="mvSymbolOptions" placeholder="输入代码、名称或分类搜索" autocomplete="off">
       <datalist id="mvSymbolOptions"></datalist>
     </label>
-    <label>代码
+    <label class="mv-symbol-code-label">代码
       <input id="mvSymbolInput" type="text" placeholder="如 518850 或 518850.SS">
     </label>
     <button id="mvRefreshBtn" type="button">刷新</button>
@@ -125,7 +125,7 @@
   </div>
 </section>
 
-<script src="https://cdn.jsdelivr.net/npm/echarts@5/dist/echarts.min.js"></script>
+<script src="/static/echarts.min.js?v={{ request.app.state.asset_version|default('1', true) if request is defined else '1' }}"></script>
 <script>
 (() => {
   const symbolSearchEl = document.getElementById('mvSymbolSearch');
@@ -154,15 +154,27 @@
   const rsiControlsEl = document.getElementById('mvRsiControls');
   const rsiPeriodEl = document.getElementById('mvRsiPeriod');
 
-  const priceChart = echarts.init(document.getElementById('mvPriceChart'));
-  const trendChart = echarts.init(document.getElementById('mvTrendChart'));
-  const volumeChart = echarts.init(document.getElementById('mvVolumeChart'));
-  const rsiChart = echarts.init(document.getElementById('mvRsiChart'));
-  const macdChart = echarts.init(document.getElementById('mvMacdChart'));
-  const biasChart = echarts.init(document.getElementById('mvBiasChart'));
-  const charts = [priceChart, trendChart, volumeChart, rsiChart, biasChart, macdChart];
-  for (const chart of charts) chart.group = 'market-view-time';
-  echarts.connect('market-view-time');
+  let priceChart = null;
+  let trendChart = null;
+  let volumeChart = null;
+  let rsiChart = null;
+  let macdChart = null;
+  let biasChart = null;
+  let charts = [];
+  try {
+    priceChart = echarts.init(document.getElementById('mvPriceChart'));
+    trendChart = echarts.init(document.getElementById('mvTrendChart'));
+    volumeChart = echarts.init(document.getElementById('mvVolumeChart'));
+    rsiChart = echarts.init(document.getElementById('mvRsiChart'));
+    macdChart = echarts.init(document.getElementById('mvMacdChart'));
+    biasChart = echarts.init(document.getElementById('mvBiasChart'));
+    charts = [priceChart, trendChart, volumeChart, rsiChart, biasChart, macdChart];
+    for (const chart of charts) chart.group = 'market-view-time';
+    echarts.connect('market-view-time');
+  } catch (err) {
+    console.warn('ECharts 初始化失败，图表将不可用：', err);
+    charts = [];
+  }
 
   const maColors = Object.freeze({
     5: '#7c3aed',
@@ -371,7 +383,7 @@
   }
 
   function updatePriceYAxis(params) {
-    if (!currentCandles.length) return;
+    if (!currentCandles.length || !priceChart) return;
     currentZoom = zoomFromEvent(params);
     const range = computeLogPriceRange(currentCandles, currentZoom);
     priceChart.setOption({ yAxis: { min: range.min, max: range.max, logBase: range.logBase } }, false);
@@ -482,6 +494,7 @@
   }
 
   function renderPrice(payload, zoom) {
+    if (!priceChart) return;
     const dates = payload.dates || [];
     const candles = payload.candles || [];
     const indicators = payload.indicators || {};
@@ -567,6 +580,7 @@
   }
 
   function renderTrend(payload, zoom) {
+    if (!trendChart) return;
     const dates = payload.dates || [];
     const trend = payload.indicators?.trend || {};
     const scores = trend.score || [];
@@ -645,6 +659,7 @@
   }
 
   function renderVolume(payload, zoom) {
+    if (!volumeChart) return;
     const dates = payload.dates || [];
     const candles = payload.candles || [];
     const volumes = payload.volumes || [];
@@ -671,6 +686,7 @@
   }
 
   function renderRsi(payload, zoom) {
+    if (!rsiChart) return;
     const dates = payload.dates || [];
     const rsi = payload.indicators?.rsi || {};
     const period = Number(rsi.period || rsiPeriodFromInput() || 14);
@@ -714,6 +730,7 @@
   }
 
   function renderMacd(payload, zoom) {
+    if (!macdChart) return;
     const dates = payload.dates || [];
     const macd = payload.indicators?.macd || {};
     const bars = (macd.bar || []).map((v) => ({
@@ -738,6 +755,7 @@
   }
 
   function renderBias(payload, zoom) {
+    if (!biasChart) return;
     const dates = payload.dates || [];
     const bias = payload.indicators?.bias || {};
     biasChart.setOption({
@@ -892,7 +910,7 @@
     renderRsi(payload, zoom);
     renderBias(payload, zoom);
     renderMacd(payload, zoom);
-    setTimeout(() => charts.forEach((chart) => chart.resize()), 0);
+    setTimeout(() => { if (charts.length) charts.forEach((chart) => chart.resize()); }, 0);
   }
 
   function normalizeSearchText(value) {
@@ -1067,8 +1085,12 @@
     }
   }
 
-  for (const chart of charts) {
-    chart.on('dataZoom', updatePriceYAxis);
+  try {
+    for (const chart of charts) {
+      chart.on('dataZoom', updatePriceYAxis);
+    }
+  } catch (err) {
+    // charts not initialized – dataZoom listeners skipped
   }
   refreshBtnEl.addEventListener('click', () => loadDaily());
   runBacktestBtnEl.addEventListener('click', runRuleBacktest);
@@ -1107,7 +1129,7 @@
   symbolInputEl.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') loadDaily();
   });
-  window.addEventListener('resize', () => charts.forEach((chart) => chart.resize()));
+  window.addEventListener('resize', () => { if (charts.length) charts.forEach((chart) => chart.resize()); });
 
   // Cap backtest end date to yesterday (intraday data not persisted).
   (function setBacktestDateMax() {

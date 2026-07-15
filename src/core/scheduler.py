@@ -18,7 +18,12 @@ class SchedulerManager:
     settings: Settings
     scheduler: BackgroundScheduler | None = None
 
-    def start(self, poll_job: Callable[[], None], final_job: Callable[[], None], update_job: Callable[[], None]) -> None:
+    def start(
+        self,
+        poll_job: Callable[[], None],
+        final_job: Callable[[], None],
+        update_job: Callable[[], None],
+    ) -> None:
         if self.scheduler is not None:
             return
 

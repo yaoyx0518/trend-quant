@@ -1,0 +1,44 @@
+"""API‑test layer fixtures.
+
+Uses FastAPI's ``TestClient`` with a fully isolated app instance:
+- Disables the APScheduler (``TREND_QUANT_DISABLE_SCHEDULER=1``).
+- Overrides ``init_db`` and ``get_db`` to use the test database.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Generator
+
+import pytest
+from fastapi.testclient import TestClient
+
+
+@pytest.fixture(autouse=True)
+def _disable_scheduler(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Prevent the background scheduler from starting during tests."""
+    monkeypatch.setenv("TREND_QUANT_DISABLE_SCHEDULER", "1")
+
+
+@pytest.fixture(autouse=True)
+def isolate_api_db(test_db, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the FastAPI app use *test_db* instead of the production DB."""
+    import data.storage.db as db_module
+
+    monkeypatch.setattr(db_module, "get_db", lambda: test_db)
+    monkeypatch.setattr(db_module, "_db_instance", test_db)
+    # Also intercept init_db so lifespan() re-uses our test DB
+    monkeypatch.setattr(db_module, "init_db", lambda db_path=None: test_db)
+
+
+@pytest.fixture
+def client(test_db) -> Generator[TestClient, None, None]:
+    """Return a ``TestClient`` wired to the FastAPI app with test DB."""
+    from app.main import app
+
+    with TestClient(app) as c:
+        yield c
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    for item in items:
+        item.add_marker(pytest.mark.api)

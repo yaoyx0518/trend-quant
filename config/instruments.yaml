@@ -7825,3 +7825,42 @@ instruments:
   priority_l2: 4
   priority_l3: 1
   sort_order: 448
+- symbol: 600276.SS
+  name: 恒瑞医药
+  enabled: true
+  risk_budget_pct: 0.01
+  stop_atr_mul: 1.5
+  asset_type: stock
+  category_l1: 股票
+  category_l2: 医药健康
+  category_l3: CXO
+  priority_l1: 3
+  priority_l2: 10
+  priority_l3: 2
+  sort_order: 449
+- symbol: 300760.SZ
+  name: 迈瑞医疗
+  enabled: true
+  risk_budget_pct: 0.01
+  stop_atr_mul: 1.5
+  asset_type: stock
+  category_l1: 股票
+  category_l2: 医药健康
+  category_l3: CXO
+  priority_l1: 3
+  priority_l2: 10
+  priority_l3: 2
+  sort_order: 450
+- symbol: 601318.SS
+  name: 中国平安
+  enabled: true
+  risk_budget_pct: 0.01
+  stop_atr_mul: 1.5
+  asset_type: stock
+  category_l1: 股票
+  category_l2: 大金融
+  category_l3: 金融科技
+  priority_l1: 3
+  priority_l2: 11
+  priority_l3: 8
+  sort_order: 451

@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 
 from app.routers.market_view import _trend_config, compute_trend_indicator
 from core.calendar import is_trading_day, is_trading_time, previous_trading_day, trading_session_status
-from data.intraday_service import build_intraday_dashboard
+from data.intraday_service import build_intraday_dashboard, _detect_trend_phase
 from data.service import DataService
 from data.storage.db import get_db
 
@@ -65,6 +65,7 @@ def _aggregate_daily(frame: pd.DataFrame, group_columns: list[str]) -> pd.DataFr
         "change_5d": "return_5d",
         "change_20d": "return_20d",
         "change_60d": "return_60d",
+        "close": "close",
     }
     columns = [*group_columns, "time", "amount", *metrics.values()]
     work = frame[columns].copy()
@@ -95,8 +96,14 @@ def _metrics_summary(daily: pd.DataFrame, metadata: dict) -> dict | None:
     daily = daily.sort_values("time")
     raw_trend = [_number(value) for value in daily["trend_score"]]
     trend_ma5 = _ma5(raw_trend)
+    raw_close = [_number(value) for value in daily["close"]] if "close" in daily.columns else []
+    dates = [pd.Timestamp(value).date().isoformat() for value in daily["time"]]
     recent = daily.tail(DISPLAY_DAYS)
     latest = daily.iloc[-1]
+
+    # Detect trend phase signal.
+    phase_info = _detect_trend_phase(raw_trend, trend_ma5, raw_close, dates)
+
     return {
         "member_count": int(metadata["member_count"]),
         "trend_score": _number(latest["trend_score"]),
@@ -112,6 +119,10 @@ def _metrics_summary(daily: pd.DataFrame, metadata: dict) -> dict | None:
         "priority_l1": _priority(metadata["priority_l1"]),
         "priority_l2": _priority(metadata["priority_l2"]),
         "priority_l3": _priority(metadata["priority_l3"]),
+        "trend_phase": phase_info["phase"],
+        "trend_phase_days": phase_info["days"],
+        "trend_phase_change_pct": phase_info["change_pct"],
+        "trend_phase_signal_date": phase_info["signal_date"],
     }
 
 

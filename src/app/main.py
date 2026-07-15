@@ -65,7 +65,7 @@ async def lifespan(app: FastAPI):
 
     def update_job() -> None:
         result = signal_engine.run_daily_update()
-        logger.info("Daily market data update result: %s", result.get("status", "ok"))
+        logger.info("Daily market data update (16:30) result: %s", result.get("status", "ok"))
 
     disable_scheduler = str(os.getenv("TREND_QUANT_DISABLE_SCHEDULER", "")).strip().lower() in {
         "1",
@@ -76,7 +76,11 @@ async def lifespan(app: FastAPI):
     if disable_scheduler:
         logger.warning("Scheduler disabled by TREND_QUANT_DISABLE_SCHEDULER")
     else:
-        scheduler_manager.start(poll_job=poll_job, final_job=final_job, update_job=update_job)
+        scheduler_manager.start(
+            poll_job=poll_job,
+            final_job=final_job,
+            update_job=update_job,
+        )
 
     app.state.settings = settings
     app.state.scheduler_manager = scheduler_manager

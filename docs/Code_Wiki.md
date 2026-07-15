@@ -238,7 +238,9 @@ class AppSettings:
     data_provider_priority: list[str] # 数据源优先级
     polling_times: list[str]         # 盘中轮询时间
     final_signal_time: str           # 终盘信号时间
-    update_time_after_close: str     # 收盘后更新时间
+    update_time_after_close: str     # 收盘后更新时间 (16:30)
+    daily_update_max_retries: int   # 日更新失败重试次数
+    daily_update_retry_interval_seconds: int  # 重试间隔秒数
     market_fetch_retry_times: int    # 行情拉取重试次数
     market_fetch_retry_interval_seconds: int
     notify_retry_times: int
@@ -1196,7 +1198,9 @@ app:
     - "10:00"  - "10:30"  - "11:00"  - "11:30"
     - "13:00"  - "13:30"  - "14:00"  - "14:30"
   final_signal_time: "14:45"                   # 终盘前信号时间
-  update_time_after_close: "15:30"             # 收盘后更新时间
+  update_time_after_close: "16:30"             # 收盘后更新时间
+  daily_update_max_retries: 2                  # 日更新失败最大重试次数
+  daily_update_retry_interval_seconds: 5       # 重试间隔
   market_fetch_retry_times: 3                  # 行情拉取重试次数
   market_fetch_retry_interval_seconds: 20      # 重试间隔
   notify_retry_times: 2                        # 通知重试

@@ -34,6 +34,99 @@ def _number(value: object) -> float | None:
     return result if isfinite(result) else None
 
 
+def _detect_trend_phase(
+    trend_scores: list[float | None],
+    trend_ma5: list[float | None],
+    closes: list[float | None],
+    dates: list[str],
+) -> dict:
+    """Detect the current trend phase and its start date.
+
+    Uses the last bar's trend_score and MA5 to determine the current
+    phase ("start" / "end"), then walks backwards to find the transition
+    bar where this phase began.  Returns None if the current bar is in
+    neither state.
+
+    - 趋势启动 (start): trend_score >= 5  AND  trend_ma5 >= 0
+    - 趋势结束 (end):   trend_score <= 5  AND  trend_ma5 <= 0
+
+    Returns a dict with keys:
+      phase: "start" | "end" | None
+      days:  int (the transition bar is day 1)
+      change_pct: float (transition close → latest close % change)
+      signal_date: str (ISO date of the transition bar)
+    """
+    default: dict = {
+        "phase": None,
+        "days": None,
+        "change_pct": None,
+        "signal_date": None,
+    }
+    n = len(trend_scores)
+    if n < 5:
+        return default
+
+    # Scan backwards from the latest bar to find the most recent signal.
+    # Skip bars that are NEITHER (don't satisfy either condition).
+    latest_idx = n - 1
+    phase = None
+    scan_idx = -1
+    for i in range(n - 1, 3, -1):
+        ts = trend_scores[i]
+        ma5 = trend_ma5[i]
+        if ts is None or ma5 is None:
+            continue
+        if ts >= 5 and ma5 >= 0:
+            phase = "start"
+            scan_idx = i
+            break
+        if ts <= 5 and ma5 <= 0:
+            phase = "end"
+            scan_idx = i
+            break
+    if phase is None:
+        return default  # no signal found at all
+
+    latest_close = closes[latest_idx] if latest_idx < len(closes) else None
+    if latest_close is None or latest_close <= 0:
+        return default
+
+    # Walk backwards from scan_idx to find where this phase started
+    # (the transition point — first bar where the condition became true).
+    signal_idx = scan_idx
+    for j in range(scan_idx - 1, 3, -1):
+        prev_ts = trend_scores[j]
+        prev_ma5 = trend_ma5[j]
+        if prev_ts is None or prev_ma5 is None:
+            break
+        if phase == "start":
+            if prev_ts >= 5 and prev_ma5 >= 0:
+                signal_idx = j  # still in same phase — move start earlier
+            else:
+                break  # phase started at signal_idx
+        else:  # phase == "end"
+            if prev_ts <= 5 and prev_ma5 <= 0:
+                signal_idx = j
+            else:
+                break
+
+    signal_close = closes[signal_idx] if signal_idx < len(closes) else None
+    if signal_close is None or signal_close <= 0:
+        return default
+
+    # Days: transition bar is day 1, counted to the latest bar.
+    days = latest_idx - signal_idx + 1
+    change_pct = round((latest_close / signal_close - 1.0) * 100.0, 2)
+    signal_date = dates[signal_idx] if signal_idx < len(dates) else None
+
+    return {
+        "phase": phase,
+        "days": days,
+        "change_pct": change_pct,
+        "signal_date": signal_date,
+    }
+
+
 def build_synthetic_bar(quote: dict, prev_volume: float) -> dict:
     """Build a single synthetic daily bar from a real-time quote.
 
@@ -253,6 +346,43 @@ def build_intraday_dashboard(
             failed.append(symbol)
             continue
 
+        # --- Compute trend history for phase detection -----------------
+        # Late import to avoid circular dependency (market_view → intraday_service).
+        from app.routers.market_view import compute_trend_indicator  # noqa: PLC0415
+
+        trend_result = compute_trend_indicator(hist, trend_config)
+        hist_trend_scores = trend_result.get("score", [])
+        hist_closes = [_number(v) for v in hist["close"]]
+        hist_dates = [pd.Timestamp(v).date().isoformat() for v in hist["time"]]
+
+        # For intraday, extend the historical series with the intraday
+        # snapshot so the current phase is determined by the live trend
+        # score, not yesterday's.
+        intraday_ts = result["trend_score"]
+        intraday_price = _number(quote.get("price")) or 0.0
+        extended_scores = list(hist_trend_scores) + [intraday_ts]
+        extended_ma5 = _ma5(extended_scores)
+        extended_closes = list(hist_closes) + [intraday_price]
+        extended_dates = list(hist_dates) + [datetime.now().date().isoformat()]
+
+        phase_info = _detect_trend_phase(
+            extended_scores, extended_ma5,
+            extended_closes, extended_dates,
+        )
+        # Override change_pct with intraday price if phase detected.
+        if phase_info["phase"] is not None and intraday_price > 0:
+            # Re-lookup signal close from original hist_closes.
+            sig_date = phase_info["signal_date"]
+            signal_idx = None
+            for i in range(len(hist_dates) - 1, -1, -1):
+                if hist_dates[i] == sig_date:
+                    signal_idx = i
+                    break
+            if signal_idx is not None and signal_idx < len(hist_closes):
+                sig_close = hist_closes[signal_idx]
+                if sig_close and sig_close > 0:
+                    phase_info["change_pct"] = round((intraday_price / sig_close - 1.0) * 100.0, 2)
+
         name = str(meta.get("name") or name_map.get(symbol, "")).strip()
         instrument_rows.append(
             {
@@ -278,6 +408,10 @@ def build_intraday_dashboard(
                 "priority_l3": int(meta.get("priority_l3") or 9999),
                 "sort_order": int(meta.get("sort_order") or 999999),
                 "is_intraday": True,
+                "trend_phase": phase_info["phase"],
+                "trend_phase_days": phase_info["days"],
+                "trend_phase_change_pct": phase_info["change_pct"],
+                "trend_phase_signal_date": phase_info["signal_date"],
             }
         )
 
@@ -337,7 +471,7 @@ def build_intraday_dashboard(
         }
 
     # ---- helpers for aggregation ----
-    def _metrics_summary_intra(rows_df: pd.DataFrame, meta: dict) -> dict | None:
+    def _metrics_summary_intra(rows_df: pd.DataFrame, meta: dict, *, is_instrument: bool = False) -> dict | None:
         if rows_df.empty:
             return None
         trend_vals: list[float] = []
@@ -356,7 +490,7 @@ def build_intraday_dashboard(
         avg_60d = float(rows_df["return_60d"].mean()) if "return_60d" in rows_df else 0.0
         total_amount = float(rows_df["amount"].sum()) if "amount" in rows_df else 0.0
 
-        return {
+        result = {
             "member_count": int(meta.get("member_count", len(rows_df))),
             "trend_score": avg_trend,
             "trend_ma5": avg_trend,  # simplified: single snapshot, no MA5 history
@@ -374,12 +508,27 @@ def build_intraday_dashboard(
             "is_intraday": True,
         }
 
+        # Pass through trend phase for instrument-level rows only.
+        if is_instrument and len(rows_df) == 1:
+            row = rows_df.iloc[0]
+            result["trend_phase"] = row.get("trend_phase")
+            result["trend_phase_days"] = _number(row.get("trend_phase_days"))
+            result["trend_phase_change_pct"] = _number(row.get("trend_phase_change_pct"))
+            result["trend_phase_signal_date"] = row.get("trend_phase_signal_date")
+        else:
+            result["trend_phase"] = None
+            result["trend_phase_days"] = None
+            result["trend_phase_change_pct"] = None
+            result["trend_phase_signal_date"] = None
+
+        return result
+
     # L2 / L3 / instrument level aggregation.
     l2_columns = ["category_l1", "category_l2"]
     l3_columns = ["category_l1", "category_l2", "category_l3"]
     inst_columns = ["category_l1", "category_l2", "category_l3", "symbol", "name"]
 
-    def _build_summaries(df: pd.DataFrame, group_cols: list[str]) -> list[dict]:
+    def _build_summaries(df: pd.DataFrame, group_cols: list[str], *, is_instrument: bool = False) -> list[dict]:
         summaries: list[dict] = []
         for key, grp in df.groupby(group_cols, sort=False):
             key_tuple_vals = tuple(str(v) for v in (_key_tuple(key)))
@@ -389,7 +538,7 @@ def build_intraday_dashboard(
                 "priority_l2": int(grp["priority_l2"].min()) if "priority_l2" in grp.columns else 9999,
                 "priority_l3": int(grp["priority_l3"].min()) if "priority_l3" in grp.columns else 9999,
             }
-            summary = _metrics_summary_intra(grp, meta_counts)
+            summary = _metrics_summary_intra(grp, meta_counts, is_instrument=is_instrument)
             if summary:
                 summary.update(dict(zip(group_cols, key_tuple_vals)))
                 summaries.append(summary)
@@ -397,7 +546,7 @@ def build_intraday_dashboard(
 
     l2_items = _build_summaries(source, l2_columns)
     l3_items = _build_summaries(source, l3_columns)
-    instruments = _build_summaries(source, inst_columns)
+    instruments = _build_summaries(source, inst_columns, is_instrument=True)
 
     # Assign strength percentiles.
     def _assign_strength(items: list[dict], scope_cols: tuple[str, ...]) -> None:

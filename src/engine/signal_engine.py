@@ -403,6 +403,10 @@ class SignalEngine:
             seen_symbols.add(symbol)
             symbols.append(symbol)
 
+        app_cfg = self._load_yaml("config/app.yaml").get("app", {})
+        max_retries = int(app_cfg.get("daily_update_max_retries", 2))
+        retry_interval = float(app_cfg.get("daily_update_retry_interval_seconds", 5))
+
         start_text = str(strategy_cfg.get("backtest_start_primary", "2015-01-01"))
         start_date = datetime.strptime(start_text, "%Y-%m-%d").date()
         payload = self.data_service.update_pool_daily(
@@ -410,6 +414,13 @@ class SignalEngine:
             start_date=start_date,
             end_date=today,
             adjust=str(strategy_cfg.get("adjust", "qfq")),
+            max_retries=max_retries,
+            retry_interval_seconds=retry_interval,
         )
-        logger.info("Daily update finished for %s symbols", len(symbols))
+        logger.info(
+            "Daily update (16:30) finished: %s success, %s failed out of %s symbols",
+            payload.get("success", 0),
+            payload.get("failed", 0),
+            payload.get("total", 0),
+        )
         return payload

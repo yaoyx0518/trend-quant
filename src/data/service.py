@@ -567,19 +567,71 @@ class DataService:
 
         return [results[symbol] for symbol in normalized_items.keys() if symbol in results]
 
-    def update_pool_daily(self, symbols: list[str], start_date: date, end_date: date, adjust: str = "qfq") -> dict:
-        results = []
+    def update_pool_daily(
+        self,
+        symbols: list[str],
+        start_date: date,
+        end_date: date,
+        adjust: str = "qfq",
+        max_retries: int = 2,
+        retry_interval_seconds: float = 5.0,
+    ) -> dict:
+        results: list[dict] = []
+        failed_symbols: list[str] = []
+
         for symbol in symbols:
-            results.append(self.ensure_daily_history(symbol, start_date, end_date, adjust=adjust))
+            result: dict | None = None
+            last_error: str | None = None
+            for attempt in range(max_retries + 1):
+                try:
+                    result = self.ensure_daily_history(symbol, start_date, end_date, adjust=adjust)
+                    break
+                except Exception as exc:
+                    last_error = str(exc)
+                    if attempt < max_retries:
+                        logger.warning(
+                            "update_pool_daily retry %s/%s for %s: %s",
+                            attempt + 1,
+                            max_retries,
+                            symbol,
+                            last_error,
+                        )
+                        time.sleep(float(retry_interval_seconds))
+            if result is None:
+                result = {"symbol": symbol, "status": "error", "error": last_error}
+                failed_symbols.append(symbol)
+            results.append(result)
+
+        success_count = sum(1 for r in results if r.get("status") not in ("error", "no_data"))
+        failed_count = len(failed_symbols)
 
         payload = {
             "ts": datetime.now().isoformat(),
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
+            "total": len(symbols),
+            "success": success_count,
+            "failed": failed_count,
+            "failed_symbols": failed_symbols,
             "results": results,
         }
         day = end_date.isoformat()
         self.runtime_store.write_json(f"advice/data_update_{day}.json", payload)
+
+        # Lightweight status file for the web notification bar.
+        self.runtime_store.write_json(
+            "daily_update_status.json",
+            {
+                "ts": datetime.now().isoformat(),
+                "date": day,
+                "total": len(symbols),
+                "success": success_count,
+                "failed": failed_count,
+                "failed_symbols": failed_symbols,
+                "completed": True,
+            },
+        )
+
         return payload
 
     def close(self) -> None:

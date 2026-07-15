@@ -15,7 +15,9 @@
     - "14:00"
     - "14:30"
   final_signal_time: "14:45"
-  update_time_after_close: "15:30"
+  update_time_after_close: "16:30"
+  daily_update_max_retries: 2
+  daily_update_retry_interval_seconds: 5
   market_fetch_retry_times: 3
   market_fetch_retry_interval_seconds: 20
   notify_retry_times: 2

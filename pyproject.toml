@@ -31,3 +31,26 @@ where = ["src"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+markers = [
+    "unit: 单元测试（快速，无 IO）",
+    "integration: 集成测试（真实类 + 隔离数据）",
+    "api: API 测试（FastAPI TestClient）",
+    "slow: 慢速测试（回测引擎全量运行等）",
+]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/__init__.py", "*/__init__.py", ".venv/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+    "class .*Protocol",
+]

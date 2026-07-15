@@ -119,3 +119,12 @@ async def overview_api(request: Request, favorite_only: bool = False) -> dict:
         "action_signals": action_signals,
         "recent_backtests": _recent_backtests(limit=40, favorite_only=favorite_only),
     }
+
+
+@router.get("/api/daily-update/status")
+async def daily_update_status() -> dict:
+    """Return the latest daily data update status for the notification bar."""
+    status = store.read_json("daily_update_status.json")
+    if not status:
+        return {"ts": None, "completed": False, "message": "暂无更新记录"}
+    return status

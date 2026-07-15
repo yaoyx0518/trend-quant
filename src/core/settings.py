@@ -17,6 +17,8 @@ class AppSettings:
     polling_times: list[str]
     final_signal_time: str
     update_time_after_close: str
+    daily_update_max_retries: int
+    daily_update_retry_interval_seconds: int
     market_fetch_retry_times: int
     market_fetch_retry_interval_seconds: int
     notify_retry_times: int
@@ -89,7 +91,9 @@ def load_settings(config_path: Path | None = None) -> Settings:
             ),
             polling_times=list(app_raw.get("polling_times", [])),
             final_signal_time=str(app_raw.get("final_signal_time", "14:45")),
-            update_time_after_close=str(app_raw.get("update_time_after_close", "15:30")),
+            update_time_after_close=str(app_raw.get("update_time_after_close", "16:30")),
+            daily_update_max_retries=int(app_raw.get("daily_update_max_retries", 2)),
+            daily_update_retry_interval_seconds=int(app_raw.get("daily_update_retry_interval_seconds", 5)),
             market_fetch_retry_times=int(app_raw.get("market_fetch_retry_times", 3)),
             market_fetch_retry_interval_seconds=int(app_raw.get("market_fetch_retry_interval_seconds", 20)),
             notify_retry_times=int(app_raw.get("notify_retry_times", 2)),

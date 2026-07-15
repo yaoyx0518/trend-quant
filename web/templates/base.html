@@ -28,8 +28,85 @@
       </nav>
     </div>
   </header>
+  <div id="dailyUpdateBar" class="daily-update-bar" role="status" aria-live="polite">
+    <span class="daily-update-bar__icon">📊</span>
+    <span class="daily-update-bar__text" id="duText"></span>
+    <span class="daily-update-bar__detail" id="duDetail" title="点击查看失败标的详情"></span>
+    <button class="daily-update-bar__close" id="duClose" title="关闭提示">&times;</button>
+  </div>
   <main>
     {% block content %}{% endblock %}
   </main>
+  <script>
+  (function() {
+    const bar = document.getElementById('dailyUpdateBar');
+    const textEl = document.getElementById('duText');
+    const detailEl = document.getElementById('duDetail');
+    const closeBtn = document.getElementById('duClose');
+    const STORAGE_KEY = 'du_last_seen_ts';
+
+    let lastSeenTs = localStorage.getItem(STORAGE_KEY) || '';
+
+    function showBar(status) {
+      if (!status || !status.completed) return;
+      if (status.ts === lastSeenTs) return;
+
+      const total = status.total || 0;
+      const success = status.success || 0;
+      const failed = status.failed || 0;
+      const failedSymbols = status.failed_symbols || [];
+
+      textEl.textContent = '盘后数据更新完成 (16:30)：成功 ' + success + ' 只';
+
+      bar.classList.remove('has-errors');
+      detailEl.style.display = 'none';
+      detailEl.textContent = '';
+
+      if (failed > 0) {
+        textEl.textContent += '，失败 ' + failed + ' 只';
+        bar.classList.add('has-errors');
+        if (failedSymbols.length > 0) {
+          detailEl.textContent = '失败标的: ' + failedSymbols.join(', ');
+          detailEl.style.display = 'inline';
+        }
+      }
+
+      bar.classList.add('is-visible');
+    }
+
+    function hideBar() {
+      bar.classList.remove('is-visible');
+      // Remember this update so it won't show again.
+      const text = textEl.textContent;
+      // Store current state as seen.
+      fetch('/api/daily-update/status')
+        .then(function(r) { return r.json(); })
+        .then(function(s) {
+          if (s && s.ts) {
+            localStorage.setItem(STORAGE_KEY, s.ts);
+            lastSeenTs = s.ts;
+          }
+        })
+        .catch(function() {});
+    }
+
+    function poll() {
+      fetch('/api/daily-update/status')
+        .then(function(r) { return r.json(); })
+        .then(function(status) {
+          if (status && status.completed && status.ts && status.ts !== lastSeenTs) {
+            showBar(status);
+          }
+        })
+        .catch(function() {});
+    }
+
+    closeBtn.addEventListener('click', hideBar);
+
+    // Poll every 30 seconds; also check once on page load.
+    poll();
+    setInterval(poll, 30000);
+  })();
+  </script>
 </body>
 </html>

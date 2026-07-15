@@ -278,8 +278,8 @@ logs/
 
 - 运行参数：host/port/timezone
 - 数据源配置：`data_provider_priority` 当前只应配置 `tickflow`
-- 调度时点：`polling_times`、`final_signal_time`、`update_time_after_close`
-- 重试参数：行情拉取与通知重试
+- 调度时点：`polling_times`、`final_signal_time`、`update_time_after_close`（16:30 收盘后数据更新）
+- 重试参数：`daily_update_max_retries`（日更新失败重试次数）、行情拉取与通知重试
 - 交易整手：`lot_size`
 
 ### 8.2 `config/instruments.yaml`
