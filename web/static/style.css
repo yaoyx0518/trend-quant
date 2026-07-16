@@ -601,7 +601,7 @@ button:disabled {
   display: grid;
   grid-template-columns: 220px minmax(360px, 1fr) auto auto auto;
   gap: 12px;
-  align-items: center;
+  align-items: start;
   margin: 12px 0 16px;
   padding: 12px;
   border: 1px solid rgba(20, 41, 51, 0.08);
@@ -639,10 +639,10 @@ button:disabled {
   white-space: nowrap;
 }
 
-.market-backtest-bar label:has(#mvBacktestStrategy) {
+.market-backtest-bar label:has(.multi-select-dropdown) {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
-  align-items: center;
+  align-items: start;
   width: 100%;
 }
 
@@ -654,7 +654,7 @@ button:disabled {
   width: 260px;
 }
 
-#mvBacktestStrategy {
+.multi-select-dropdown {
   width: 100%;
   min-width: 0;
 }
@@ -795,43 +795,162 @@ button:disabled {
   font-variant-numeric: tabular-nums;
 }
 
-.market-backtest-summary {
-  display: flex;
-  gap: 1px;
-  align-items: stretch;
+/* --- Multi-select dropdown with checkboxes --- */
+.multi-select-dropdown {
+  display: inline-block;
+  min-width: 160px;
   width: 100%;
+}
+
+.multi-select-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid rgba(20, 41, 51, 0.18);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--text);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s;
+}
+
+.multi-select-trigger:hover,
+.multi-select-trigger.multi-select-open {
+  border-color: var(--accent);
+}
+
+.multi-select-trigger span:first-child {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.multi-select-arrow {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted);
+  transition: transform 0.2s;
+}
+
+.multi-select-open .multi-select-arrow {
+  transform: rotate(180deg);
+}
+
+.multi-select-panel {
+  position: fixed;
+  z-index: 9999;
+  max-height: 280px;
+  overflow-y: auto;
+  border: 1px solid rgba(20, 41, 51, 0.12);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.99);
+  box-shadow: 0 8px 28px rgba(17, 35, 42, 0.22);
+}
+
+.multi-select-panel[hidden] {
+  display: none;
+}
+
+.multi-select-list {
+  padding: 4px 0;
+}
+
+.multi-select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--text);
+  white-space: nowrap;
+}
+
+.multi-select-option:hover {
+  background: rgba(20, 41, 51, 0.04);
+}
+
+.multi-select-option input[type="checkbox"] {
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.multi-select-empty {
+  padding: 10px 14px;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.market-backtest-summary {
   margin: 0;
   overflow-x: auto;
   border: 1px solid rgba(20, 41, 51, 0.08);
   border-radius: 8px;
-  background: rgba(229, 238, 233, 0.74);
 }
 
 .market-backtest-summary[hidden] {
   display: none;
 }
 
-.market-backtest-summary div {
-  flex: 1 0 112px;
-  min-width: 112px;
-  padding: 8px 11px;
-  background: rgba(255, 255, 255, 0.78);
+.backtest-metrics-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
 }
 
-.market-backtest-summary span {
-  display: block;
-  margin-bottom: 3px;
+.backtest-metrics-table th,
+.backtest-metrics-table td {
+  padding: 8px 12px;
+  text-align: right;
+  white-space: nowrap;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.backtest-metrics-table thead th {
+  background: rgba(20, 41, 51, 0.04);
   color: var(--muted);
   font-size: 11px;
   font-weight: 800;
 }
 
-.market-backtest-summary strong {
-  display: block;
+.backtest-metrics-table thead th:first-child {
+  text-align: center;
+}
+
+.backtest-metrics-table tbody th {
+  text-align: center;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(20, 41, 51, 0.03);
+  min-width: 64px;
+}
+
+.backtest-metrics-table tbody td {
+  font-size: 15px;
+  font-weight: 700;
   color: var(--text);
-  font-size: 16px;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.15;
+}
+
+.backtest-metrics-table tbody tr[data-strategy-id] {
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.backtest-metrics-table tbody tr[data-strategy-id]:hover {
+  background: rgba(20, 41, 51, 0.04);
+}
+
+.backtest-metrics-table tbody tr[data-strategy-id].active th,
+.backtest-metrics-table tbody tr[data-strategy-id].active td {
+  background: rgba(13, 122, 113, 0.08);
+  box-shadow: inset 3px 0 0 var(--accent);
 }
 
 .market-price-chart {
@@ -2024,14 +2143,14 @@ button:disabled {
   .market-toolbar label,
   .market-backtest-bar label,
   #mvSymbolInput,
-  #mvBacktestStrategy,
+  .multi-select-dropdown,
   #mvStartDate,
   #mvEndDate {
     width: 100%;
     min-width: 0;
   }
 
-  .market-backtest-bar label:has(#mvBacktestStrategy),
+  .market-backtest-bar label:has(.multi-select-dropdown),
   .market-backtest-bar label:has(#mvStartDate),
   .market-backtest-bar label:has(#mvEndDate) {
     width: 100%;

@@ -18,7 +18,12 @@
       <strong id="mvBacktestRangeLabel">选择策略与区间</strong>
     </div>
     <label>策略
-      <select id="mvBacktestStrategy"></select>
+      <div class="multi-select-dropdown" id="mvBacktestStrategyDropdown">
+        <button id="mvBacktestStrategyBtn" type="button" class="multi-select-trigger">
+          <span id="mvBacktestStrategyLabel">选择策略</span>
+          <span class="multi-select-arrow">▾</span>
+        </button>
+      </div>
     </label>
     <label>开始日期
       <input id="mvStartDate" type="date">
@@ -131,7 +136,20 @@
   const symbolSearchEl = document.getElementById('mvSymbolSearch');
   const symbolOptionsEl = document.getElementById('mvSymbolOptions');
   const symbolInputEl = document.getElementById('mvSymbolInput');
-  const backtestStrategyEl = document.getElementById('mvBacktestStrategy');
+  const backtestStrategyDropdownEl = document.getElementById('mvBacktestStrategyDropdown');
+  const backtestStrategyBtnEl = document.getElementById('mvBacktestStrategyBtn');
+  const backtestStrategyLabelEl = document.getElementById('mvBacktestStrategyLabel');
+
+  // Strategy dropdown panel — lives on <body> to escape all parent clipping
+  const backtestStrategyPanelEl = document.createElement('div');
+  backtestStrategyPanelEl.id = 'mvBacktestStrategyPanel';
+  backtestStrategyPanelEl.className = 'multi-select-panel';
+  backtestStrategyPanelEl.hidden = true;
+  const backtestStrategyListEl = document.createElement('div');
+  backtestStrategyListEl.id = 'mvBacktestStrategyList';
+  backtestStrategyListEl.className = 'multi-select-list';
+  backtestStrategyPanelEl.appendChild(backtestStrategyListEl);
+  document.body.appendChild(backtestStrategyPanelEl);
   const backtestStartEl = document.getElementById('mvStartDate');
   const backtestEndEl = document.getElementById('mvEndDate');
   const runBacktestBtnEl = document.getElementById('mvRunBacktestBtn');
@@ -190,6 +208,8 @@
   let currentZoom = null;
   let currentPayload = null;
   let currentBacktest = null;
+  let allMultiKline = [];        // [{strategy_id, strategy_name, buy_points, sell_points}]
+  let activeStrategyId = null;   // which strategy's markers are shown on chart
   let allSymbols = [];
   let ruleMeta = { strategies: [] };
   let backtestProgressTimer = null;
@@ -500,14 +520,24 @@
     const indicators = payload.indicators || {};
     currentCandles = candles;
     const overlays = mainOverlaySeries(indicators);
-    const klineBacktest = currentBacktest?.charts?.kline || {};
-    const backtestSeries = currentBacktest
-      ? [
-        tradeSeries(klineBacktest.buy_points, '买入', '#2563eb', 'pin'),
-        tradeSeries(klineBacktest.sell_points, '卖出', '#f59e0b', 'pin'),
-      ]
-      : [];
+
+    // Build trade-marker series — only the active strategy, simple names "买"/"卖"
+    let backtestSeries = [];
+    if (activeStrategyId) {
+      const activeKline = allMultiKline.find(sk => sk.strategy_id === activeStrategyId);
+      if (activeKline) {
+        backtestSeries = [
+          tradeSeries(activeKline.buy_points || [], '买', '#2563eb', 'pin'),
+          tradeSeries(activeKline.sell_points || [], '卖', '#f59e0b', 'diamond'),
+        ];
+      }
+    }
+
     const range = computeLogPriceRange(candles, zoom);
+
+    // Legend: only overlays (MA/BOLL); strategy markers NOT in legend
+    const legendData = ['K', ...overlays.map(s => s.name)];
+
     priceChart.setOption({
       animation: false,
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
@@ -537,15 +567,11 @@
         },
       },
       legend: {
-        data: ['K', ...overlays.map((item) => item.name), ...backtestSeries.map((item) => item.name)],
+        data: legendData,
         top: 4,
         selected: {
-          MA60: false,
-          MA120: false,
-          MA200: false,
-          BOLL上轨: false,
-          BOLL中轨: false,
-          BOLL下轨: false,
+          MA60: false, MA120: false, MA200: false,
+          BOLL上轨: false, BOLL中轨: false, BOLL下轨: false,
         },
       },
       grid: { left: 62, right: 28, top: 42, bottom: 54 },
@@ -775,26 +801,91 @@
     }, true);
   }
 
-  function renderBacktestSummary(result) {
-    const s = result?.summary || {};
-    const cards = [
-      ['总收益', pct(s.total_return), 'return'],
-      ['年化收益', pct(s.annual_return), 'return'],
-      ['最大回撤', pct(s.max_drawdown), 'risk'],
-      ['夏普', num(s.sharpe, 3), 'score'],
-      ['卡玛比', num(s.calmar, 3), 'score'],
-      ['胜率', pct(s.win_rate), 'score'],
-      ['盈亏比', num(s.profit_factor, 2), 'score'],
-      ['交易数', String(s.trade_count || 0), 'neutral'],
+  function metricRowCells(summary, isBenchmark) {
+    const s = summary || {};
+    const metrics = [
+      ['return', pct(s.total_return)],
+      ['return', pct(s.annual_return)],
+      ['risk',   pct(s.max_drawdown)],
+      ['score',  num(s.sharpe, 3)],
+      ['score',  num(s.calmar, 3)],
+      ['score',  isBenchmark ? '—' : pct(s.win_rate)],
+      ['score',  isBenchmark ? '—' : num(s.profit_factor, 2)],
+      ['neutral', String(s.trade_count || 0)],
     ];
-    backtestSummaryEl.hidden = false;
-    backtestSummaryEl.innerHTML = cards.map(([label, value, tone]) => {
+    return metrics.map(([tone, value]) => {
       const n = Number(String(value).replace('%', ''));
       const cls = tone === 'risk'
         ? 'metric-risk'
         : (tone !== 'neutral' && Number.isFinite(n) && n > 0 ? 'metric-positive' : '');
-      return `<div><span>${esc(label)}</span><strong class="${cls}">${esc(value)}</strong></div>`;
+      return `<td class="${cls}">${esc(value)}</td>`;
     }).join('');
+  }
+
+  function strategyLabel(result) {
+    const name = (ruleMeta.strategies || []).find(s => s.id === result.strategy_id)?.name;
+    return name || result.strategy_id || '-';
+  }
+
+  function selectChartStrategy(strategyId) {
+    if (activeStrategyId === strategyId) {
+      activeStrategyId = null;
+    } else {
+      activeStrategyId = strategyId;
+    }
+    // Re-render chart with updated markers, preserving current zoom
+    if (currentPayload) {
+      renderPrice(currentPayload, currentZoom);
+    }
+    // Update trades table to show active strategy's trades
+    if (currentBacktest) {
+      renderBacktestTrades(currentBacktest);
+    }
+    // Update row highlights
+    for (const row of backtestSummaryEl.querySelectorAll('tr[data-strategy-id]')) {
+      row.classList.toggle('active', row.dataset.strategyId === activeStrategyId);
+    }
+  }
+
+  function renderBacktestSummary(result) {
+    const results = result?.results || [];
+    // Fallback for single-result backward compat
+    const strategyRows = results.length
+      ? results.map(r => {
+          const sid = esc(r.strategy_id || '');
+          return `<tr data-strategy-id="${sid}" class="${activeStrategyId === r.strategy_id ? 'active' : ''}"><th>${esc(strategyLabel(r))}</th>${metricRowCells(r.summary, false)}</tr>`;
+        }).join('')
+      : (result?.summary ? `<tr><th>${esc(result.strategy_id || '策略')}</th>${metricRowCells(result.summary, false)}</tr>` : '');
+    const bench = result?.benchmark_summary || {};
+    backtestSummaryEl.hidden = false;
+    backtestSummaryEl.innerHTML = `
+      <table class="backtest-metrics-table">
+        <thead>
+          <tr>
+            <th></th>
+            <th>总收益</th>
+            <th>年化收益</th>
+            <th>最大回撤</th>
+            <th>夏普</th>
+            <th>卡玛比</th>
+            <th>胜率</th>
+            <th>盈亏比</th>
+            <th>交易数</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${strategyRows}
+          <tr><th>买入持有</th>${metricRowCells(bench, true)}</tr>
+        </tbody>
+      </table>
+    `;
+    // Attach click handlers to strategy rows
+    for (const row of backtestSummaryEl.querySelectorAll('tr[data-strategy-id]')) {
+      row.style.cursor = 'pointer';
+      row.addEventListener('click', () => {
+        selectChartStrategy(row.dataset.strategyId);
+      });
+    }
   }
 
   function tradePnlCell(trade) {
@@ -854,10 +945,17 @@
   }
 
   function renderBacktestTrades(result) {
-    const trades = attachHoldingDays(result?.trades || [])
+    // Use trades from the active strategy if available, otherwise first result
+    let tradesSource = result;
+    if (activeStrategyId && result?.results) {
+      const active = result.results.find(r => r.strategy_id === activeStrategyId);
+      if (active) tradesSource = active;
+    }
+    const trades = attachHoldingDays(tradesSource?.trades || [])
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+    const strategyName = tradesSource?.strategy_name || strategyLabel(tradesSource) || '';
     tradeMetaEl.textContent = trades.length
-      ? `${result.strategy_id || ''} | ${result.start_date || '-'} ~ ${result.end_date || '-'} | ${trades.length} 笔`
+      ? `${strategyName ? esc(strategyName) + ' | ' : ''}${tradesSource.start_date || '-'} ~ ${tradesSource.end_date || '-'} | ${trades.length} 笔`
       : '本次回测无交易。';
     tradesBodyEl.innerHTML = trades.length ? trades.map((t) => `
       <tr>
@@ -883,6 +981,17 @@
 
   function renderBacktestResult(result) {
     currentBacktest = result;
+    allMultiKline = result?.multi_kline || [];
+    // If only one strategy, create a synthetic multi_kline entry from the single result
+    if (!allMultiKline.length && result?.charts?.kline) {
+      allMultiKline = [{
+        strategy_id: result.strategy_id || '',
+        strategy_name: strategyLabel({ strategy_id: result.strategy_id }) || result.strategy_id || '',
+        buy_points: result.charts.kline.buy_points || [],
+        sell_points: result.charts.kline.sell_points || [],
+      }];
+    }
+    activeStrategyId = null;
     renderBacktestSummary(result);
     renderBacktestTrades(result);
     renderBacktestDebug(result);
@@ -984,15 +1093,40 @@
     await loadDaily(allSymbols[0].symbol);
   }
 
+  function selectedStrategyIds() {
+    return [...backtestStrategyListEl.querySelectorAll('input[type="checkbox"]:checked')]
+      .map(cb => cb.value)
+      .filter(Boolean);
+  }
+
+  function updateStrategyDropdownLabel() {
+    const ids = selectedStrategyIds();
+    const strategies = (ruleMeta.strategies || []).filter(s => s.valid);
+    if (!ids.length) {
+      backtestStrategyLabelEl.textContent = '选择策略';
+    } else if (ids.length === 1) {
+      const found = strategies.find(s => s.id === ids[0]);
+      backtestStrategyLabelEl.textContent = found ? (found.name || found.id) : ids[0];
+    } else {
+      backtestStrategyLabelEl.textContent = `已选 ${ids.length} 个策略`;
+    }
+  }
+
   async function loadRuleMeta() {
     const resp = await fetch('/rule-backtest/api/meta');
     const data = await resp.json();
     if (!resp.ok) throw new Error(data.detail || '策略列表加载失败');
     ruleMeta = data || { strategies: [] };
     const strategies = (ruleMeta.strategies || []).filter((item) => item.valid);
-    backtestStrategyEl.innerHTML = strategies.length
-      ? strategies.map((item) => `<option value="${esc(item.id)}">${esc(item.name || item.id)}</option>`).join('')
-      : '<option value="">暂无可用策略</option>';
+    backtestStrategyListEl.innerHTML = strategies.length
+      ? strategies.map((item) => `
+        <label class="multi-select-option">
+          <input type="checkbox" value="${esc(item.id)}" ${strategies.length === 1 ? 'checked' : ''}>
+          <span>${esc(item.name || item.id)}</span>
+        </label>
+      `).join('')
+      : '<div class="multi-select-empty">暂无可用策略</div>';
+    updateStrategyDropdownLabel();
     runBacktestBtnEl.disabled = !strategies.length;
   }
 
@@ -1049,8 +1183,8 @@
 
   async function runRuleBacktest() {
     const symbol = selectedSymbol();
-    const strategyId = backtestStrategyEl.value;
-    if (!symbol || !strategyId) return;
+    const strategyIds = selectedStrategyIds();
+    if (!symbol || !strategyIds.length) return;
     runBacktestBtnEl.disabled = true;
     runBacktestBtnEl.textContent = '回测中';
     startBacktestProgress();
@@ -1060,7 +1194,7 @@
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          strategy_id: strategyId,
+          strategy_ids: strategyIds,
           symbol,
           start_date: backtestStartEl.value,
           end_date: backtestEndEl.value,
@@ -1090,10 +1224,37 @@
       chart.on('dataZoom', updatePriceYAxis);
     }
   } catch (err) {
-    // charts not initialized – dataZoom listeners skipped
+    // charts not initialized – listeners skipped
   }
   refreshBtnEl.addEventListener('click', () => loadDaily());
   runBacktestBtnEl.addEventListener('click', runRuleBacktest);
+
+  // --- Strategy dropdown (checkbox panel) ---
+  backtestStrategyBtnEl.addEventListener('click', (event) => {
+    event.stopPropagation();
+    if (backtestStrategyPanelEl.hidden) {
+      const rect = backtestStrategyBtnEl.getBoundingClientRect();
+      backtestStrategyPanelEl.style.top = (rect.bottom + 4) + 'px';
+      backtestStrategyPanelEl.style.left = rect.left + 'px';
+      backtestStrategyPanelEl.style.minWidth = rect.width + 'px';
+      backtestStrategyPanelEl.hidden = false;
+      backtestStrategyBtnEl.classList.add('multi-select-open');
+    } else {
+      backtestStrategyPanelEl.hidden = true;
+      backtestStrategyBtnEl.classList.remove('multi-select-open');
+    }
+  });
+
+  backtestStrategyListEl.addEventListener('change', () => {
+    updateStrategyDropdownLabel();
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!backtestStrategyPanelEl.contains(event.target) && !backtestStrategyDropdownEl.contains(event.target)) {
+      backtestStrategyPanelEl.hidden = true;
+      backtestStrategyBtnEl.classList.remove('multi-select-open');
+    }
+  });
   backtestStartEl.addEventListener('change', updateBacktestRangeLabel);
   backtestEndEl.addEventListener('change', updateBacktestRangeLabel);
   trendControlsEl.addEventListener('submit', (event) => {

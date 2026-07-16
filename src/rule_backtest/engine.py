@@ -171,6 +171,8 @@ class SingleSymbolAllInBacktestEngine:
             initial_capital=execution.initial_capital,
             lot_size=execution.lot_size,
         )
+        benchmark_nav = benchmark.get("series", [])
+        benchmark_summary = compute_summary(daily_nav=benchmark_nav, trades=[], turnover_total=0.0)
         kline_payload = self._build_kline_payload(bars=bars, trades=trades)
 
         return {
@@ -191,6 +193,7 @@ class SingleSymbolAllInBacktestEngine:
             "annual_returns": annual_returns(daily_nav),
             "monthly_returns": monthly_returns(daily_nav),
             "benchmark": benchmark,
+            "benchmark_summary": benchmark_summary,
             "charts": {
                 "dates": [row["date"] for row in daily_nav],
                 "nav": [row["equity"] for row in daily_nav],

@@ -16,7 +16,7 @@ service = RuleBacktestService()
 
 
 class RuleBacktestRunRequest(BaseModel):
-    strategy_id: str
+    strategy_ids: list[str] = Field(default_factory=list)
     symbol: str
     start_date: str = Field(default="")
     end_date: str = Field(default="")

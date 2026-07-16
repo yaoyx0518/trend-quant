@@ -68,14 +68,13 @@ class RuleBacktestService:
         return rows
 
     def run(self, payload: dict) -> dict:
-        strategy_id = str(payload.get("strategy_id", "")).strip()
+        strategy_ids = self._normalize_strategy_ids(payload)
         symbol = str(payload.get("symbol", "")).strip().upper()
-        if not strategy_id:
-            raise ValueError("strategy_id is required")
+        if not strategy_ids:
+            raise ValueError("strategy_ids is required")
         if not symbol:
             raise ValueError("symbol is required")
 
-        strategy = self.strategy_loader.load(strategy_id)
         start_date = self._parse_date(payload.get("start_date"))
         end_date = self._parse_date(payload.get("end_date"))
         if start_date is not None and end_date is not None and start_date > end_date:
@@ -104,16 +103,64 @@ class RuleBacktestService:
             stock_stamp_tax_rate=float(payload.get("stock_stamp_tax_rate", 0.001) or 0.001),
             debug_log_enabled=self._parse_debug_flag(payload.get("debug_log_enabled")),
         )
-        request = RuleBacktestRequest(
-            strategy=strategy,
-            symbol=symbol,
-            bars=bars,
-            start_date=start_date,
-            end_date=end_date,
-            execution=execution,
-            run_id=datetime.now().strftime("%Y%m%d%H%M%S%f"),
-        )
-        return self.engine.run(request)
+
+        results: list[dict] = []
+        debug_enabled_for_first = False
+        for sid in strategy_ids:
+            strategy = self.strategy_loader.load(sid)
+            request = RuleBacktestRequest(
+                strategy=strategy,
+                symbol=symbol,
+                bars=bars,
+                start_date=start_date,
+                end_date=end_date,
+                execution=execution,
+                run_id=datetime.now().strftime("%Y%m%d%H%M%S%f"),
+            )
+            result = self.engine.run(request)
+            result["strategy_name"] = str(strategy.get("name", "") or sid)
+            results.append(result)
+            if not debug_enabled_for_first and result.get("debug_log"):
+                debug_enabled_for_first = True
+
+        if not results:
+            raise ValueError("no strategy results produced")
+
+        multi_kline = []
+        for r in results:
+            kline = r.get("charts", {}).get("kline", {})
+            multi_kline.append({
+                "strategy_id": r.get("strategy_id", ""),
+                "strategy_name": r.get("strategy_name", ""),
+                "buy_points": kline.get("buy_points", []),
+                "sell_points": kline.get("sell_points", []),
+            })
+
+        first = results[0]
+        return {
+            "results": results,
+            "benchmark_summary": first.get("benchmark_summary", {}),
+            "multi_kline": multi_kline,
+            # backward-compat: first result's fields for charts / trades / debug
+            "status": first.get("status", "ok"),
+            "run_id": first.get("run_id", ""),
+            "strategy_id": first.get("strategy_id", ""),
+            "symbol": symbol,
+            "start_date": first.get("start_date"),
+            "end_date": first.get("end_date"),
+            "initial_capital": float(execution.initial_capital),
+            "final_equity": first.get("final_equity"),
+            "summary": first.get("summary", {}),
+            "trades": first.get("trades", []),
+            "daily_nav": first.get("daily_nav", []),
+            "condition_trace": first.get("condition_trace", []),
+            "debug_log": first.get("debug_log", []),
+            "drawdown": first.get("drawdown", []),
+            "annual_returns": first.get("annual_returns", []),
+            "monthly_returns": first.get("monthly_returns", []),
+            "benchmark": first.get("benchmark", {}),
+            "charts": first.get("charts", {}),
+        }
 
     @staticmethod
     def _parse_date(value: object) -> date | None:
@@ -121,6 +168,17 @@ class RuleBacktestService:
         if not text:
             return None
         return datetime.strptime(text, "%Y-%m-%d").date()
+
+    @staticmethod
+    def _normalize_strategy_ids(payload: dict) -> list[str]:
+        ids = payload.get("strategy_ids", [])
+        if isinstance(ids, str):
+            ids = [ids]
+        # backward compat: single strategy_id field
+        single = str(payload.get("strategy_id", "") or "").strip()
+        if single and single not in ids:
+            ids = list(ids) + [single]
+        return [s for s in ids if s]
 
     @staticmethod
     def _filter_bars(bars: pd.DataFrame, start_date: date | None, end_date: date | None) -> pd.DataFrame:

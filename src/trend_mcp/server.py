@@ -36,7 +36,10 @@ from strategy.trend_score_core import safe_float
 # Server instance
 # ---------------------------------------------------------------------------
 
-mcp = FastMCP("trend-quant")
+mcp = FastMCP(
+    "trend-quant",
+    transport_security={"enable_dns_rebinding_protection": False},
+)
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +85,13 @@ def _category_path(meta: dict | None) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Dashboard cache (same strategy as subject_market.py)
+# ---------------------------------------------------------------------------
+
+_dashboard_cache: tuple[tuple[str, int, str], dict] | None = None
+
+
+# ---------------------------------------------------------------------------
 # Tool 1 -- trend_dashboard
 # ---------------------------------------------------------------------------
 
@@ -98,8 +108,14 @@ def trend_dashboard() -> dict:
     - 趋势相位检测 (上升 / 下降 / 震荡)
     - 历史趋势值 MA5 序列 (trend_history)
     """
+    global _dashboard_cache
     db = get_db()
-    return build_subject_dashboard_payload(db)
+    revision = db.get_market_dashboard_revision()
+    if _dashboard_cache is not None and _dashboard_cache[0] == revision:
+        return _dashboard_cache[1]
+    payload = build_subject_dashboard_payload(db)
+    _dashboard_cache = (revision, payload)
+    return payload
 
 
 # ---------------------------------------------------------------------------
