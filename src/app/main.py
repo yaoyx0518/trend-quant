@@ -123,3 +123,12 @@ app.include_router(logs.router)
 app.include_router(instruments.router)
 app.include_router(market_view.router)
 app.include_router(subject_market.router)
+
+# ── MCP SSE endpoint (optional, requires `mcp` package) ──────────────
+try:
+    from trend_mcp.server import mcp as _mcp_app
+
+    app.mount("/mcp", _mcp_app.sse_app(mount_path="/mcp"))
+    logger.info("MCP SSE endpoint mounted at /mcp/sse")
+except ImportError:
+    logger.info("MCP package not installed – skipping /mcp endpoint")

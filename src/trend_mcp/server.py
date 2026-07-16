@@ -1,0 +1,351 @@
+"""MCP server for trend-quant.
+
+Exposes 4 tools to external agents via MCP SSE transport:
+
+1. **trend_dashboard** -- 标的看板: multi-symbol trend dashboard grouped by
+   three-level category hierarchy.
+2. **symbol_detail** -- 标的查看: historical OHLCV + full indicator suite for
+   a single symbol.
+3. **calc_stop_loss** -- 辅助计算: hard-stop and chandelier-stop prices for
+   a given buy entry.
+4. **list_instruments** -- 标的列表: searchable / filterable instrument
+   catalogue.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pandas as pd
+import yaml
+from mcp.server.fastmcp import FastMCP
+
+from app.instrument_display import format_symbol_display
+from app.routers.market_view import (
+    _config_name_map,
+    _normalize_symbol,
+    _trend_config,
+    compute_market_indicators,
+)
+from app.routers.subject_market import build_subject_dashboard_payload
+from data.storage.db import get_db
+from strategy.indicators import atr
+from strategy.trend_score_core import safe_float
+
+# ---------------------------------------------------------------------------
+# Server instance
+# ---------------------------------------------------------------------------
+
+mcp = FastMCP("trend-quant")
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _load_yaml(path: str) -> dict:
+    p = Path(path)
+    if not p.exists():
+        return {}
+    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+
+
+def _load_strategy_config() -> dict:
+    payload = _load_yaml("config/strategy.yaml")
+    cfg = payload.get("strategy", {}) if isinstance(payload, dict) else {}
+    return dict(cfg) if isinstance(cfg, dict) else {}
+
+
+def _load_instruments_raw() -> list[dict]:
+    payload = _load_yaml("config/instruments.yaml")
+    instruments = payload.get("instruments", []) if isinstance(payload, dict) else []
+    return [dict(item) for item in instruments if isinstance(item, dict)]
+
+
+def _instrument_metadata_map(instruments: list[dict]) -> dict[str, dict]:
+    return {
+        str(item.get("symbol", "")).strip().upper(): item
+        for item in instruments
+        if str(item.get("symbol", "")).strip().upper()
+    }
+
+
+def _category_path(meta: dict | None) -> str:
+    if not meta:
+        return ""
+    parts = [
+        str(meta.get("category_l1") or "").strip(),
+        str(meta.get("category_l2") or "").strip(),
+        str(meta.get("category_l3") or "").strip(),
+    ]
+    return "-".join(p for p in parts if p)
+
+
+# ---------------------------------------------------------------------------
+# Tool 1 -- trend_dashboard
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def trend_dashboard() -> dict:
+    """获取标的看板数据。
+
+    Returns all ETF instruments grouped by a three-level category
+    hierarchy (L1/L2/L3), each with:
+    - 最新趋势值 (trend_score)
+    - 趋势值 MA5 (trend_ma5, the primary ranking metric)
+    - 同级强度百分位 (strength)
+    - 日涨跌幅 / 5日 / 20日 / 60日涨跌幅
+    - 趋势相位检测 (上升 / 下降 / 震荡)
+    - 历史趋势值 MA5 序列 (trend_history)
+    """
+    db = get_db()
+    return build_subject_dashboard_payload(db)
+
+
+# ---------------------------------------------------------------------------
+# Tool 2 -- symbol_detail
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14) -> dict:
+    """获取指定标的的历史日K线、趋势指标和全套技术指标。
+
+    Args:
+        symbol: 标的代码，如 510300.SS 或 510300
+        days: 返回最近多少天的数据，默认 60
+        rsi_period: RSI 计算周期，默认 14
+
+    Returns:
+        包含 dates、candles(OHLC)、volumes、indicators 的完整数据。
+        indicators 包含: trend(score/ma/price_direction/confidence),
+        ma, atr, bias, boll, macd, rsi。
+    """
+    symbol = _normalize_symbol(symbol)
+    if not symbol:
+        return {"ok": False, "error": "无效的标的代码"}
+
+    db = get_db()
+    df = db.load_market_data(symbol)
+    if df.empty:
+        return {"ok": False, "error": f"未找到 {symbol} 的数据，请确认代码正确且数据已入库"}
+
+    # Load enough bars for indicator bootstrapping, then tail to requested days.
+    # Trend-score needs max(n_long, atr_period) + 2 ≈ 22 bars minimum.
+    MIN_BARS = 30
+    requested = max(int(days), 1)
+    df = df.tail(max(requested, MIN_BARS)).copy()
+
+    name_map = _config_name_map()
+    instruments = _load_instruments_raw()
+    metadata_map = _instrument_metadata_map(instruments)
+    name = name_map.get(symbol, "")
+    metadata = metadata_map.get(symbol)
+
+    rsi_period = max(2, int(rsi_period or 14))
+    trend_cfg = _trend_config()
+    indicators = compute_market_indicators(df, trend_cfg=trend_cfg, rsi_period=rsi_period)
+
+    # Tail output arrays to the requested number of days
+    def _tail(values: list, n: int) -> list:
+        return values[-n:] if len(values) > n else values
+
+    def _float_list(series_like) -> list:
+        return [round(float(v), 4) if pd.notna(v) else None for v in series_like]
+
+    n = min(requested, len(df))
+    dates_out = [str(d.date()) for d in df["time"]][-n:]
+
+    return {
+        "ok": True,
+        "symbol": symbol,
+        "name": name,
+        "display_name": format_symbol_display(symbol, name),
+        "category": _category_path(metadata),
+        "category_l1": str((metadata or {}).get("category_l1") or ""),
+        "category_l2": str((metadata or {}).get("category_l2") or ""),
+        "category_l3": str((metadata or {}).get("category_l3") or ""),
+        "meta": db.get_market_data_summary(symbol),
+        "dates": dates_out,
+        "candles": {
+            "open": _tail(_float_list(df["open"]), n),
+            "high": _tail(_float_list(df["high"]), n),
+            "low": _tail(_float_list(df["low"]), n),
+            "close": _tail(_float_list(df["close"]), n),
+        },
+        "volumes": _tail(
+            [int(v) if pd.notna(v) else None for v in df.get("volume", pd.Series())], n
+        ),
+        "indicators": indicators,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool 3 -- calc_stop_loss
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
+    """计算给定买入的硬止损价和吊灯止损价。
+
+    硬止损公式: 买入价 − 买入当日 ATR(20) × hard_stop_atr_mul (默认 1.5)
+    吊灯止损公式: 买入以来最高价 − 最新 ATR(20) × chandelier_stop_atr_mul (默认 2.5)
+
+    Args:
+        symbol: 标的代码，如 510300.SS
+        buy_date: 买入日期，格式 YYYY-MM-DD
+        buy_price: 买入均价
+
+    Returns:
+        硬止损价、吊灯止损价、ATR 参数、距买入价的百分比等。
+    """
+    symbol = _normalize_symbol(symbol)
+    if not symbol:
+        return {"ok": False, "error": "无效的标的代码"}
+
+    db = get_db()
+    df = db.load_market_data(symbol)
+    if df.empty:
+        return {"ok": False, "error": f"未找到 {symbol} 的数据"}
+
+    strategy_cfg = _load_strategy_config()
+    atr_period = int(strategy_cfg.get("atr_period", 20))
+    hard_stop_mul = float(strategy_cfg.get("hard_stop_atr_mul_default", 1.5))
+    chandelier_mul = float(strategy_cfg.get("chandelier_stop_atr_mul", 2.5))
+
+    # Per-instrument stop_atr_mul override
+    instruments = _load_instruments_raw()
+    for item in instruments:
+        if item.get("symbol", "").strip().upper() == symbol:
+            if "stop_atr_mul" in item:
+                hard_stop_mul = float(item["stop_atr_mul"])
+            break
+
+    atr_series = atr(df, period=atr_period)
+    if atr_series.empty:
+        return {"ok": False, "error": "数据不足，无法计算 ATR"}
+
+    current_atr = safe_float(atr_series.iloc[-1], 0.0)
+    if current_atr <= 0:
+        return {"ok": False, "error": "ATR 值为 0，数据异常"}
+
+    df = df.copy()
+    df["time"] = pd.to_datetime(df["time"], errors="coerce")
+    buy_ts = pd.Timestamp(buy_date)
+
+    # ATR at buy date (look back up to and including buy_date)
+    atr_at_buy = current_atr
+    mask_until = df["time"] <= buy_ts
+    if mask_until.any():
+        subset = atr_series[mask_until.values]
+        if not subset.empty and pd.notna(subset.iloc[-1]):
+            atr_at_buy = safe_float(subset.iloc[-1], current_atr)
+
+    # Highest price since buy date (inclusive)
+    highs = pd.to_numeric(df["high"], errors="coerce")
+    latest_price = safe_float(pd.to_numeric(df["close"], errors="coerce").iloc[-1], 0.0)
+    highest_since_buy = latest_price
+    mask_since = df["time"] >= buy_ts
+    if mask_since.any():
+        since_highs = highs[mask_since]
+        if not since_highs.empty and since_highs.notna().any():
+            highest_since_buy = safe_float(since_highs.max(), latest_price)
+
+    # Calculate stop prices
+    hard_stop_price = round(buy_price - hard_stop_mul * atr_at_buy, 4)
+    chandelier_stop_price = round(highest_since_buy - chandelier_mul * current_atr, 4)
+
+    hard_stop_pct = round((hard_stop_price / buy_price - 1) * 100, 2)
+    chandelier_pct = (
+        round((chandelier_stop_price / highest_since_buy - 1) * 100, 2)
+        if highest_since_buy > 0
+        else 0.0
+    )
+
+    return {
+        "ok": True,
+        "symbol": symbol,
+        "buy_price": buy_price,
+        "buy_date": buy_date,
+        "hard_stop_price": hard_stop_price,
+        "hard_stop_pct": hard_stop_pct,
+        "hard_stop_atr_mul": hard_stop_mul,
+        "chandelier_stop_price": chandelier_stop_price,
+        "chandelier_stop_pct_from_high": chandelier_pct,
+        "chandelier_stop_atr_mul": chandelier_mul,
+        "atr_at_buy": round(atr_at_buy, 4),
+        "current_atr": round(current_atr, 4),
+        "highest_since_buy": round(highest_since_buy, 4),
+        "latest_price": round(latest_price, 4),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Tool 4 -- list_instruments
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def list_instruments(
+    category: str = "",
+    keyword: str = "",
+    enabled_only: bool = True,
+) -> dict:
+    """列出所有可用的 ETF 标的，支持按分类和关键词筛选。
+
+    Args:
+        category: 按分类筛选（匹配 L1/L2/L3），如 "宽基"、"行业"、"跨境"
+        keyword: 按代码或名称模糊搜索
+        enabled_only: 是否仅返回启用的标的，默认 True
+
+    Returns:
+        标的列表，包含代码、名称、三级分类、数据范围、启用状态。
+    """
+    instruments = _load_instruments_raw()
+    db = get_db()
+
+    result: list[dict] = []
+    for item in instruments:
+        symbol = str(item.get("symbol", "")).strip().upper()
+        if not symbol:
+            continue
+
+        if enabled_only and not item.get("enabled", True):
+            continue
+
+        cat_l1 = str(item.get("category_l1") or "")
+        cat_l2 = str(item.get("category_l2") or "")
+        cat_l3 = str(item.get("category_l3") or "")
+        name = str(item.get("name") or "")
+
+        # Filter by category keyword (match any level)
+        if category:
+            kw = category.strip().lower()
+            if not (kw in cat_l1.lower() or kw in cat_l2.lower() or kw in cat_l3.lower()):
+                continue
+
+        # Filter by symbol / name keyword
+        if keyword:
+            kw = keyword.strip().lower()
+            if not (kw in symbol.lower() or kw in name.lower()):
+                continue
+
+        db_summary = db.get_market_data_summary(symbol)
+
+        result.append(
+            {
+                "symbol": symbol,
+                "name": name,
+                "category_l1": cat_l1,
+                "category_l2": cat_l2,
+                "category_l3": cat_l3,
+                "enabled": bool(item.get("enabled", True)),
+                "data_rows": db_summary.get("rows", 0),
+                "data_start": str(db_summary.get("start", ""))
+                if db_summary.get("start")
+                else None,
+                "data_end": str(db_summary.get("end", ""))
+                if db_summary.get("end")
+                else None,
+            }
+        )
+
+    return {"ok": True, "count": len(result), "instruments": result}

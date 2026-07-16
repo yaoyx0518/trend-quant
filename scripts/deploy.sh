@@ -106,7 +106,7 @@ Group=root
 WorkingDirectory=/opt/trend-quant
 Environment="PYTHONPATH=src"
 Environment="PATH=/opt/trend-quant/.venv/bin:/usr/local/bin:/usr/bin:/bin"
-ExecStart=/opt/trend-quant/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+ExecStart=/opt/trend-quant/.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
 Restart=always
 RestartSec=5
 StandardOutput=journal
