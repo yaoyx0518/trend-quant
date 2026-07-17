@@ -179,9 +179,9 @@
     try {
       const resp = await fetch('/subject-market/api/trading-status');
       const status = await resp.json();
-      if (status.is_trading_time) {
+      if (status.is_realtime_available) {
         intradayBtn.disabled = false;
-        intradayBtn.title = '点击获取基于实时报价的盘中趋势值看板';
+        intradayBtn.title = '点击获取基于实时报价的盘中趋势值看板（午间休盘也可用）';
       } else {
         intradayBtn.disabled = true;
         intradayBtn.title = status.next_session || '非交易时段';

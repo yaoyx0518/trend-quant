@@ -1,19 +1,23 @@
 """MCP server for trend-quant.
 
-Exposes 4 tools to external agents via MCP SSE transport:
+Exposes 5 tools to external agents via MCP SSE transport:
 
 1. **trend_dashboard** -- 标的看板: multi-symbol trend dashboard grouped by
-   three-level category hierarchy.
-2. **symbol_detail** -- 标的查看: historical OHLCV + full indicator suite for
-   a single symbol.
-3. **calc_stop_loss** -- 辅助计算: hard-stop and chandelier-stop prices for
+   three-level category hierarchy (EOD daily bars).
+2. **intraday_dashboard** -- 实时看板: same structure as trend_dashboard but
+   computed from real-time quotes (trading days 9:30-15:00, lunch break
+   included).
+3. **symbol_detail** -- 标的查看: historical OHLCV + full indicator suite for
+   a single symbol, with an optional real-time intraday overlay.
+4. **calc_stop_loss** -- 辅助计算: hard-stop and chandelier-stop prices for
    a given buy entry.
-4. **list_instruments** -- 标的列表: searchable / filterable instrument
+5. **list_instruments** -- 标的列表: searchable / filterable instrument
    catalogue.
 """
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -28,6 +32,13 @@ from app.routers.market_view import (
     compute_market_indicators,
 )
 from app.routers.subject_market import build_subject_dashboard_payload
+from core.calendar import is_realtime_available, is_trading_day
+from data.intraday_service import (
+    build_intraday_dashboard,
+    build_synthetic_bar,
+    compute_intraday_trend_score,
+)
+from data.service import DataService
 from data.storage.db import get_db
 from strategy.indicators import atr
 from strategy.trend_score_core import safe_float
@@ -97,7 +108,7 @@ _dashboard_cache: tuple[tuple[str, int, str], dict] | None = None
 
 @mcp.tool()
 def trend_dashboard() -> dict:
-    """获取标的看板数据。
+    """获取标的看板数据（基于日K线，不含当天盘中实时数据）。
 
     Returns all ETF instruments grouped by a three-level category
     hierarchy (L1/L2/L3), each with:
@@ -107,6 +118,9 @@ def trend_dashboard() -> dict:
     - 日涨跌幅 / 5日 / 20日 / 60日涨跌幅
     - 趋势相位检测 (上升 / 下降 / 震荡)
     - 历史趋势值 MA5 序列 (trend_history)
+
+    数据来自本地日K库，最新一根K线通常是上一个交易日。
+    如需当天实时数据请使用 intraday_dashboard。
     """
     global _dashboard_cache
     db = get_db()
@@ -119,22 +133,97 @@ def trend_dashboard() -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 2 -- symbol_detail
+# Tool 2 -- intraday_dashboard (real-time)
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
-def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14) -> dict:
+def intraday_dashboard(category: str = "") -> dict:
+    """获取实时标的看板（基于当天实时报价，含盘中趋势值）。
+
+    仅在交易日 9:30-15:00（含午间休盘 11:30-13:00）可用；
+    非交易时段请使用 trend_dashboard 获取日K看板。
+
+    Args:
+        category: 可选，按分类筛选（匹配 L1/L2/L3），如 "宽基"、"行业"、
+            "跨境"。不传则计算全部标的（600+，可能需要 1 分钟以上，
+            建议按需用 category 缩小范围）。
+
+    Returns:
+        与 trend_dashboard 相同的三级分类结构，另含:
+        - is_intraday: True
+        - intraday_ts: 计算时间戳
+        - 每个标的的 daily_change_pct 为实时涨跌幅
+    """
+    now = datetime.now()
+    if not is_trading_day(now.date()):
+        return {
+            "ok": False,
+            "error": "今日非交易日，无实时数据；请使用 trend_dashboard 获取日K看板",
+        }
+    if not is_realtime_available(now):
+        return {
+            "ok": False,
+            "error": "当前非实时行情时段（交易日 9:30-15:00，含午间休盘）；请使用 trend_dashboard 获取日K看板",
+        }
+
+    db = get_db()
+    symbols = db.list_market_symbols(price_mode="qfq")
+    if not symbols:
+        return {"ok": False, "error": "本地无日K数据"}
+
+    # Filter to fully classified instruments (mirrors the web intraday job).
+    metadata_map = db.get_instrument_metadata_map()
+    classified = [
+        s for s in symbols
+        if s in metadata_map
+        and str(metadata_map[s].get("category_l1", "")).strip()
+        and str(metadata_map[s].get("category_l2", "")).strip()
+        and str(metadata_map[s].get("category_l3", "")).strip()
+    ]
+
+    # Optional category filter (match any level, case-insensitive).
+    if category.strip():
+        kw = category.strip().lower()
+        classified = [
+            s for s in classified
+            if kw in str(metadata_map[s].get("category_l1", "")).lower()
+            or kw in str(metadata_map[s].get("category_l2", "")).lower()
+            or kw in str(metadata_map[s].get("category_l3", "")).lower()
+        ]
+
+    if not classified:
+        return {"ok": False, "error": "无符合条件的标的（需完整三级分类）"}
+
+    payload = build_intraday_dashboard(
+        classified, db, DataService(), _trend_config()
+    )
+    payload["ok"] = True
+    payload["requested_category"] = category.strip() or None
+    return payload
+
+
+# ---------------------------------------------------------------------------
+# Tool 3 -- symbol_detail
+# ---------------------------------------------------------------------------
+
+@mcp.tool()
+def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: bool = False) -> dict:
     """获取指定标的的历史日K线、趋势指标和全套技术指标。
 
     Args:
         symbol: 标的代码，如 510300.SS 或 510300
         days: 返回最近多少天的数据，默认 60
         rsi_period: RSI 计算周期，默认 14
+        intraday: 是否叠加当天实时数据，默认 False。
+            仅交易日 9:30-15:00（含午间休盘）生效：追加一根由实时报价
+            合成的当日K线，并在 indicators.trend_intraday 中返回盘中
+            趋势值快照；非交易时段或实时行情获取失败时静默回退为日K数据。
 
     Returns:
         包含 dates、candles(OHLC)、volumes、indicators 的完整数据。
         indicators 包含: trend(score/ma/price_direction/confidence),
         ma, atr, bias, boll, macd, rsi。
+        meta.is_intraday 标记是否包含实时数据。
     """
     symbol = _normalize_symbol(symbol)
     if not symbol:
@@ -171,7 +260,7 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14) -> dict:
     n = min(requested, len(df))
     dates_out = [str(d.date()) for d in df["time"]][-n:]
 
-    return {
+    payload = {
         "ok": True,
         "symbol": symbol,
         "name": name,
@@ -193,10 +282,52 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14) -> dict:
         ),
         "indicators": indicators,
     }
+    payload["meta"]["is_intraday"] = False
+
+    # --- Intraday overlay (mirrors market_view.get_market_daily) ----------
+    # Gate on is_realtime_available (not is_trading_time) so the midday
+    # lunch break still serves an intraday snapshot from live quotes.
+    if intraday and is_realtime_available():
+        try:
+            quote = DataService().fetch_latest_quote(symbol)
+            if quote and quote.get("price") is not None:
+                hist = df.copy()
+                hist["time"] = pd.to_datetime(hist["time"], errors="coerce")
+                hist = (
+                    hist.dropna(subset=["time", "open", "high", "low", "close"])
+                    .sort_values("time")
+                    .reset_index(drop=True)
+                )
+                intraday_result = compute_intraday_trend_score(hist, quote, trend_cfg)
+                if intraday_result.get("ok"):
+                    prev_vol = safe_float(hist["volume"].iloc[-1], 0.0) if len(hist) > 0 else 0.0
+                    synth = build_synthetic_bar(quote, prev_vol)
+                    payload["dates"].append(str(datetime.now().date()))
+                    payload["candles"]["open"].append(round(float(synth["open"]), 4))
+                    payload["candles"]["high"].append(round(float(synth["high"]), 4))
+                    payload["candles"]["low"].append(round(float(synth["low"]), 4))
+                    payload["candles"]["close"].append(round(float(synth["close"]), 4))
+                    payload["volumes"].append(int(synth["volume"]))
+                    payload["indicators"]["trend_intraday"] = {
+                        "score": intraday_result["trend_score"],
+                        "price_direction": intraday_result["price_direction"],
+                        "confidence": intraday_result["confidence"],
+                        "atr": intraday_result["atr"],
+                        "price": intraday_result["price"],
+                        "ma_mid": intraday_result["ma_mid"],
+                        "calc_details": intraday_result.get("calc_details", {}),
+                    }
+                    payload["meta"]["is_intraday"] = True
+                    payload["meta"]["intraday_ts"] = datetime.now().isoformat()
+        except Exception:
+            # Silently fall back to EOD data if intraday fetch fails.
+            pass
+
+    return payload
 
 
 # ---------------------------------------------------------------------------
-# Tool 3 -- calc_stop_loss
+# Tool 4 -- calc_stop_loss
 # ---------------------------------------------------------------------------
 
 @mcp.tool()
@@ -296,7 +427,7 @@ def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Tool 4 -- list_instruments
+# Tool 5 -- list_instruments
 # ---------------------------------------------------------------------------
 
 @mcp.tool()

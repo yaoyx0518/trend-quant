@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 import re
@@ -67,7 +68,11 @@ class RuleBacktestService:
             )
         return rows
 
-    def run(self, payload: dict) -> dict:
+    def run(
+        self,
+        payload: dict,
+        progress_callback: Callable[[int, int], None] | None = None,
+    ) -> dict:
         strategy_ids = self._normalize_strategy_ids(payload)
         symbol = str(payload.get("symbol", "")).strip().upper()
         if not strategy_ids:
@@ -106,8 +111,17 @@ class RuleBacktestService:
 
         results: list[dict] = []
         debug_enabled_for_first = False
-        for sid in strategy_ids:
+        days_per_strategy = len(trading_bars)
+        total_days = days_per_strategy * len(strategy_ids)
+        for s_idx, sid in enumerate(strategy_ids):
             strategy = self.strategy_loader.load(sid)
+            if progress_callback is not None:
+                day_offset = s_idx * days_per_strategy
+
+                def engine_progress(day_cur: int, day_total: int, *, _offset: int = day_offset) -> None:
+                    progress_callback(min(_offset + day_cur, total_days), total_days)
+            else:
+                engine_progress = None
             request = RuleBacktestRequest(
                 strategy=strategy,
                 symbol=symbol,
@@ -116,6 +130,7 @@ class RuleBacktestService:
                 end_date=end_date,
                 execution=execution,
                 run_id=datetime.now().strftime("%Y%m%d%H%M%S%f"),
+                progress_callback=engine_progress,
             )
             result = self.engine.run(request)
             result["strategy_name"] = str(strategy.get("name", "") or sid)

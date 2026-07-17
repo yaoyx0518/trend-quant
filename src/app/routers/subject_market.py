@@ -15,7 +15,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.routers.market_view import _trend_config, compute_trend_indicator
-from core.calendar import is_trading_day, is_trading_time, previous_trading_day, trading_session_status
+from core.calendar import is_realtime_available, is_trading_day, previous_trading_day, trading_session_status
 from data.intraday_service import build_intraday_dashboard, _detect_trend_phase
 from data.service import DataService
 from data.storage.db import get_db
@@ -341,8 +341,9 @@ async def start_intraday_dashboard() -> dict:
     now = datetime.now()
     if not is_trading_day(now.date()):
         raise HTTPException(status_code=400, detail="今日非交易日")
-    if not is_trading_time(now):
-        raise HTTPException(status_code=400, detail="当前非交易时段（9:30-11:30, 13:00-15:00）")
+    # 午间休盘（11:30-13:00）也允许启动 —— 实时报价在休盘期间仍然有效。
+    if not is_realtime_available(now):
+        raise HTTPException(status_code=400, detail="当前非交易时段（9:30-15:00，含午间休盘）")
 
     job_id = _create_intraday_job()
 

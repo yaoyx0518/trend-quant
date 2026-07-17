@@ -27,6 +27,8 @@ class SingleSymbolAllInBacktestEngine:
         strategy = request.strategy
         execution = request.execution
         debug_enabled = self._debug_enabled(execution=execution, bars=bars)
+        total_days = len(bars)
+        progress_callback = request.progress_callback
 
         resolver = ValueResolver(strategy_cfg=strategy.get("indicator_config", {}) if isinstance(strategy, dict) else {})
         condition_engine = ConditionEngine(resolver)
@@ -39,7 +41,7 @@ class SingleSymbolAllInBacktestEngine:
         debug_log: list[dict] = []
         turnover_total = 0.0
 
-        for idx, row in bars.iterrows():
+        for day_no, (idx, row) in enumerate(bars.iterrows(), 1):
             day = row["date"]
             day_str = day.isoformat()
             day_bars = all_bars.iloc[: idx + 1].copy()
@@ -163,6 +165,8 @@ class SingleSymbolAllInBacktestEngine:
                 debug_day["state_after"] = self._position_snapshot(position)
                 debug_day["daily_nav"] = nav_row
                 debug_log.append(debug_day)
+            if progress_callback is not None:
+                progress_callback(day_no, total_days)
 
         drawdown = compute_drawdown(daily_nav)
         summary = compute_summary(daily_nav=daily_nav, trades=trades, turnover_total=turnover_total)

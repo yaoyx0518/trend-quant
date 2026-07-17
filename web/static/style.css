@@ -731,6 +731,13 @@ button:disabled {
   background: linear-gradient(90deg, #c94b4b 0%, #f59e0b 100%);
 }
 
+.market-backtest-progress-text {
+  margin-left: 10px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
 .market-toolbar-secondary {
   display: flex;
   flex-wrap: wrap;
@@ -1957,6 +1964,7 @@ button:disabled {
   justify-content: center;
   padding: 36px 24px;
   overflow: auto;
+  overscroll-behavior: contain;
   background: rgba(17, 35, 42, 0.42);
   backdrop-filter: blur(5px);
 }
@@ -1966,8 +1974,9 @@ button:disabled {
 }
 
 .rule-strategy-dialog {
-  width: min(1120px, 100%);
-  padding: 22px;
+  width: min(1240px, 100%);
+  margin: auto;
+  padding: 20px 22px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: var(--panel-strong);
@@ -1979,11 +1988,11 @@ button:disabled {
   gap: 18px;
   align-items: flex-start;
   justify-content: space-between;
-  margin-bottom: 18px;
+  margin-bottom: 12px;
 }
 
 .rule-strategy-dialog-head h3 {
-  margin: 0 0 8px;
+  margin: 0 0 6px;
   font-size: 1.24rem;
   letter-spacing: 0;
 }
@@ -1993,15 +2002,16 @@ button:disabled {
 }
 
 .rule-strategy-editor-meta {
-  margin: 8px 0 0;
+  margin: 6px 0 0;
   color: var(--muted);
   font-size: 12px;
   font-weight: 800;
 }
 
 .rule-strategy-name-field {
-  width: min(520px, 100%);
-  margin-bottom: 16px;
+  display: block;
+  width: min(460px, 100%);
+  margin-bottom: 12px;
 }
 
 .rule-strategy-name-field input {
@@ -2010,13 +2020,14 @@ button:disabled {
 
 .rule-condition-stack {
   display: grid;
-  gap: 16px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
   margin-top: 12px;
 }
 
 .rule-condition-panel {
   min-width: 0;
-  padding: 14px;
+  padding: 12px;
   border: 1px solid var(--line);
   border-radius: 14px;
   background: rgba(255, 255, 255, 0.72);
@@ -2027,7 +2038,7 @@ button:disabled {
   gap: 12px;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .rule-condition-head h4 {
@@ -2036,10 +2047,10 @@ button:disabled {
 
 .rule-condition-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1fr) 78px minmax(260px, 1fr) 74px;
-  gap: 12px;
+  grid-template-columns: minmax(0, 1fr) 58px minmax(0, 1fr) 60px;
+  gap: 8px;
   align-items: start;
-  padding: 12px 0;
+  padding: 10px 0;
   border-top: 1px solid rgba(20, 41, 51, 0.08);
 }
 
@@ -2049,72 +2060,103 @@ button:disabled {
 
 .rule-value-editor {
   display: grid;
-  grid-template-columns: 126px minmax(0, 1fr);
-  gap: 8px;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 6px;
   align-items: start;
   min-width: 0;
+}
+
+.rule-value-editor .value-type {
+  max-width: 160px;
 }
 
 .rule-value-editor select,
 .rule-value-editor input,
 .rule-condition-row .rule-operator {
   width: 100%;
-  min-height: 38px;
-  padding: 7px 10px;
+  min-height: 34px;
+  padding: 6px 8px;
   border-radius: 10px;
   font-size: 13px;
 }
 
 .rule-condition-row .rule-operator {
   align-self: start;
+  padding: 6px 4px;
   text-align: center;
 }
 
 .rule-remove-condition {
-  width: 74px;
-  min-height: 38px;
-  padding: 0 10px;
+  width: 60px;
+  min-height: 34px;
+  padding: 0 8px;
 }
 
-.value-detail,
+.value-detail {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: flex-start;
+  min-width: 0;
+}
+
+.value-detail > select {
+  flex: 1 1 90px;
+  width: auto;
+  max-width: 170px;
+}
+
+.value-detail > input.value-literal {
+  flex: 0 1 110px;
+  width: auto;
+  max-width: 110px;
+}
+
 .indicator-params,
 .state-params {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  align-items: center;
   min-width: 0;
   color: var(--muted);
   font-size: 12px;
 }
 
-.value-detail {
-  grid-template-columns: minmax(0, 1fr);
-}
-
-.indicator-params,
-.state-params {
-  grid-template-columns: repeat(2, minmax(96px, 1fr));
-}
-
 .indicator-params label,
 .state-params label {
-  display: grid;
-  grid-template-columns: auto minmax(82px, 1fr);
-  gap: 8px;
+  display: inline-flex;
+  gap: 6px;
   align-items: center;
   white-space: nowrap;
 }
 
 .indicator-params input,
 .state-params input {
+  width: 62px;
   min-width: 0;
 }
 
+.indicator-params select,
+.state-params select {
+  width: auto;
+  min-width: 72px;
+}
+
 .rule-strategy-dialog-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
   display: flex;
   gap: 12px;
   align-items: center;
   justify-content: flex-end;
-  margin-top: 18px;
+  margin: 14px -22px -20px;
+  padding: 10px 22px;
+  border-top: 1px solid var(--line);
+  border-radius: 0 0 17px 17px;
+  background: var(--panel-strong);
 }
 
 .rule-strategy-dialog-actions #strategySaveStatus {
@@ -2131,6 +2173,12 @@ button:disabled {
   .market-backtest-action {
     grid-column: 3 / -1;
     justify-self: end;
+  }
+}
+
+@media (max-width: 1200px) {
+  .rule-condition-stack {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -2176,6 +2224,10 @@ button:disabled {
 
   .rule-condition-row {
     grid-template-columns: 1fr;
+  }
+
+  .rule-condition-row .rule-operator {
+    width: 88px;
   }
 
   .strategy-row-head {

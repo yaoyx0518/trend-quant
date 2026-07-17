@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from typing import Literal
@@ -34,6 +35,8 @@ class RuleBacktestRequest:
     end_date: date | None = None
     execution: BacktestExecutionConfig = field(default_factory=BacktestExecutionConfig)
     run_id: str | None = None
+    # Called once per processed bar as (day_number, total_days); None disables reporting.
+    progress_callback: Callable[[int, int], None] | None = None
 
 
 @dataclass(slots=True)

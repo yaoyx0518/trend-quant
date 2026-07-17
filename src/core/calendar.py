@@ -68,6 +68,26 @@ def is_trading_time(dt: datetime | None = None) -> bool:
     return False
 
 
+def is_realtime_available(dt: datetime | None = None) -> bool:
+    """Return True if real-time quotes are meaningful at *dt*.
+
+    Unlike ``is_trading_time`` this treats the trading day as one
+    continuous window (9:30–15:00 Beijing time) — the midday lunch
+    break (11:30–13:00) is INCLUDED, because quotes fetched during
+    the break still reflect the morning session's latest state and
+    make a valid intraday snapshot.
+
+    Use this to gate intraday / real-time data features; keep using
+    ``is_trading_time`` where actual continuous-auction sessions
+    matter.
+    """
+    now = dt or datetime.now()
+    if not is_trading_day(now.date()):
+        return False
+    t = now.time()
+    return _MORNING_START <= t <= _AFTERNOON_END
+
+
 def previous_trading_day(day: date | None = None) -> date:
     """Return the most recent trading day on or before *day*.
 
@@ -99,13 +119,14 @@ def trading_session_status(now: datetime | None = None) -> dict:
     """Convenience helper for API endpoints.
 
     Returns a dict with keys:
-      is_trading_day, is_trading_time, next_session
+      is_trading_day, is_trading_time, is_realtime_available, next_session
     where *next_session* is a human-readable string.
     """
     dt = now or datetime.now()
     today = dt.date()
     trading_day = is_trading_day(today)
     trading_time = is_trading_time(dt) if trading_day else False
+    realtime_available = is_realtime_available(dt)
 
     if trading_time:
         next_session = "in_session"
@@ -113,7 +134,7 @@ def trading_session_status(now: datetime | None = None) -> dict:
         if dt.time() < _MORNING_START:
             next_session = f"今日 {_MORNING_START.strftime('%H:%M')} 开盘"
         elif dt.time() < _AFTERNOON_START:
-            next_session = f"今日 {_AFTERNOON_START.strftime('%H:%M')} 开盘"
+            next_session = f"午间休盘，今日 {_AFTERNOON_START.strftime('%H:%M')} 开盘"
         else:
             next_session = "今日已收盘"
     else:
@@ -123,5 +144,6 @@ def trading_session_status(now: datetime | None = None) -> dict:
     return {
         "is_trading_day": trading_day,
         "is_trading_time": trading_time,
+        "is_realtime_available": realtime_available,
         "next_session": next_session,
     }

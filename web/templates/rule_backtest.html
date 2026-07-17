@@ -259,49 +259,49 @@
     <button id="newStrategyBtn" type="button">新增策略</button>
   </div>
 
-  <div id="strategyEditor" class="rule-strategy-modal" hidden>
-    <div class="rule-strategy-dialog" role="dialog" aria-modal="true" aria-labelledby="strategyDialogTitle">
-      <div class="rule-strategy-dialog-head">
-        <div>
-          <h3 id="strategyDialogTitle">新增策略</h3>
-          <p class="context-hint">填写策略名称，系统自动生成策略 ID。买入条件全部满足（AND），卖出条件任一满足（OR）。</p>
-          <p id="strategyEditorMeta" class="rule-strategy-editor-meta" hidden></p>
-        </div>
-        <button id="closeStrategyBtn" type="button" class="ghost-btn">关闭</button>
-      </div>
-
-      <label class="rule-strategy-name-field">策略名称
-        <input id="newStrategyName" type="text" placeholder="例如：收盘价上穿/跌破 SMA60">
-      </label>
-
-      <div class="rule-condition-stack">
-        <div class="rule-condition-panel">
-          <div class="rule-condition-head">
-            <h4>买入条件（全部满足）</h4>
-            <button id="addEntryConditionBtn" type="button" class="ghost-btn">+ 条件</button>
-          </div>
-          <div id="entryConditions"></div>
-        </div>
-        <div class="rule-condition-panel">
-          <div class="rule-condition-head">
-            <h4>卖出条件（任一满足）</h4>
-            <button id="addExitConditionBtn" type="button" class="ghost-btn">+ 条件</button>
-          </div>
-          <div id="exitConditions"></div>
-        </div>
-      </div>
-
-      <div class="rule-strategy-dialog-actions">
-        <span id="strategySaveStatus"></span>
-        <button id="cancelStrategyBtn" type="button" class="ghost-btn">取消</button>
-        <button id="saveStrategyBtn" type="button">保存策略</button>
-      </div>
-    </div>
-  </div>
-
   <p id="status" class="status-banner">加载中...</p>
   <div id="strategyGrid" class="strategy-list"></div>
 </section>
+
+<div id="strategyEditor" class="rule-strategy-modal" hidden>
+  <div class="rule-strategy-dialog" role="dialog" aria-modal="true" aria-labelledby="strategyDialogTitle">
+    <div class="rule-strategy-dialog-head">
+      <div>
+        <h3 id="strategyDialogTitle">新增策略</h3>
+        <p class="context-hint">填写策略名称，系统自动生成策略 ID。买入条件全部满足（AND），卖出条件任一满足（OR）。</p>
+        <p id="strategyEditorMeta" class="rule-strategy-editor-meta" hidden></p>
+      </div>
+      <button id="closeStrategyBtn" type="button" class="ghost-btn">关闭</button>
+    </div>
+
+    <label class="rule-strategy-name-field">策略名称
+      <input id="newStrategyName" type="text" placeholder="例如：收盘价上穿/跌破 SMA60">
+    </label>
+
+    <div class="rule-condition-stack">
+      <div class="rule-condition-panel">
+        <div class="rule-condition-head">
+          <h4>买入条件（全部满足）</h4>
+          <button id="addEntryConditionBtn" type="button" class="ghost-btn">+ 条件</button>
+        </div>
+        <div id="entryConditions"></div>
+      </div>
+      <div class="rule-condition-panel">
+        <div class="rule-condition-head">
+          <h4>卖出条件（任一满足）</h4>
+          <button id="addExitConditionBtn" type="button" class="ghost-btn">+ 条件</button>
+        </div>
+        <div id="exitConditions"></div>
+      </div>
+    </div>
+
+    <div class="rule-strategy-dialog-actions">
+      <span id="strategySaveStatus"></span>
+      <button id="cancelStrategyBtn" type="button" class="ghost-btn">取消</button>
+      <button id="saveStrategyBtn" type="button">保存策略</button>
+    </div>
+  </div>
+</div>
 
 <script>
 let metaCache = { strategies: [], instruments: [], indicators: [] };

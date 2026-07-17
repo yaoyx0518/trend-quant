@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -11,7 +12,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.instrument_display import format_symbol_display, strip_etf_suffix
-from core.calendar import is_trading_time, previous_trading_day
+from core.calendar import is_realtime_available, previous_trading_day
 from data.intraday_service import compute_intraday_trend_score
 from data.service import DataService
 from data.storage.db import get_db
@@ -527,7 +528,9 @@ async def get_market_daily(
     payload["meta"]["is_intraday"] = False
 
     # --- Intraday overlay -------------------------------------------------
-    if intraday and is_trading_time():
+    # Gate on is_realtime_available (not is_trading_time) so the midday
+    # lunch break still serves an intraday snapshot from live quotes.
+    if intraday and is_realtime_available():
         try:
             data_service = DataService()
             quote = data_service.fetch_latest_quote(normalized_symbol)

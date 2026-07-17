@@ -34,7 +34,8 @@
     <div class="market-backtest-action">
       <button id="mvRunBacktestBtn" type="button">运行回测</button>
       <div id="mvBacktestProgress" class="market-backtest-progress" hidden>
-        <progress id="mvBacktestProgressBar" aria-label="回测进度" max="100" value="24" style="width:240px;height:16px;"></progress>
+        <progress id="mvBacktestProgressBar" aria-label="回测进度" max="100" value="0" style="width:240px;height:16px;"></progress>
+        <span id="mvBacktestProgressText" class="market-backtest-progress-text"></span>
       </div>
     </div>
   </div>
@@ -155,6 +156,7 @@
   const runBacktestBtnEl = document.getElementById('mvRunBacktestBtn');
   const backtestProgressEl = document.getElementById('mvBacktestProgress');
   const backtestProgressBarEl = document.getElementById('mvBacktestProgressBar');
+  const backtestProgressTextEl = document.getElementById('mvBacktestProgressText');
   const backtestRangeLabelEl = document.getElementById('mvBacktestRangeLabel');
   const refreshBtnEl = document.getElementById('mvRefreshBtn');
   const chartTitleEl = document.getElementById('mvChartTitle');
@@ -212,7 +214,6 @@
   let activeStrategyId = null;   // which strategy's markers are shown on chart
   let allSymbols = [];
   let ruleMeta = { strategies: [] };
-  let backtestProgressTimer = null;
   let backtestProgressHideTimer = null;
   const priceAxisSplitCount = 6;
 
@@ -243,33 +244,39 @@
     return n.toFixed(2);
   }
 
-  function setBacktestProgress(percent, state = 'running') {
+  function setBacktestProgress(percent, state = 'running', text = '') {
     const value = Math.max(0, Math.min(100, Number(percent) || 0));
     backtestProgressEl.hidden = false;
     backtestProgressEl.classList.toggle('is-complete', state === 'complete');
     backtestProgressEl.classList.toggle('is-error', state === 'error');
     backtestProgressBarEl.value = value;
+    if (text) backtestProgressTextEl.textContent = text;
   }
 
-  function startBacktestProgress() {
-    clearInterval(backtestProgressTimer);
+  function showBacktestProgress() {
     clearTimeout(backtestProgressHideTimer);
-    let progress = 24;
-    setBacktestProgress(progress);
-    backtestProgressTimer = setInterval(() => {
-      progress = Math.min(90, progress + 4);
-      setBacktestProgress(progress);
-    }, 420);
+    backtestProgressTextEl.textContent = '';
+    setBacktestProgress(0, 'running', '回测任务启动中…');
+  }
+
+  function updateBacktestProgress(current, total) {
+    const cur = Math.max(0, Number(current) || 0);
+    const tot = Math.max(1, Number(total) || 1);
+    const pct = Math.min(cur / tot, 1);
+    setBacktestProgress(
+      pct * 100,
+      'running',
+      `${(pct * 100).toFixed(1)}%（已计算 ${cur.toLocaleString()}/${tot.toLocaleString()} 根K线）`,
+    );
   }
 
   function finishBacktestProgress(ok) {
-    clearInterval(backtestProgressTimer);
-    backtestProgressTimer = null;
-    setBacktestProgress(100, ok ? 'complete' : 'error');
+    setBacktestProgress(100, ok ? 'complete' : 'error', ok ? '回测完成' : '回测失败');
     clearTimeout(backtestProgressHideTimer);
     backtestProgressHideTimer = setTimeout(() => {
       backtestProgressEl.hidden = true;
       backtestProgressBarEl.value = 0;
+      backtestProgressTextEl.textContent = '';
     }, ok ? 1200 : 2400);
   }
 
@@ -528,7 +535,7 @@
       if (activeKline) {
         backtestSeries = [
           tradeSeries(activeKline.buy_points || [], '买', '#2563eb', 'pin'),
-          tradeSeries(activeKline.sell_points || [], '卖', '#f59e0b', 'diamond'),
+          tradeSeries(activeKline.sell_points || [], '卖', '#f59e0b', 'pin'),
         ];
       }
     }
@@ -1181,13 +1188,60 @@
     }
   }
 
+  async function pollRuleBacktest(runId) {
+    const STALL_LIMIT_MS = 120000;
+    const MAX_CONSECUTIVE_FETCH_ERRORS = 10;
+    let lastCurrent = -1;
+    let lastChangeAt = Date.now();
+    let fetchErrors = 0;
+    while (true) {
+      await new Promise((r) => setTimeout(r, 500));
+      let progResp = null;
+      try {
+        progResp = await fetch(`/rule-backtest/api/progress/${encodeURIComponent(runId)}`);
+      } catch (err) {
+        fetchErrors += 1;
+        if (fetchErrors >= MAX_CONSECUTIVE_FETCH_ERRORS) {
+          throw new Error('进度查询连续失败，请检查服务状态后重试');
+        }
+        if (Date.now() - lastChangeAt > STALL_LIMIT_MS) {
+          throw new Error('回测进度长时间无更新，可能已中断，请重试');
+        }
+        continue;
+      }
+      fetchErrors = 0;
+      if (progResp.status === 404) {
+        throw new Error('回测任务不存在或已过期（服务可能已重启），请重试');
+      }
+      const progData = await progResp.json();
+      if (!progResp.ok) throw new Error(progData.detail || '进度查询失败');
+
+      const current = Number(progData.progress_current || 0);
+      const total = Number(progData.progress_total || 1);
+      if (current !== lastCurrent) {
+        lastCurrent = current;
+        lastChangeAt = Date.now();
+      }
+      updateBacktestProgress(current, total);
+
+      if (progData.status !== 'running') {
+        if (progData.status === 'error') throw new Error(progData.error || '回测运行出错');
+        if (!progData.result) throw new Error('回测结果为空');
+        return progData.result;
+      }
+      if (Date.now() - lastChangeAt > STALL_LIMIT_MS) {
+        throw new Error('回测进度长时间无更新，可能已中断，请重试');
+      }
+    }
+  }
+
   async function runRuleBacktest() {
     const symbol = selectedSymbol();
     const strategyIds = selectedStrategyIds();
     if (!symbol || !strategyIds.length) return;
     runBacktestBtnEl.disabled = true;
     runBacktestBtnEl.textContent = '回测中';
-    startBacktestProgress();
+    showBacktestProgress();
     let ok = false;
     try {
       const resp = await fetch('/rule-backtest/api/run', {
@@ -1206,8 +1260,9 @@
           debug_log_enabled: null,
         }),
       });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || '回测失败');
+      const startData = await resp.json();
+      if (!resp.ok || !startData.run_id) throw new Error(startData.detail || '回测启动失败');
+      const data = await pollRuleBacktest(startData.run_id);
       renderBacktestResult(data);
       ok = true;
     } catch (err) {

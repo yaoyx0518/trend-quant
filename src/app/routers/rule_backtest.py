@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from datetime import date
+import logging
+import threading
+from datetime import date, datetime
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -10,9 +12,16 @@ from pydantic import BaseModel, Field
 from core.calendar import previous_trading_day
 from rule_backtest.service import RuleBacktestService
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/rule-backtest", tags=["rule-backtest"])
 templates = Jinja2Templates(directory="web/templates")
 service = RuleBacktestService()
+
+# In-memory async backtest jobs (no persistence; lost on restart by design).
+_rule_jobs: dict[str, dict] = {}
+_rule_jobs_lock = threading.Lock()
+RULE_JOB_TTL_SECONDS = 1800
 
 
 class RuleBacktestRunRequest(BaseModel):
@@ -73,14 +82,89 @@ async def get_rule_backtest_meta() -> dict:
 
 @router.post("/api/run")
 async def run_rule_backtest(payload: RuleBacktestRunRequest) -> dict:
+    """Start a rule backtest in a background thread and return immediately.
+
+    The client polls GET /api/progress/{run_id} for K-line-level progress
+    and the final result. Jobs live only in memory (see RULE_JOB_TTL_SECONDS).
+    """
     # Cap end_date to previous trading day (intraday data is never persisted).
     payload.end_date = _cap_end_date(payload.end_date)
-    try:
-        return service.run(payload.model_dump())
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    run_id = datetime.now().strftime("%Y%m%d%H%M%S%f")
+    now = datetime.now()
+    with _rule_jobs_lock:
+        # Lazy eviction of expired jobs whenever a new run is created.
+        expired = [
+            jid for jid, j in _rule_jobs.items()
+            if (now - j.get("created_at", now)).total_seconds() > RULE_JOB_TTL_SECONDS
+        ]
+        for jid in expired:
+            _rule_jobs.pop(jid, None)
+        _rule_jobs[run_id] = {
+            "run_id": run_id,
+            "status": "running",
+            "progress_current": 0,
+            "progress_total": 1,
+            "error": None,
+            "result": None,
+            "created_at": now,
+        }
+
+    body = payload.model_dump()
+
+    def _progress_callback(current: int, total: int) -> None:
+        with _rule_jobs_lock:
+            job = _rule_jobs.get(run_id)
+            if job:
+                job["progress_current"] = current
+                job["progress_total"] = max(int(total), 1)
+
+    def _run() -> None:
+        try:
+            # Per-run service instance to avoid sharing engine state across threads.
+            result = RuleBacktestService().run(body, progress_callback=_progress_callback)
+            with _rule_jobs_lock:
+                job = _rule_jobs.get(run_id)
+                if job:
+                    job["status"] = result.get("status", "ok")
+                    job["progress_current"] = job.get("progress_total", 1)
+                    job["result"] = result
+        except (FileNotFoundError, ValueError) as exc:
+            with _rule_jobs_lock:
+                job = _rule_jobs.get(run_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(exc)
+        except Exception as exc:
+            logger.exception("Rule backtest run_id=%s failed", run_id)
+            with _rule_jobs_lock:
+                job = _rule_jobs.get(run_id)
+                if job:
+                    job["status"] = "error"
+                    job["error"] = str(exc)
+
+    thread = threading.Thread(target=_run, daemon=True, name=f"rule-backtest-{run_id}")
+    thread.start()
+
+    return {"run_id": run_id, "status": "running"}
+
+
+@router.get("/api/progress/{run_id}")
+async def get_rule_backtest_progress(run_id: str) -> dict:
+    with _rule_jobs_lock:
+        job = _rule_jobs.get(run_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="回测任务不存在或已过期")
+    resp: dict = {
+        "run_id": job["run_id"],
+        "status": job["status"],
+        "progress_current": job.get("progress_current", 0),
+        "progress_total": job.get("progress_total", 1),
+        "error": job.get("error"),
+    }
+    if job["status"] != "running" and job.get("result") is not None:
+        resp["result"] = job["result"]
+    return resp
 
 
 @router.post("/api/strategies")
