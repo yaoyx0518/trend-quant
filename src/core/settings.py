@@ -14,22 +14,9 @@ class AppSettings:
     host: str
     port: int
     data_provider_priority: list[str]
-    polling_times: list[str]
-    final_signal_time: str
     update_time_after_close: str
     daily_update_max_retries: int
     daily_update_retry_interval_seconds: int
-    market_fetch_retry_times: int
-    market_fetch_retry_interval_seconds: int
-    notify_retry_times: int
-    notify_retry_interval_seconds: int
-    lot_size: int
-
-
-@dataclass(slots=True)
-class RuntimeSettings:
-    account_equity_default: float
-    ensure_dirs: bool
 
 
 @dataclass(slots=True)
@@ -56,7 +43,6 @@ class TickFlowSettings:
 class Settings:
     app: AppSettings
     tickflow: TickFlowSettings
-    runtime: RuntimeSettings
     logging: LoggingSettings
 
 
@@ -74,7 +60,6 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     app_raw = raw.get("app", {})
     tickflow_raw = raw.get("tickflow", {})
-    runtime_raw = raw.get("runtime", {})
     logging_raw = raw.get("logging", {})
 
     return Settings(
@@ -89,16 +74,9 @@ def load_settings(config_path: Path | None = None) -> Settings:
                     ["tickflow"],
                 )
             ),
-            polling_times=list(app_raw.get("polling_times", [])),
-            final_signal_time=str(app_raw.get("final_signal_time", "14:45")),
             update_time_after_close=str(app_raw.get("update_time_after_close", "16:30")),
             daily_update_max_retries=int(app_raw.get("daily_update_max_retries", 2)),
             daily_update_retry_interval_seconds=int(app_raw.get("daily_update_retry_interval_seconds", 5)),
-            market_fetch_retry_times=int(app_raw.get("market_fetch_retry_times", 3)),
-            market_fetch_retry_interval_seconds=int(app_raw.get("market_fetch_retry_interval_seconds", 20)),
-            notify_retry_times=int(app_raw.get("notify_retry_times", 2)),
-            notify_retry_interval_seconds=int(app_raw.get("notify_retry_interval_seconds", 5)),
-            lot_size=int(app_raw.get("lot_size", 100)),
         ),
         tickflow=TickFlowSettings(
             plan=str(tickflow_raw.get("plan", "starter")).strip().lower(),
@@ -121,10 +99,6 @@ def load_settings(config_path: Path | None = None) -> Settings:
                 int(tickflow_raw.get("quote_max_symbols_per_request", 50)),
             ),
             quote_requests_per_minute=max(1, int(tickflow_raw.get("quote_requests_per_minute", 60))),
-        ),
-        runtime=RuntimeSettings(
-            account_equity_default=float(runtime_raw.get("account_equity_default", 200000)),
-            ensure_dirs=bool(runtime_raw.get("ensure_dirs", True)),
         ),
         logging=LoggingSettings(
             level=str(logging_raw.get("level", "INFO")),

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import re
-from pathlib import Path
-
-import yaml
 
 ETF_SUFFIX_RE = re.compile(r"\s*ETF\s*$", flags=re.IGNORECASE)
 
@@ -28,20 +25,18 @@ def format_symbol_display(symbol: str | None, name: str | None = None) -> str:
     return cleaned_name or code
 
 
-def load_instrument_name_map(path: str = "config/instruments.yaml") -> dict[str, str]:
-    p = Path(path)
-    if not p.exists():
-        return {}
+def load_instrument_name_map() -> dict[str, str]:
+    """Symbol -> display name map, sourced from the instrument_metadata table."""
+    import sqlite3
 
-    payload = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-    instruments = payload.get("instruments", []) if isinstance(payload, dict) else []
-    if not isinstance(instruments, list):
-        return {}
+    from data.storage.db import get_db
 
+    try:
+        items = get_db().list_instrument_metadata()
+    except (RuntimeError, sqlite3.Error):
+        return {}  # database unavailable (e.g. bare unit-test context)
     out: dict[str, str] = {}
-    for item in instruments:
-        if not isinstance(item, dict):
-            continue
+    for item in items:
         symbol = str(item.get("symbol", "")).strip().upper()
         if symbol == "":
             continue

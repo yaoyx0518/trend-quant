@@ -1,18 +1,17 @@
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 from typing import Iterable
 
 import numpy as np
 import pandas as pd
-import yaml
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
-from app.instrument_display import format_symbol_display, strip_etf_suffix
+from app.instrument_display import format_symbol_display, load_instrument_name_map, strip_etf_suffix
 from core.calendar import is_realtime_available, previous_trading_day
+from core.strategy_config import get_strategy_config
 from data.intraday_service import compute_intraday_trend_score
 from data.service import DataService
 from data.storage.db import get_db
@@ -33,16 +32,7 @@ DEFAULT_RSI_PERIOD = 14
 
 
 def _strategy_config() -> dict:
-    payload = _load_yaml("config/strategy.yaml")
-    cfg = payload.get("strategy", {}) if isinstance(payload, dict) else {}
-    return dict(cfg) if isinstance(cfg, dict) else {}
-
-
-def _load_yaml(path: str) -> dict:
-    p = Path(path)
-    if not p.exists():
-        return {}
-    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
+    return get_strategy_config()
 
 
 def _normalize_symbol(raw_symbol: str) -> str:
@@ -59,20 +49,7 @@ def _normalize_symbol(raw_symbol: str) -> str:
 
 
 def _config_name_map() -> dict[str, str]:
-    payload = _load_yaml("config/instruments.yaml")
-    instruments = payload.get("instruments", []) if isinstance(payload, dict) else []
-    if not isinstance(instruments, list):
-        return {}
-
-    out: dict[str, str] = {}
-    for item in instruments:
-        if not isinstance(item, dict):
-            continue
-        symbol = str(item.get("symbol", "")).strip().upper()
-        if not symbol:
-            continue
-        out[symbol] = strip_etf_suffix(str(item.get("name", "") or ""))
-    return out
+    return load_instrument_name_map()
 
 
 def _category_path(meta: dict | None) -> str:

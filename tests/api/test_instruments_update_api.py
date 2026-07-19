@@ -1,9 +1,9 @@
 """API tests for the instrument category edit endpoint.
 
 POST /instruments/api/{symbol}/update edits only the three-level categories
-of a managed instrument. Symbol and name are not editable. The endpoint keeps
-config/instruments.yaml and the instrument_metadata table in sync and
-re-derives level priorities from the category registry.
+of a managed instrument. Symbol and name are not editable. The instrument
+metadata table is the single source of truth; level priorities are
+re-derived from the category registry.
 """
 
 from __future__ import annotations
@@ -31,35 +31,17 @@ SEED_METADATA = {
     "priority_l2": 1,
     "priority_l3": 1,
     "sort_order": 1,
+    "enabled": True,
+    "stop_atr_mul": 1.5,
     "source": "test",
 }
 
 
 @pytest.fixture
-def managed_instrument(test_db, monkeypatch: pytest.MonkeyPatch) -> list[dict]:
-    """Seed one managed instrument and isolate the yaml config layer."""
-    import app.routers.instruments as instruments_module
-
+def managed_instrument(test_db) -> None:
+    """Seed one managed instrument in the metadata table."""
     test_db.save_instrument_categories(CATEGORIES)
     test_db.save_instrument_metadata([SEED_METADATA])
-
-    config_calls: list[dict] = []
-    config_items = [{"symbol": "510300.SS", "name": "沪深300ETF", "enabled": True}]
-    monkeypatch.setattr(
-        instruments_module,
-        "_config_items",
-        lambda *args, **kwargs: [dict(item) for item in config_items],
-    )
-
-    def fake_update(symbol, updates, path="config/instruments.yaml"):
-        config_calls.append({"symbol": symbol, "updates": dict(updates)})
-        for item in config_items:
-            if item.get("symbol") == symbol:
-                item.update(updates)
-        return 1
-
-    monkeypatch.setattr(instruments_module, "_update_instrument_config_categories", fake_update)
-    return config_calls
 
 
 def test_update_categories_success(client, test_db, managed_instrument):
@@ -81,12 +63,12 @@ def test_update_categories_success(client, test_db, managed_instrument):
     assert meta["priority_l1"] == 2
     assert meta["priority_l2"] == 1
     assert meta["priority_l3"] == 1
+    assert meta["asset_type"] == "etf"
     # 其他属性保持不变
     assert meta["factor_tags"] == ["大盘"]
     assert meta["sort_order"] == 1
-
-    assert managed_instrument and managed_instrument[0]["symbol"] == "510300.SS"
-    assert managed_instrument[0]["updates"]["asset_type"] == "etf"
+    assert meta["enabled"] == 1
+    assert meta["stop_atr_mul"] == 1.5
 
 
 def test_update_categories_keeps_symbol_and_name(client, test_db, managed_instrument):

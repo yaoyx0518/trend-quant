@@ -7,29 +7,33 @@ migrated from the retired signal engine's ``run_daily_update``.
 from __future__ import annotations
 
 from datetime import date, datetime
-from pathlib import Path
 
-import yaml
 
 from audit.app_logger import get_logger
 from core.benchmarks import benchmark_market_symbols
 from core.calendar import is_trading_day
 from core.settings import Settings
+from core.strategy_config import get_strategy_config
 from data.service import DataService
-from data.storage.runtime_store import RuntimeStore
+from data.storage.db import record_job_run_safely
 
 logger = get_logger(__name__)
 
 
-def _load_yaml(path: str) -> dict:
-    with Path(path).open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
-
-
 def _pool_symbols() -> list[str]:
-    """Enabled instruments from config plus benchmark index symbols, deduped."""
-    instruments_cfg = _load_yaml("config/instruments.yaml")
-    instruments = [item for item in instruments_cfg.get("instruments", []) if item.get("enabled", True)]
+    """Enabled instruments from the metadata table plus benchmark symbols, deduped."""
+    from data.storage.db import get_db
+
+    import sqlite3
+
+    try:
+        instruments = [
+            item
+            for item in get_db().list_instrument_metadata()
+            if item.get("enabled", 1) in (1, True)
+        ]
+    except (RuntimeError, sqlite3.Error):
+        instruments = []  # database unavailable; fall back to benchmarks only
 
     symbols: list[str] = []
     seen: set[str] = set()
@@ -55,10 +59,15 @@ def daily_market_update_job(settings: Settings, data_service: DataService | None
             "status": "skipped_non_trading_day",
             "results": [],
         }
-        RuntimeStore().write_json(f"advice/data_update_{today.isoformat()}.json", payload)
+        record_job_run_safely(
+            "daily_update_skip",
+            payload,
+            run_date=today.isoformat(),
+            status="skipped_non_trading_day",
+        )
         return payload
 
-    strategy_cfg = _load_yaml("config/strategy.yaml").get("strategy", {})
+    strategy_cfg = get_strategy_config()
     symbols = _pool_symbols()
 
     app_cfg = settings.app

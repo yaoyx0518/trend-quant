@@ -7,18 +7,8 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-import yaml
-
 from app.routers.instruments import BulkBackfillJobManager, InstrumentAddJobManager
 from data.storage.db import get_db, init_db
-
-
-class FakeRuntimeStore:
-    def __init__(self) -> None:
-        self.writes: list[tuple[str, dict]] = []
-
-    def write_json(self, path: str, payload: dict) -> None:
-        self.writes.append((path, payload))
 
 
 class FakeBackfillService:
@@ -138,8 +128,15 @@ def wait_for_terminal(manager: BulkBackfillJobManager, timeout: float = 2.0) -> 
 
 
 class BulkBackfillJobManagerTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp.name)
+        init_db(self.tmp_path / "test.db")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
     def test_runs_in_background_and_summarizes_results(self) -> None:
-        store = FakeRuntimeStore()
         services: list[FakeBackfillService] = []
 
         def factory(provider_priority: list[str] | None) -> FakeBackfillService:
@@ -147,7 +144,7 @@ class BulkBackfillJobManagerTest(unittest.TestCase):
             services.append(service)
             return service
 
-        manager = BulkBackfillJobManager(data_service_factory=factory, runtime_store_obj=store)
+        manager = BulkBackfillJobManager(data_service_factory=factory)
         started, status = manager.start(
             items=[
                 {"symbol": "000001.SZ", "start_date": date(2026, 7, 1)},
@@ -171,14 +168,20 @@ class BulkBackfillJobManagerTest(unittest.TestCase):
         self.assertEqual(done["summary"]["no_data"], 1)
         self.assertEqual(done["summary"]["failed"], 1)
         self.assertEqual(done["summary"]["added_rows"], 2)
+        # close() happens in the worker's finally block, just after the
+        # terminal status is published — poll briefly instead of racing it.
+        deadline = time.time() + 2
+        while not services[0].closed and time.time() < deadline:
+            time.sleep(0.02)
         self.assertTrue(services[0].closed)
-        self.assertEqual(len(store.writes), 1)
+        runs = get_db().list_job_runs("instrument_bulk_backfill")
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["payload"]["status"], "completed")
 
     def test_rejects_second_job_while_running(self) -> None:
         release = threading.Event()
         manager = BulkBackfillJobManager(
             data_service_factory=lambda provider_priority: BlockingBackfillService(release),
-            runtime_store_obj=FakeRuntimeStore(),
         )
 
         started, status = manager.start(
@@ -205,7 +208,6 @@ class BulkBackfillJobManagerTest(unittest.TestCase):
     def test_marks_job_failed_when_every_symbol_fails(self) -> None:
         manager = BulkBackfillJobManager(
             data_service_factory=lambda provider_priority: AllFailedBackfillService(),
-            runtime_store_obj=FakeRuntimeStore(),
         )
 
         started, status = manager.start(
@@ -269,11 +271,8 @@ class InstrumentAddJobManagerTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_add_job_writes_config_metadata_and_backfills(self) -> None:
-        config_path = self.tmp_path / "instruments.yaml"
         manager = InstrumentAddJobManager(
             data_service_factory=lambda provider_priority: FakeBackfillService(),
-            runtime_store_obj=FakeRuntimeStore(),
-            config_path=config_path,
         )
 
         started, status = manager.start(
@@ -298,17 +297,16 @@ class InstrumentAddJobManagerTest(unittest.TestCase):
         self.assertEqual(done["summary"]["config_saved"], 1)
         self.assertEqual(done["summary"]["metadata_saved"], 1)
         self.assertEqual(done["summary"]["added_rows"], 2)
-        saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        self.assertEqual(saved_config["instruments"][0]["symbol"], "301516.SZ")
-        self.assertEqual(saved_config["instruments"][0]["asset_type"], "stock")
-        self.assertEqual(get_db().get_instrument_metadata("301516.SZ")["category_path"], "股票-创业板-电源设备")
+        saved = get_db().get_instrument_metadata("301516.SZ")
+        self.assertEqual(saved["asset_type"], "stock")
+        self.assertEqual(saved["category_path"], "股票-创业板-电源设备")
+        self.assertEqual(saved["enabled"], 1)
+        self.assertEqual(saved["stop_atr_mul"], 1.5)
 
     def test_rejects_second_add_job_while_running(self) -> None:
         release = threading.Event()
         manager = InstrumentAddJobManager(
             data_service_factory=lambda provider_priority: BlockingBackfillService(release),
-            runtime_store_obj=FakeRuntimeStore(),
-            config_path=self.tmp_path / "instruments.yaml",
         )
 
         started, status = manager.start(

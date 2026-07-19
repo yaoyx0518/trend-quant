@@ -52,6 +52,11 @@ def _list_ids(client) -> list[str]:
 
 class TestRuleStrategyDeleteApi:
     def test_delete_seeded_strategy_removes_it_from_list(self, client) -> None:
+        save = client.post(
+            "/rule-backtest/api/strategies",
+            json={"strategy": _valid_strategy("close_above_sma20"), "overwrite": False},
+        )
+        assert save.status_code == 200
         assert "close_above_sma20" in _list_ids(client)
 
         resp = client.delete("/rule-backtest/api/strategies/close_above_sma20")

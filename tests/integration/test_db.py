@@ -118,3 +118,46 @@ class TestRuleStrategies:
         assert test_db.get_rule_strategy("del_me") is None
 
 
+
+
+class TestJobRuns:
+    def test_record_and_get_latest(self, test_db) -> None:
+        test_db.record_job_run("daily_update", {"status": "ok", "success": 600}, run_date="2026-07-18")
+        test_db.record_job_run("daily_update", {"status": "ok", "success": 607}, run_date="2026-07-19")
+        latest = test_db.get_latest_job_run("daily_update")
+        assert latest is not None
+        assert latest["payload"]["success"] == 607
+        assert latest["run_date"] == "2026-07-19"
+
+    def test_get_latest_empty(self, test_db) -> None:
+        assert test_db.get_latest_job_run("nope") is None
+
+    def test_list_job_runs(self, test_db) -> None:
+        for i in range(3):
+            test_db.record_job_run("instrument_add", {"seq": i})
+        runs = test_db.list_job_runs("instrument_add", limit=2)
+        assert len(runs) == 2
+        assert runs[0]["payload"]["seq"] == 2  # newest first
+
+
+class TestAppConfig:
+    def test_set_and_get(self, test_db) -> None:
+        test_db.set_config("strategy", {"atr_period": 20, "weights": [0.4, 0.4, 0.2]})
+        cfg = test_db.get_config("strategy")
+        assert cfg["atr_period"] == 20
+        assert cfg["weights"] == [0.4, 0.4, 0.2]
+
+    def test_get_default(self, test_db) -> None:
+        assert test_db.get_config("missing", default={}) == {}
+
+    def test_upsert_overwrites(self, test_db) -> None:
+        test_db.set_config("k", {"v": 1})
+        test_db.set_config("k", {"v": 2})
+        assert test_db.get_config("k")["v"] == 2
+
+    def test_get_all_config(self, test_db) -> None:
+        test_db.set_config("a", {"x": 1})
+        test_db.set_config("b", {"y": 2})
+        all_cfg = test_db.get_all_config()
+        assert all_cfg["a"] == {"x": 1}
+        assert all_cfg["b"] == {"y": 2}

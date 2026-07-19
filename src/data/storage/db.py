@@ -14,6 +14,7 @@ class Database:
         self.db_path = Path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_tables()
+        self._migrate_schema()
 
     @contextmanager
     def _connect(self):
@@ -88,6 +89,11 @@ class Database:
                     priority_l3 INTEGER,
                     sort_order INTEGER,
                     source TEXT,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    stop_atr_mul REAL,
+                    risk_budget_pct REAL,
+                    asset_type TEXT,
+                    start_date TEXT,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE INDEX IF NOT EXISTS idx_instrument_metadata_category
@@ -106,8 +112,44 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_instrument_categories_parent
                     ON instrument_categories(parent_path, priority, name);
 
+                CREATE TABLE IF NOT EXISTS job_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_type TEXT NOT NULL,
+                    run_date TEXT,
+                    status TEXT,
+                    payload TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_job_runs_type_id
+                    ON job_runs(job_type, id);
+
+                CREATE TABLE IF NOT EXISTS app_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
                 """
             )
+
+    # ------------------------------------------------------------------
+    # schema migration
+    # ------------------------------------------------------------------
+    def _migrate_schema(self) -> None:
+        """Idempotent column additions for existing databases."""
+        new_columns = {
+            "enabled": "INTEGER NOT NULL DEFAULT 1",
+            "stop_atr_mul": "REAL",
+            "risk_budget_pct": "REAL",
+            "asset_type": "TEXT",
+            "start_date": "TEXT",
+        }
+        with self._connect() as conn:
+            for name, ddl in new_columns.items():
+                try:
+                    conn.execute(f"ALTER TABLE instrument_metadata ADD COLUMN {name} {ddl}")
+                except sqlite3.OperationalError:
+                    pass  # column already exists
 
     # ------------------------------------------------------------------
     # rule_strategies
@@ -244,6 +286,7 @@ class Database:
             symbol = str(item.get("symbol") or "").strip().upper()
             if not symbol:
                 continue
+            enabled_raw = item.get("enabled", True)
             records.append(
                 (
                     symbol,
@@ -258,6 +301,11 @@ class Database:
                     item.get("priority_l3"),
                     item.get("sort_order"),
                     str(item.get("source") or "").strip(),
+                    1 if enabled_raw in (True, 1, "1", "true") else 0,
+                    item.get("stop_atr_mul"),
+                    item.get("risk_budget_pct"),
+                    str(item.get("asset_type") or "").strip() or None,
+                    str(item.get("start_date") or "").strip() or None,
                 )
             )
         if not records:
@@ -267,8 +315,9 @@ class Database:
             conn.executemany(
                 """INSERT INTO instrument_metadata
                    (symbol, name, category_l1, category_l2, category_l3, factor_tags,
-                    region_tag, priority_l1, priority_l2, priority_l3, sort_order, source)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    region_tag, priority_l1, priority_l2, priority_l3, sort_order, source,
+                    enabled, stop_atr_mul, risk_budget_pct, asset_type, start_date)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                    ON CONFLICT(symbol) DO UPDATE SET
                      name=excluded.name,
                      category_l1=excluded.category_l1,
@@ -281,6 +330,11 @@ class Database:
                      priority_l3=excluded.priority_l3,
                      sort_order=excluded.sort_order,
                      source=excluded.source,
+                     enabled=excluded.enabled,
+                     stop_atr_mul=COALESCE(excluded.stop_atr_mul, instrument_metadata.stop_atr_mul),
+                     risk_budget_pct=COALESCE(excluded.risk_budget_pct, instrument_metadata.risk_budget_pct),
+                     asset_type=COALESCE(excluded.asset_type, instrument_metadata.asset_type),
+                     start_date=COALESCE(excluded.start_date, instrument_metadata.start_date),
                      updated_at=CURRENT_TIMESTAMP""",
                 records,
             )
@@ -483,6 +537,95 @@ class Database:
             cur = conn.execute(f"DELETE FROM {table}")
             return int(cur.rowcount or 0)
 
+    # ------------------------------------------------------------------
+    # job_runs
+    # ------------------------------------------------------------------
+    def record_job_run(
+        self,
+        job_type: str,
+        payload: dict,
+        run_date: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """INSERT INTO job_runs (job_type, run_date, status, payload)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    str(job_type),
+                    run_date,
+                    status or str(payload.get("status", "")),
+                    json.dumps(payload, ensure_ascii=False, default=str),
+                ),
+            )
+            return int(cursor.lastrowid or 0)
+
+    def get_latest_job_run(self, job_type: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM job_runs WHERE job_type = ?
+                   ORDER BY id DESC LIMIT 1""",
+                (str(job_type),),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["payload"] = json.loads(d["payload"]) if d.get("payload") else {}
+        return d
+
+    def list_job_runs(self, job_type: str, limit: int = 20) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM job_runs WHERE job_type = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (str(job_type), int(limit)),
+            ).fetchall()
+        out: list[dict] = []
+        for row in rows:
+            d = dict(row)
+            d["payload"] = json.loads(d["payload"]) if d.get("payload") else {}
+            out.append(d)
+        return out
+
+    # ------------------------------------------------------------------
+    # app_config
+    # ------------------------------------------------------------------
+    def get_config(self, key: str, default: Any = None) -> Any:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key = ?", (str(key),)
+            ).fetchone()
+        if row is None:
+            return default
+        text = row["value"]
+        try:
+            return json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            return text
+
+    def set_config(self, key: str, value: Any) -> None:
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO app_config (key, value, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = excluded.updated_at""",
+                (str(key), text),
+            )
+
+    def get_all_config(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT key, value FROM app_config").fetchall()
+        out: dict[str, Any] = {}
+        for row in rows:
+            try:
+                out[row["key"]] = json.loads(row["value"])
+            except (TypeError, json.JSONDecodeError):
+                out[row["key"]] = row["value"]
+        return out
+
 
 def init_db(db_path: str | Path = "data/trend_quant.db") -> Database:
     global _db_instance
@@ -494,3 +637,18 @@ def get_db() -> Database:
     if _db_instance is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")
     return _db_instance
+
+
+def record_job_run_safely(
+    job_type: str,
+    payload: dict,
+    run_date: str | None = None,
+    status: str | None = None,
+) -> None:
+    """Best-effort job_run recording — never breaks the caller's workflow."""
+    try:
+        get_db().record_job_run(job_type, payload, run_date=run_date, status=status)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning("Failed to record job run: %s", job_type, exc_info=True)

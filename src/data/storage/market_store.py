@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pandas as pd
 
 
@@ -13,6 +11,7 @@ class MarketStore:
     def _get_db(self):
         if self._db is None:
             from data.storage.db import get_db
+
             self._db = get_db()
         return self._db
 
@@ -25,11 +24,3 @@ class MarketStore:
 
     def list_stored_symbols(self) -> list[str]:
         return self._get_db().list_market_symbols(price_mode=self.price_mode)
-
-    @property
-    def base_dir(self) -> Path:
-        return Path("data/market/etf")
-
-    def path_for(self, symbol: str) -> Path:
-        safe_symbol = symbol.replace("/", "_")
-        return self.base_dir / f"{safe_symbol}.parquet"
