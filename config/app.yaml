@@ -5,24 +5,9 @@
   port: 8000
   data_provider_priority:
     - tickflow
-  polling_times:
-    - "10:00"
-    - "10:30"
-    - "11:00"
-    - "11:30"
-    - "13:00"
-    - "13:30"
-    - "14:00"
-    - "14:30"
-  final_signal_time: "14:45"
   update_time_after_close: "16:30"
   daily_update_max_retries: 2
   daily_update_retry_interval_seconds: 5
-  market_fetch_retry_times: 3
-  market_fetch_retry_interval_seconds: 20
-  notify_retry_times: 2
-  notify_retry_interval_seconds: 5
-  lot_size: 100
 
 # TickFlow CN Starter subscription limits (verified against the public pricing API).
 # The application uses the authenticated API endpoint only; the unregistered trial
@@ -36,10 +21,6 @@ tickflow:
   daily_kline_single_requests_per_minute: 60
   quote_max_symbols_per_request: 50
   quote_requests_per_minute: 60
-
-runtime:
-  account_equity_default: 200000
-  ensure_dirs: true
 
 logging:
   level: INFO

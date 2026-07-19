@@ -6,11 +6,46 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 
 import pandas as pd
+import yaml
 
 from data.storage.db import Database
 from rule_backtest import BacktestExecutionConfig, RuleBacktestRequest, SingleSymbolAllInBacktestEngine
 from rule_backtest.loader import StrategyLoader
 from rule_backtest.service import RuleBacktestService
+
+SAMPLE_STRATEGY = {
+    "schema_version": 1,
+    "id": "close_above_sma20",
+    "name": "收盘价上穿/跌破 SMA20",
+    "trade_mode": "single_symbol_all_in",
+    "description": "收盘价大于等于 SMA20 时买入，收盘价小于等于 SMA20 时卖出。",
+    "entry": {
+        "type": "group",
+        "combinator": "all",
+        "children": [
+            {
+                "id": "close_gte_sma20",
+                "type": "condition",
+                "left": {"type": "price", "field": "close"},
+                "operator": ">=",
+                "right": {"type": "indicator", "name": "sma", "params": {"field": "close", "period": 20}},
+            }
+        ],
+    },
+    "exit": {
+        "type": "group",
+        "combinator": "all",
+        "children": [
+            {
+                "id": "close_lte_sma20",
+                "type": "condition",
+                "left": {"type": "price", "field": "close"},
+                "operator": "<=",
+                "right": {"type": "indicator", "name": "sma", "params": {"field": "close", "period": 20}},
+            }
+        ],
+    },
+}
 
 
 def make_bars(closes: list[float], highs: list[float] | None = None, lows: list[float] | None = None) -> pd.DataFrame:
@@ -290,14 +325,18 @@ class RuleBacktestEngineTest(unittest.TestCase):
 
 class RuleBacktestLoaderServiceTest(unittest.TestCase):
     def test_loader_reads_sample_strategy(self) -> None:
-        loader = StrategyLoader()
-        strategies = loader.list_strategies()
-        ids = {item["id"] for item in strategies}
-        self.assertIn("close_above_sma20", ids)
+        with TemporaryDirectory() as tmp:
+            Path(tmp, "close_above_sma20.yaml").write_text(
+                yaml.safe_dump(SAMPLE_STRATEGY, allow_unicode=True), encoding="utf-8"
+            )
+            loader = StrategyLoader(base_dir=tmp)
+            strategies = loader.list_strategies()
+            ids = {item["id"] for item in strategies}
+            self.assertIn("close_above_sma20", ids)
 
-        strategy = loader.load("close_above_sma20")
-        self.assertEqual("single_symbol_all_in", strategy["trade_mode"])
-        self.assertEqual("sma", strategy["entry"]["children"][0]["right"]["name"])
+            strategy = loader.load("close_above_sma20")
+            self.assertEqual("single_symbol_all_in", strategy["trade_mode"])
+            self.assertEqual("sma", strategy["entry"]["children"][0]["right"]["name"])
 
     def test_loader_saves_new_strategy_yaml(self) -> None:
         strategy = {
@@ -460,19 +499,23 @@ class RuleBacktestLoaderServiceTest(unittest.TestCase):
             def list_stored_symbols(self) -> list[str]:
                 return ["TEST"]
 
-        service = RuleBacktestService(strategy_loader=StrategyLoader(), market_store=FakeMarketStore())
-        result = service.run(
-            {
-                "strategy_id": "close_above_sma20",
-                "symbol": "TEST",
-                "initial_capital": 100000.0,
-                "slippage": 0.0,
-                "fee_rate": 0.0,
-                "fee_min": 0.0,
-            }
-        )
-        self.assertEqual("ok", result["status"])
-        self.assertEqual(["BUY", "SELL"], [trade["side"] for trade in result["trades"]])
+        with TemporaryDirectory() as tmp:
+            Path(tmp, "close_above_sma20.yaml").write_text(
+                yaml.safe_dump(SAMPLE_STRATEGY, allow_unicode=True), encoding="utf-8"
+            )
+            service = RuleBacktestService(strategy_loader=StrategyLoader(base_dir=tmp), market_store=FakeMarketStore())
+            result = service.run(
+                {
+                    "strategy_id": "close_above_sma20",
+                    "symbol": "TEST",
+                    "initial_capital": 100000.0,
+                    "slippage": 0.0,
+                    "fee_rate": 0.0,
+                    "fee_min": 0.0,
+                }
+            )
+            self.assertEqual("ok", result["status"])
+            self.assertEqual(["BUY", "SELL"], [trade["side"] for trade in result["trades"]])
 
     def test_service_meta_tolerates_uninitialized_market_store(self) -> None:
         class UninitializedMarketStore:
