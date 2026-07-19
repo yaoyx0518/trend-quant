@@ -15,7 +15,7 @@ from core.calendar import is_trading_day
 from core.settings import Settings
 from core.strategy_config import get_strategy_config
 from data.service import DataService
-from data.storage.runtime_store import RuntimeStore
+from data.storage.db import record_job_run_safely
 
 logger = get_logger(__name__)
 
@@ -59,7 +59,12 @@ def daily_market_update_job(settings: Settings, data_service: DataService | None
             "status": "skipped_non_trading_day",
             "results": [],
         }
-        RuntimeStore().write_json(f"advice/data_update_{today.isoformat()}.json", payload)
+        record_job_run_safely(
+            "daily_update_skip",
+            payload,
+            run_date=today.isoformat(),
+            status="skipped_non_trading_day",
+        )
         return payload
 
     strategy_cfg = get_strategy_config()

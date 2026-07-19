@@ -11,14 +11,6 @@ from app.routers.instruments import BulkBackfillJobManager, InstrumentAddJobMana
 from data.storage.db import get_db, init_db
 
 
-class FakeRuntimeStore:
-    def __init__(self) -> None:
-        self.writes: list[tuple[str, dict]] = []
-
-    def write_json(self, path: str, payload: dict) -> None:
-        self.writes.append((path, payload))
-
-
 class FakeBackfillService:
     def __init__(self) -> None:
         self.closed = False
@@ -136,8 +128,15 @@ def wait_for_terminal(manager: BulkBackfillJobManager, timeout: float = 2.0) -> 
 
 
 class BulkBackfillJobManagerTest(unittest.TestCase):
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp_path = Path(self.tmp.name)
+        init_db(self.tmp_path / "test.db")
+
+    def tearDown(self) -> None:
+        self.tmp.cleanup()
+
     def test_runs_in_background_and_summarizes_results(self) -> None:
-        store = FakeRuntimeStore()
         services: list[FakeBackfillService] = []
 
         def factory(provider_priority: list[str] | None) -> FakeBackfillService:
@@ -145,7 +144,7 @@ class BulkBackfillJobManagerTest(unittest.TestCase):
             services.append(service)
             return service
 
-        manager = BulkBackfillJobManager(data_service_factory=factory, runtime_store_obj=store)
+        manager = BulkBackfillJobManager(data_service_factory=factory)
         started, status = manager.start(
             items=[
                 {"symbol": "000001.SZ", "start_date": date(2026, 7, 1)},
@@ -169,14 +168,20 @@ class BulkBackfillJobManagerTest(unittest.TestCase):
         self.assertEqual(done["summary"]["no_data"], 1)
         self.assertEqual(done["summary"]["failed"], 1)
         self.assertEqual(done["summary"]["added_rows"], 2)
+        # close() happens in the worker's finally block, just after the
+        # terminal status is published — poll briefly instead of racing it.
+        deadline = time.time() + 2
+        while not services[0].closed and time.time() < deadline:
+            time.sleep(0.02)
         self.assertTrue(services[0].closed)
-        self.assertEqual(len(store.writes), 1)
+        runs = get_db().list_job_runs("instrument_bulk_backfill")
+        self.assertEqual(len(runs), 1)
+        self.assertEqual(runs[0]["payload"]["status"], "completed")
 
     def test_rejects_second_job_while_running(self) -> None:
         release = threading.Event()
         manager = BulkBackfillJobManager(
             data_service_factory=lambda provider_priority: BlockingBackfillService(release),
-            runtime_store_obj=FakeRuntimeStore(),
         )
 
         started, status = manager.start(
@@ -203,7 +208,6 @@ class BulkBackfillJobManagerTest(unittest.TestCase):
     def test_marks_job_failed_when_every_symbol_fails(self) -> None:
         manager = BulkBackfillJobManager(
             data_service_factory=lambda provider_priority: AllFailedBackfillService(),
-            runtime_store_obj=FakeRuntimeStore(),
         )
 
         started, status = manager.start(
@@ -269,7 +273,6 @@ class InstrumentAddJobManagerTest(unittest.TestCase):
     def test_add_job_writes_config_metadata_and_backfills(self) -> None:
         manager = InstrumentAddJobManager(
             data_service_factory=lambda provider_priority: FakeBackfillService(),
-            runtime_store_obj=FakeRuntimeStore(),
         )
 
         started, status = manager.start(
@@ -304,7 +307,6 @@ class InstrumentAddJobManagerTest(unittest.TestCase):
         release = threading.Event()
         manager = InstrumentAddJobManager(
             data_service_factory=lambda provider_priority: BlockingBackfillService(release),
-            runtime_store_obj=FakeRuntimeStore(),
         )
 
         started, status = manager.start(

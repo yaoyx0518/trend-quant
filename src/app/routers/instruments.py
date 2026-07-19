@@ -14,14 +14,12 @@ from pydantic import BaseModel, Field
 from core.benchmarks import benchmark_instruments
 from core.strategy_config import get_strategy_config
 from data.service import DataService
-from data.storage.db import get_db
+from data.storage.db import get_db, record_job_run_safely
 from data.storage.market_store import MarketStore
-from data.storage.runtime_store import RuntimeStore
 
 router = APIRouter(prefix="/instruments", tags=["instruments"])
 templates = Jinja2Templates(directory="web/templates")
 market_store = MarketStore()
-runtime_store = RuntimeStore()
 logger = logging.getLogger(__name__)
 
 
@@ -91,14 +89,12 @@ class BulkBackfillJobManager:
     def __init__(
         self,
         data_service_factory: Callable[[list[str] | None], DataService] | None = None,
-        runtime_store_obj: RuntimeStore | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._status = _empty_bulk_status()
         self._data_service_factory = data_service_factory or (
             lambda provider_priority: DataService(provider_priority=provider_priority)
         )
-        self._runtime_store = runtime_store_obj or runtime_store
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -297,7 +293,9 @@ class BulkBackfillJobManager:
                         f"新增 {int(summary.get('added_rows', 0)):,} 行。"
                     )
                 final_status = self._copy_status()
-            self._runtime_store.write_json(f"advice/instrument_bulk_backfill_{job_id}.json", final_status)
+            record_job_run_safely(
+                "instrument_bulk_backfill", final_status, status=str(final_status.get("status") or "")
+            )
         except Exception as exc:
             logger.exception("Instrument bulk backfill job_id=%s failed", job_id)
             with self._lock:
@@ -341,7 +339,6 @@ class InstrumentAddJobManager:
     def __init__(
         self,
         data_service_factory: Callable[[list[str] | None], DataService] | None = None,
-        runtime_store_obj: RuntimeStore | None = None,
     ) -> None:
         self._lock = threading.Lock()
         self._status = _empty_add_status()
@@ -349,7 +346,6 @@ class InstrumentAddJobManager:
         self._data_service_factory = data_service_factory or (
             lambda provider_priority: DataService(provider_priority=provider_priority)
         )
-        self._runtime_store = runtime_store_obj or runtime_store
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -490,7 +486,7 @@ class InstrumentAddJobManager:
                 )
                 self._status["result"] = result
                 final_status = self._copy_status()
-            self._runtime_store.write_json(f"advice/instrument_add_{job_id}.json", final_status)
+            record_job_run_safely("instrument_add", final_status, status=str(final_status.get("status") or ""))
         except Exception as exc:
             logger.exception("Instrument add job_id=%s failed for %s", job_id, symbol)
             with self._lock:
@@ -1035,7 +1031,8 @@ async def backfill_instrument(symbol: str, payload: InstrumentBackfillRequest, r
     )
 
     stamp = datetime.now().strftime("%Y%m%d%H%M%S")
-    runtime_store.write_json(f"advice/instrument_backfill_{normalized_symbol}_{stamp}.json", result)
+    result["job_stamp"] = stamp
+    record_job_run_safely("instrument_backfill", result, status=str(result.get("status") or ""))
     return {"ok": True, "result": result}
 
 
@@ -1077,7 +1074,16 @@ async def get_bulk_backfill_status() -> dict:
 @router.get("/api/daily-update/status")
 async def daily_update_status() -> dict:
     """Latest 16:30 daily data update status for the global notification bar."""
-    status = runtime_store.read_json("daily_update_status.json")
-    if not status:
+    run = get_db().get_latest_job_run("daily_update")
+    if not run:
         return {"ts": None, "completed": False, "message": "暂无更新记录"}
-    return status
+    payload = run.get("payload") or {}
+    return {
+        "ts": payload.get("ts") or run.get("created_at"),
+        "date": run.get("run_date"),
+        "total": payload.get("total", 0),
+        "success": payload.get("success", 0),
+        "failed": payload.get("failed", 0),
+        "failed_symbols": payload.get("failed_symbols", []),
+        "completed": True,
+    }

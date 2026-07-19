@@ -712,3 +712,18 @@ def get_db() -> Database:
     if _db_instance is None:
         raise RuntimeError("Database not initialized. Call init_db() first.")
     return _db_instance
+
+
+def record_job_run_safely(
+    job_type: str,
+    payload: dict,
+    run_date: str | None = None,
+    status: str | None = None,
+) -> None:
+    """Best-effort job_run recording — never breaks the caller's workflow."""
+    try:
+        get_db().record_job_run(job_type, payload, run_date=run_date, status=status)
+    except Exception:
+        import logging
+
+        logging.getLogger(__name__).warning("Failed to record job run: %s", job_type, exc_info=True)

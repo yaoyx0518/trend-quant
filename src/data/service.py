@@ -13,7 +13,7 @@ from core.calendar import is_trading_day as _calendar_is_trading_day
 from core.settings import TickFlowSettings, load_settings
 from data.provider_tickflow import TickFlowProvider
 from data.storage.market_store import MarketStore
-from data.storage.runtime_store import RuntimeStore
+from data.storage.db import record_job_run_safely
 
 logger = get_logger(__name__)
 _symbol_locks_guard = threading.Lock()
@@ -76,7 +76,6 @@ class DataService:
             )
         self.provider_priority = ["tickflow"]
         self.market_store = MarketStore()
-        self.runtime_store = RuntimeStore()
 
     def _ordered_providers(self):
         for name in self.provider_priority:
@@ -616,21 +615,7 @@ class DataService:
             "results": results,
         }
         day = end_date.isoformat()
-        self.runtime_store.write_json(f"advice/data_update_{day}.json", payload)
-
-        # Lightweight status file for the web notification bar.
-        self.runtime_store.write_json(
-            "daily_update_status.json",
-            {
-                "ts": datetime.now().isoformat(),
-                "date": day,
-                "total": len(symbols),
-                "success": success_count,
-                "failed": failed_count,
-                "failed_symbols": failed_symbols,
-                "completed": True,
-            },
-        )
+        record_job_run_safely("daily_update", payload, run_date=day, status="completed")
 
         return payload
 
