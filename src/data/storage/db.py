@@ -106,6 +106,23 @@ class Database:
                 CREATE INDEX IF NOT EXISTS idx_instrument_categories_parent
                     ON instrument_categories(parent_path, priority, name);
 
+                CREATE TABLE IF NOT EXISTS job_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_type TEXT NOT NULL,
+                    run_date TEXT,
+                    status TEXT,
+                    payload TEXT,
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_job_runs_type_id
+                    ON job_runs(job_type, id);
+
+                CREATE TABLE IF NOT EXISTS app_config (
+                    key TEXT PRIMARY KEY,
+                    value TEXT,
+                    updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
                 """
             )
 
@@ -482,6 +499,95 @@ class Database:
         with self._connect() as conn:
             cur = conn.execute(f"DELETE FROM {table}")
             return int(cur.rowcount or 0)
+
+    # ------------------------------------------------------------------
+    # job_runs
+    # ------------------------------------------------------------------
+    def record_job_run(
+        self,
+        job_type: str,
+        payload: dict,
+        run_date: str | None = None,
+        status: str | None = None,
+    ) -> int:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                """INSERT INTO job_runs (job_type, run_date, status, payload)
+                   VALUES (?, ?, ?, ?)""",
+                (
+                    str(job_type),
+                    run_date,
+                    status or str(payload.get("status", "")),
+                    json.dumps(payload, ensure_ascii=False, default=str),
+                ),
+            )
+            return int(cursor.lastrowid or 0)
+
+    def get_latest_job_run(self, job_type: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """SELECT * FROM job_runs WHERE job_type = ?
+                   ORDER BY id DESC LIMIT 1""",
+                (str(job_type),),
+            ).fetchone()
+        if row is None:
+            return None
+        d = dict(row)
+        d["payload"] = json.loads(d["payload"]) if d.get("payload") else {}
+        return d
+
+    def list_job_runs(self, job_type: str, limit: int = 20) -> list[dict]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """SELECT * FROM job_runs WHERE job_type = ?
+                   ORDER BY id DESC LIMIT ?""",
+                (str(job_type), int(limit)),
+            ).fetchall()
+        out: list[dict] = []
+        for row in rows:
+            d = dict(row)
+            d["payload"] = json.loads(d["payload"]) if d.get("payload") else {}
+            out.append(d)
+        return out
+
+    # ------------------------------------------------------------------
+    # app_config
+    # ------------------------------------------------------------------
+    def get_config(self, key: str, default: Any = None) -> Any:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM app_config WHERE key = ?", (str(key),)
+            ).fetchone()
+        if row is None:
+            return default
+        text = row["value"]
+        try:
+            return json.loads(text)
+        except (TypeError, json.JSONDecodeError):
+            return text
+
+    def set_config(self, key: str, value: Any) -> None:
+        text = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)
+        with self._connect() as conn:
+            conn.execute(
+                """INSERT INTO app_config (key, value, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(key) DO UPDATE SET
+                       value = excluded.value,
+                       updated_at = excluded.updated_at""",
+                (str(key), text),
+            )
+
+    def get_all_config(self) -> dict[str, Any]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT key, value FROM app_config").fetchall()
+        out: dict[str, Any] = {}
+        for row in rows:
+            try:
+                out[row["key"]] = json.loads(row["value"])
+            except (TypeError, json.JSONDecodeError):
+                out[row["key"]] = row["value"]
+        return out
 
 
 def init_db(db_path: str | Path = "data/trend_quant.db") -> Database:
