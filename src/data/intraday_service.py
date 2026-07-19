@@ -48,7 +48,7 @@ def _detect_trend_phase(
     neither state.
 
     - 趋势启动 (start): trend_score >= 5  AND  trend_ma5 >= 0
-    - 趋势结束 (end):   trend_score <= 5  AND  trend_ma5 <= 0
+    - 趋势结束 (end):   trend_score <= -5 AND  trend_ma5 <= 0
 
     Returns a dict with keys:
       phase: "start" | "end" | None
@@ -80,7 +80,7 @@ def _detect_trend_phase(
             phase = "start"
             scan_idx = i
             break
-        if ts <= 5 and ma5 <= 0:
+        if ts <= -5 and ma5 <= 0:
             phase = "end"
             scan_idx = i
             break
@@ -105,7 +105,7 @@ def _detect_trend_phase(
             else:
                 break  # phase started at signal_idx
         else:  # phase == "end"
-            if prev_ts <= 5 and prev_ma5 <= 0:
+            if prev_ts <= -5 and prev_ma5 <= 0:
                 signal_idx = j
             else:
                 break

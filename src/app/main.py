@@ -65,13 +65,26 @@ style_file = static_dir / "style.css"
 app.state.asset_version = str(int(style_file.stat().st_mtime)) if style_file.exists() else "1"
 
 
-@app.middleware("http")
-async def refresh_asset_version(request, call_next):
-    """Ensure rendered pages reference the latest local stylesheet revision."""
-    request.app.state.asset_version = (
-        str(int(style_file.stat().st_mtime)) if style_file.exists() else "1"
-    )
-    return await call_next(request)
+class AssetVersionMiddleware:
+    """Refresh ``asset_version`` per request without touching the response.
+
+    Implemented as a pure ASGI pass-through (no response wrapping), unlike
+    ``@app.middleware("http")`` whose BaseHTTPMiddleware buffering asserted
+    on streaming responses such as the MCP SSE endpoint.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http":
+            scope["app"].state.asset_version = (
+                str(int(style_file.stat().st_mtime)) if style_file.exists() else "1"
+            )
+        await self.app(scope, receive, send)
+
+
+app.add_middleware(AssetVersionMiddleware)
 
 
 if static_dir.exists():
