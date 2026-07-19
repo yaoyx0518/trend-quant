@@ -133,7 +133,7 @@ class Database:
             )
 
     # ------------------------------------------------------------------
-    # schema migration + one-time instruments.yaml import
+    # schema migration
     # ------------------------------------------------------------------
     def _migrate_schema(self) -> None:
         """Idempotent column additions for existing databases."""
@@ -150,81 +150,6 @@ class Database:
                     conn.execute(f"ALTER TABLE instrument_metadata ADD COLUMN {name} {ddl}")
                 except sqlite3.OperationalError:
                     pass  # column already exists
-
-    def migrate_instruments_yaml_once(self, path: str = "config/instruments.yaml") -> None:
-        """One-time import of instruments.yaml into instrument_metadata.
-
-        Only fills the newly added columns (enabled/stop_atr_mul/...) and
-        inserts symbols missing from the table; existing category/priority
-        fields (possibly edited via the UI) are never overwritten.
-
-        Called once from the application entrypoint (app lifespan), not from
-        ``__init__`` — ad-hoc Database instances (tests, scripts) must not
-        auto-import the repo yaml into their isolated databases.
-        """
-        if self.get_config("instruments_yaml_migrated"):
-            return
-        yaml_path = Path(path)
-        if not yaml_path.exists():
-            return
-        import yaml
-
-        payload = yaml.safe_load(yaml_path.read_text(encoding="utf-8")) or {}
-        items = payload.get("instruments", []) if isinstance(payload, dict) else []
-        if not isinstance(items, list) or not items:
-            return
-
-        existing = {item["symbol"] for item in self.list_instrument_metadata()}
-        with self._connect() as conn:
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                symbol = str(item.get("symbol") or "").strip().upper()
-                if not symbol:
-                    continue
-                enabled = 1 if bool(item.get("enabled", True)) else 0
-                if symbol in existing:
-                    conn.execute(
-                        """UPDATE instrument_metadata
-                           SET enabled = ?, stop_atr_mul = ?, risk_budget_pct = ?,
-                               asset_type = ?, start_date = ?
-                           WHERE symbol = ?""",
-                        (
-                            enabled,
-                            item.get("stop_atr_mul"),
-                            item.get("risk_budget_pct"),
-                            str(item.get("asset_type") or "").strip() or None,
-                            str(item.get("start_date") or "").strip() or None,
-                            symbol,
-                        ),
-                    )
-                else:
-                    conn.execute(
-                        """INSERT OR IGNORE INTO instrument_metadata
-                           (symbol, name, category_l1, category_l2, category_l3,
-                            priority_l1, priority_l2, priority_l3, sort_order,
-                            source, enabled, stop_atr_mul, risk_budget_pct,
-                            asset_type, start_date)
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (
-                            symbol,
-                            str(item.get("name") or "").strip(),
-                            str(item.get("category_l1") or "").strip(),
-                            str(item.get("category_l2") or "").strip(),
-                            str(item.get("category_l3") or "").strip(),
-                            item.get("priority_l1"),
-                            item.get("priority_l2"),
-                            item.get("priority_l3"),
-                            item.get("sort_order"),
-                            "instruments_yaml",
-                            enabled,
-                            item.get("stop_atr_mul"),
-                            item.get("risk_budget_pct"),
-                            str(item.get("asset_type") or "").strip() or None,
-                            str(item.get("start_date") or "").strip() or None,
-                        ),
-                    )
-        self.set_config("instruments_yaml_migrated", True)
 
     # ------------------------------------------------------------------
     # rule_strategies

@@ -28,7 +28,7 @@ logger = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Path("data").mkdir(exist_ok=True)
-    init_db().migrate_instruments_yaml_once()
+    init_db()
 
     scheduler_manager = SchedulerManager(settings=settings)
 
