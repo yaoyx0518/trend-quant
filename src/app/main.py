@@ -5,16 +5,14 @@ import os
 from pathlib import Path
 
 from fastapi import FastAPI
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.routers import (
     instruments,
-    logs,
     market_view,
-    overview,
     rule_backtest,
     subject_market,
-    trades,
 )
 from audit.app_logger import get_logger, setup_logging
 from core.jobs import daily_market_update_job
@@ -79,13 +77,16 @@ async def refresh_asset_version(request, call_next):
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
-app.include_router(overview.router)
 app.include_router(rule_backtest.router)
-app.include_router(trades.router)
-app.include_router(logs.router)
 app.include_router(instruments.router)
 app.include_router(market_view.router)
 app.include_router(subject_market.router)
+
+
+@app.get("/", include_in_schema=False)
+async def root_redirect() -> RedirectResponse:
+    """The legacy overview page was removed; land on the subject dashboard."""
+    return RedirectResponse(url="/subject-market")
 
 # ── MCP SSE endpoint (optional, requires `mcp` package) ──────────────
 try:
