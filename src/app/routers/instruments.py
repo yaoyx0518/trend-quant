@@ -60,9 +60,6 @@ class InstrumentUpdateRequest(BaseModel):
     category_l3: str
 
 
-_config_write_lock = threading.Lock()
-
-
 def _empty_bulk_status() -> dict:
     return {
         "job_id": None,

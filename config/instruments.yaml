@@ -7942,3 +7942,29 @@ instruments:
   priority_l2: 1
   priority_l3: 3
   sort_order: 457
+- symbol: 688820.SS
+  name: 盛合晶微
+  enabled: true
+  risk_budget_pct: 0.01
+  stop_atr_mul: 1.5
+  asset_type: stock
+  category_l1: 股票
+  category_l2: 科技硬件
+  category_l3: 半导体-封测
+  priority_l1: 3
+  priority_l2: 1
+  priority_l3: 5
+  sort_order: 458
+- symbol: 688183.SS
+  name: 生益电子
+  enabled: true
+  risk_budget_pct: 0.01
+  stop_atr_mul: 1.5
+  asset_type: stock
+  category_l1: 股票
+  category_l2: 科技硬件
+  category_l3: PCB
+  priority_l1: 3
+  priority_l2: 1
+  priority_l3: 9
+  sort_order: 459
