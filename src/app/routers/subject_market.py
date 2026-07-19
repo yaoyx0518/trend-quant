@@ -113,6 +113,8 @@ def _metrics_summary(daily: pd.DataFrame, metadata: dict) -> dict | None:
         "change_20d": _number(latest["change_20d"]),
         "change_60d": _number(latest["change_60d"]),
         "amount": _number(latest["amount"]),
+        # 近20日平均成交额：热力图框面积依据，比单日成交额更稳定。
+        "amount_avg20": _number(daily["amount"].tail(20).mean()),
         "trend_history": trend_ma5[-DISPLAY_DAYS:],
         "trend_dates": [pd.Timestamp(value).date().isoformat() for value in recent["time"]],
         "as_of": pd.Timestamp(latest["time"]).date().isoformat(),

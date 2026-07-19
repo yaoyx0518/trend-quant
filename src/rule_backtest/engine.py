@@ -6,7 +6,13 @@ import pandas as pd
 
 from rule_backtest.condition_engine import ConditionEngine
 from rule_backtest.indicators import latest_field
-from rule_backtest.metrics import annual_returns, compute_drawdown, compute_summary, monthly_returns
+from rule_backtest.metrics import (
+    compute_annual_returns,
+    compute_drawdown,
+    compute_monthly_heatmap,
+    compute_summary,
+    monthly_returns,
+)
 from rule_backtest.models import BacktestExecutionConfig, PositionState, RuleBacktestRequest
 from rule_backtest.state_values import initialize_stop_state, update_position_state_for_day
 from rule_backtest.value_resolver import ValueResolver
@@ -194,8 +200,13 @@ class SingleSymbolAllInBacktestEngine:
             "condition_trace": condition_trace,
             "debug_log": debug_log if debug_enabled else [],
             "drawdown": drawdown,
-            "annual_returns": annual_returns(daily_nav),
+            "annual_returns": compute_annual_returns(
+                daily_nav,
+                trades=trades,
+                benchmark_daily_nav=benchmark_nav,
+            ),
             "monthly_returns": monthly_returns(daily_nav),
+            "monthly_heatmap": compute_monthly_heatmap(daily_nav),
             "benchmark": benchmark,
             "benchmark_summary": benchmark_summary,
             "charts": {

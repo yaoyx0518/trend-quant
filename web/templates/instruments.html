@@ -54,6 +54,7 @@
           <col class="inst-col-category">
           <col class="inst-col-factor">
           <col class="inst-col-date">
+          <col class="inst-col-op">
         </colgroup>
         <thead>
           <tr>
@@ -64,6 +65,7 @@
             <th>三级类目</th>
             <th>因子</th>
             <th>日期范围</th>
+            <th>操作</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -108,6 +110,42 @@
   </form>
 </div>
 
+<div id="editInstrumentModal" class="instrument-modal" hidden>
+  <form id="editInstrumentForm" class="instrument-dialog" autocomplete="off">
+    <div class="instrument-dialog-head">
+      <h3>编辑标的类目</h3>
+      <button id="editInstrumentCloseBtn" class="ghost-btn" type="button" aria-label="关闭编辑标的弹窗">关闭</button>
+    </div>
+    <div class="instrument-form-grid">
+      <label>
+        <span>代码</span>
+        <input id="editInstrumentSymbol" type="text" readonly>
+      </label>
+      <label>
+        <span>名称</span>
+        <input id="editInstrumentName" type="text" readonly>
+      </label>
+      <label>
+        <span>一级类目</span>
+        <select id="editCategoryL1" required></select>
+      </label>
+      <label>
+        <span>二级类目</span>
+        <select id="editCategoryL2" required></select>
+      </label>
+      <label>
+        <span>三级类目</span>
+        <select id="editCategoryL3" required></select>
+      </label>
+    </div>
+    <p id="editInstrumentMsg" class="instrument-form-message"></p>
+    <div class="instrument-dialog-actions">
+      <button id="editInstrumentCancelBtn" class="ghost-btn" type="button">取消</button>
+      <button id="editInstrumentConfirmBtn" type="submit" disabled>保存</button>
+    </div>
+  </form>
+</div>
+
 <script>
 (() => {
   const statusEl = document.getElementById('instStatus');
@@ -135,6 +173,19 @@
     l2: document.getElementById('addCategoryL2'),
     l3: document.getElementById('addCategoryL3'),
   };
+  const editInstrumentModal = document.getElementById('editInstrumentModal');
+  const editInstrumentForm = document.getElementById('editInstrumentForm');
+  const editInstrumentCloseBtn = document.getElementById('editInstrumentCloseBtn');
+  const editInstrumentCancelBtn = document.getElementById('editInstrumentCancelBtn');
+  const editInstrumentConfirmBtn = document.getElementById('editInstrumentConfirmBtn');
+  const editInstrumentSymbolEl = document.getElementById('editInstrumentSymbol');
+  const editInstrumentNameEl = document.getElementById('editInstrumentName');
+  const editInstrumentMsgEl = document.getElementById('editInstrumentMsg');
+  const editCategoryEls = {
+    l1: document.getElementById('editCategoryL1'),
+    l2: document.getElementById('editCategoryL2'),
+    l3: document.getElementById('editCategoryL3'),
+  };
   const filterEls = {
     l1: document.getElementById('instFilterL1'),
     l2: document.getElementById('instFilterL2'),
@@ -156,6 +207,8 @@
   let completedAddJobRefreshDone = null;
   let sectionObserver = null;
   let activeSyncPending = false;
+  let editingSymbol = '';
+  let isEditSaving = false;
   const dismissedCompletionKey = 'instrumentBulkBackfillDismissedJobId';
 
   function esc(v) {
@@ -408,27 +461,35 @@
     if (rows.some((row) => row.name === current)) select.value = current;
   }
 
-  function selectedCategoryPath(level) {
-    const select = addCategoryEls[level];
+  function selectedCategoryPath(selectEls, level) {
+    const select = selectEls[level];
     if (!select) return '';
     const option = select.selectedOptions && select.selectedOptions[0];
     return option ? String(option.dataset.path || '').trim() : '';
   }
 
-  function renderAddCategorySelects(changedLevel = '') {
-    setSelectOptions(addCategoryEls.l1, categoryChildren(1), '选择一级类目');
+  function renderCategorySelects(selectEls, changedLevel, onRendered) {
+    setSelectOptions(selectEls.l1, categoryChildren(1), '选择一级类目');
     if (changedLevel === 'l1') {
-      addCategoryEls.l2.value = '';
-      addCategoryEls.l3.value = '';
+      selectEls.l2.value = '';
+      selectEls.l3.value = '';
     }
 
-    const l1Path = selectedCategoryPath('l1');
-    setSelectOptions(addCategoryEls.l2, l1Path ? categoryChildren(2, l1Path) : [], '选择二级类目');
-    if (changedLevel === 'l1' || changedLevel === 'l2') addCategoryEls.l3.value = '';
+    const l1Path = selectedCategoryPath(selectEls, 'l1');
+    setSelectOptions(selectEls.l2, l1Path ? categoryChildren(2, l1Path) : [], '选择二级类目');
+    if (changedLevel === 'l1' || changedLevel === 'l2') selectEls.l3.value = '';
 
-    const l2Path = selectedCategoryPath('l2');
-    setSelectOptions(addCategoryEls.l3, l2Path ? categoryChildren(3, l2Path) : [], '选择三级类目');
-    updateAddConfirmState();
+    const l2Path = selectedCategoryPath(selectEls, 'l2');
+    setSelectOptions(selectEls.l3, l2Path ? categoryChildren(3, l2Path) : [], '选择三级类目');
+    if (typeof onRendered === 'function') onRendered();
+  }
+
+  function renderAddCategorySelects(changedLevel = '') {
+    renderCategorySelects(addCategoryEls, changedLevel, updateAddConfirmState);
+  }
+
+  function renderEditCategorySelects(changedLevel = '') {
+    renderCategorySelects(editCategoryEls, changedLevel, updateEditConfirmState);
   }
 
   async function loadCategories() {
@@ -562,13 +623,16 @@
         <td class="instrument-category-cell">${esc(valueOrDash(item.category_l3))}</td>
         <td class="instrument-factor-cell">${esc(tagsText(item))}</td>
         <td class="instrument-date-cell" data-role="range">${esc(dateRangeText(localStart, localEnd))}</td>
+        <td class="instrument-op-cell">
+          <button type="button" class="ghost-btn instrument-edit-btn" data-role="edit">编辑</button>
+        </td>
       </tr>
     `;
   }
 
   function renderTable(items, sections) {
     if (!Array.isArray(items) || !items.length) {
-      tableBody.innerHTML = '<tr><td colspan="7">没有符合条件的本地标的数据。</td></tr>';
+      tableBody.innerHTML = '<tr><td colspan="8">没有符合条件的本地标的数据。</td></tr>';
       return;
     }
 
@@ -580,14 +644,14 @@
       const l1 = String(item.category_l1 || '').trim() || '未分类';
       const l2 = String(item.category_l2 || '').trim() || '未分二级';
       if (l1 !== lastL1) {
-        parts.push(`<tr class="instrument-group-l1"><td colspan="7">${esc(l1)}</td></tr>`);
+        parts.push(`<tr class="instrument-group-l1"><td colspan="8">${esc(l1)}</td></tr>`);
         lastL1 = l1;
         lastL2 = null;
       }
       if (l2 !== lastL2) {
         const section = sections[sectionIndex] || { id: safeAnchorId(l1, l2, sectionIndex + 1), l1, l2 };
         sectionIndex += 1;
-        parts.push(`<tr id="${esc(section.id)}" class="instrument-group-l2" data-l1="${esc(l1)}" data-l2="${esc(l2)}"><td colspan="7">${esc(l2)}</td></tr>`);
+        parts.push(`<tr id="${esc(section.id)}" class="instrument-group-l2" data-l1="${esc(l1)}" data-l2="${esc(l2)}"><td colspan="8">${esc(l2)}</td></tr>`);
         lastL2 = l2;
       }
       parts.push(rowHtml(item));
@@ -617,7 +681,7 @@
       render();
     } catch (err) {
       statusEl.textContent = `加载失败：${err.message}`;
-      tableBody.innerHTML = '<tr><td colspan="7">数据加载失败。</td></tr>';
+      tableBody.innerHTML = '<tr><td colspan="8">数据加载失败。</td></tr>';
     }
   }
 
@@ -904,6 +968,90 @@
     if (addInstrumentModal) addInstrumentModal.hidden = true;
   }
 
+  function setEditMessage(text, isError = false) {
+    if (!editInstrumentMsgEl) return;
+    editInstrumentMsgEl.textContent = text || '';
+    editInstrumentMsgEl.classList.toggle('is-error', Boolean(isError));
+  }
+
+  function updateEditConfirmState() {
+    if (!editInstrumentConfirmBtn) return;
+    const ready = Boolean(
+      editingSymbol &&
+      editCategoryEls.l1?.value &&
+      editCategoryEls.l2?.value &&
+      editCategoryEls.l3?.value
+    );
+    editInstrumentConfirmBtn.disabled = !ready || isEditSaving;
+  }
+
+  async function openEditModal(symbol) {
+    const normalized = String(symbol || '').trim().toUpperCase();
+    const item = allItems.find(
+      (entry) => String(entry.symbol || '').trim().toUpperCase() === normalized
+    );
+    if (!item || !editInstrumentModal) return;
+    editingSymbol = normalized;
+    if (editInstrumentSymbolEl) editInstrumentSymbolEl.value = normalized;
+    if (editInstrumentNameEl) editInstrumentNameEl.value = String(item.name || '');
+    setEditMessage('');
+    editInstrumentModal.hidden = false;
+
+    if (!categoryRows().length) await loadCategories();
+    renderEditCategorySelects();
+    if (editCategoryEls.l1) editCategoryEls.l1.value = String(item.category_l1 || '').trim();
+    const l1Path = selectedCategoryPath(editCategoryEls, 'l1');
+    setSelectOptions(editCategoryEls.l2, l1Path ? categoryChildren(2, l1Path) : [], '选择二级类目');
+    if (editCategoryEls.l2) editCategoryEls.l2.value = String(item.category_l2 || '').trim();
+    const l2Path = selectedCategoryPath(editCategoryEls, 'l2');
+    setSelectOptions(editCategoryEls.l3, l2Path ? categoryChildren(3, l2Path) : [], '选择三级类目');
+    if (editCategoryEls.l3) editCategoryEls.l3.value = String(item.category_l3 || '').trim();
+    updateEditConfirmState();
+  }
+
+  function closeEditModal() {
+    if (editInstrumentModal) editInstrumentModal.hidden = true;
+    editingSymbol = '';
+  }
+
+  async function runEditInstrument(event) {
+    event.preventDefault();
+    if (!editingSymbol || isEditSaving) return;
+    const payload = {
+      category_l1: String(editCategoryEls.l1?.value || '').trim(),
+      category_l2: String(editCategoryEls.l2?.value || '').trim(),
+      category_l3: String(editCategoryEls.l3?.value || '').trim(),
+    };
+    if (!payload.category_l1 || !payload.category_l2 || !payload.category_l3) {
+      setEditMessage('一二三级类目均必选。', true);
+      return;
+    }
+
+    isEditSaving = true;
+    updateEditConfirmState();
+    setEditMessage('正在保存...');
+    try {
+      const resp = await fetch(`/instruments/api/${encodeURIComponent(editingSymbol)}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.detail || '保存失败');
+      const savedSymbol = editingSymbol;
+      const savedPath = String(data.category_path || '');
+      closeEditModal();
+      await loadList();
+      loadCategories();
+      statusEl.textContent = `已更新 ${savedSymbol} 的类目：${savedPath}。`;
+    } catch (err) {
+      setEditMessage(err.message, true);
+    } finally {
+      isEditSaving = false;
+      updateEditConfirmState();
+    }
+  }
+
   async function lookupAddInstrumentName() {
     const rawSymbol = String(addInstrumentSymbolEl?.value || '').trim();
     const symbol = normalizeSymbolInput(rawSymbol);
@@ -1059,10 +1207,15 @@
   tableBody.addEventListener('click', async (event) => {
     const target = event.target;
     if (!(target instanceof HTMLElement)) return;
-    if (target.getAttribute('data-role') !== 'backfill') return;
-    if (isBulkRunning) return;
+    const role = target.getAttribute('data-role');
     const row = target.closest('tr');
     if (!row) return;
+    if (role === 'edit') {
+      openEditModal(row.dataset.symbol);
+      return;
+    }
+    if (role !== 'backfill') return;
+    if (isBulkRunning) return;
     await runBackfill(row);
   });
 
@@ -1080,6 +1233,10 @@
 
   for (const [level, el] of Object.entries(addCategoryEls)) {
     el?.addEventListener('change', () => renderAddCategorySelects(level));
+  }
+
+  for (const [level, el] of Object.entries(editCategoryEls)) {
+    el?.addEventListener('change', () => renderEditCategorySelects(level));
   }
 
   clearFiltersBtn.addEventListener('click', () => {
@@ -1115,6 +1272,12 @@
     lookupAddInstrumentName();
   });
   addInstrumentForm?.addEventListener('submit', runAddInstrument);
+  editInstrumentCloseBtn?.addEventListener('click', closeEditModal);
+  editInstrumentCancelBtn?.addEventListener('click', closeEditModal);
+  editInstrumentModal?.addEventListener('click', (event) => {
+    if (event.target === editInstrumentModal) closeEditModal();
+  });
+  editInstrumentForm?.addEventListener('submit', runEditInstrument);
   completionCloseBtn?.addEventListener('click', () => dismissCompletion(currentCompletionJobId || currentBulkJobId));
 
   loadList();

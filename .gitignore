@@ -28,3 +28,6 @@ Thumbs.db
 
 # ZCode IDE
 .zcode/
+
+# Git bundle backups (never commit bundles into the repo they back up)
+*.bundle

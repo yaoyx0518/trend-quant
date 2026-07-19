@@ -730,6 +730,8 @@
       symbol: 'none',
       smooth: true,
       lineStyle: { width: 1.0, type: 'dashed', color: KLINE_MA_COLORS[period] || '#666' },
+      // 图例图标圆形取 itemStyle 颜色，需与线色一致避免误导
+      itemStyle: { color: KLINE_MA_COLORS[period] || '#666' },
       data,
       tooltip: { valueFormatter: (v) => num3(v) },
       z: 3,
@@ -1437,6 +1439,7 @@
           data: strategyDrawdown,
           areaStyle: {},
           lineStyle: { color: '#d14343' },
+          itemStyle: { color: '#d14343' },
           symbol: 'none',
         },
         ...benchmarkDrawdowns.map((item) => ({

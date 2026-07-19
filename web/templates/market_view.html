@@ -124,6 +124,22 @@
     </div>
   </div>
 
+  <div class="chart-grid market-returns-grid" id="mvReturnsPanel" hidden>
+    <div class="viz-panel">
+      <h3 id="mvHeatTitle">月度收益热力图</h3>
+      <div id="mvHeatChart" class="chart-md"></div>
+    </div>
+    <div class="table-panel">
+      <h3 id="mvAnnualTitle">年度收益表</h3>
+      <div class="table-shell">
+        <table id="mvAnnualTable">
+          <thead></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div class="content-panel market-debug-panel">
     <h3>Debug 日志</h3>
     <p id="mvDebugInfo" class="context-hint">暂无结果。</p>
@@ -164,6 +180,11 @@
   const backtestSummaryEl = document.getElementById('mvBacktestSummary');
   const tradeMetaEl = document.getElementById('mvTradeMeta');
   const tradesBodyEl = document.getElementById('mvTradesBody');
+  const returnsPanelEl = document.getElementById('mvReturnsPanel');
+  const heatTitleEl = document.getElementById('mvHeatTitle');
+  const annualTitleEl = document.getElementById('mvAnnualTitle');
+  const annualTableHeadEl = document.querySelector('#mvAnnualTable thead');
+  const annualTableBodyEl = document.querySelector('#mvAnnualTable tbody');
   const debugInfoEl = document.getElementById('mvDebugInfo');
   const debugPreviewEl = document.getElementById('mvDebugPreview');
   const trendControlsEl = document.getElementById('mvTrendControls');
@@ -180,6 +201,7 @@
   let rsiChart = null;
   let macdChart = null;
   let biasChart = null;
+  let heatChart = null;
   let charts = [];
   try {
     priceChart = echarts.init(document.getElementById('mvPriceChart'));
@@ -472,11 +494,13 @@
       symbol: 'none',
       smooth: true,
       lineStyle: { width: 1.1, color: maColors[period] || '#475569' },
+      // 图例图标圆形取 itemStyle 颜色，需与线色一致避免误导
+      itemStyle: { color: maColors[period] || '#475569' },
     }));
     const bollSeries = [
-      { name: 'BOLL上轨', type: 'line', data: indicators.boll?.upper || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#b42318' } },
-      { name: 'BOLL中轨', type: 'line', data: indicators.boll?.mid || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#c7834c' } },
-      { name: 'BOLL下轨', type: 'line', data: indicators.boll?.lower || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#0d7a71' } },
+      { name: 'BOLL上轨', type: 'line', data: indicators.boll?.upper || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#b42318' }, itemStyle: { color: '#b42318' } },
+      { name: 'BOLL中轨', type: 'line', data: indicators.boll?.mid || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#c7834c' }, itemStyle: { color: '#c7834c' } },
+      { name: 'BOLL下轨', type: 'line', data: indicators.boll?.lower || [], symbol: 'none', smooth: true, lineStyle: { width: 1.1, color: '#0d7a71' }, itemStyle: { color: '#0d7a71' } },
     ];
     return [...maSeries, ...bollSeries];
   }
@@ -685,8 +709,8 @@
             ],
           },
         },
-        { name: 'Trend MA5', type: 'line', data: trend.ma?.['5'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.15, color: '#7c3aed' } },
-        { name: 'Trend MA10', type: 'line', data: trend.ma?.['10'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.15, color: '#c7834c' } },
+        { name: 'Trend MA5', type: 'line', data: trend.ma?.['5'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.15, color: '#7c3aed' }, itemStyle: { color: '#7c3aed' } },
+        { name: 'Trend MA10', type: 'line', data: trend.ma?.['10'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.15, color: '#c7834c' }, itemStyle: { color: '#c7834c' } },
       ],
     }, true);
   }
@@ -712,8 +736,8 @@
       yAxis: { type: 'value', scale: true, axisLabel: { formatter: compact } },
       series: [
         { name: '成交量', type: 'bar', data, barMaxWidth: 8 },
-        { name: 'VOLMA5', type: 'line', data: indicators.volume_ma?.['5'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1, color: '#7c3aed' } },
-        { name: 'VOLMA10', type: 'line', data: indicators.volume_ma?.['10'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1, color: '#c7834c' } },
+        { name: 'VOLMA5', type: 'line', data: indicators.volume_ma?.['5'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1, color: '#7c3aed' }, itemStyle: { color: '#7c3aed' } },
+        { name: 'VOLMA10', type: 'line', data: indicators.volume_ma?.['10'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1, color: '#c7834c' }, itemStyle: { color: '#c7834c' } },
       ],
     }, true);
   }
@@ -747,6 +771,7 @@
           symbol: 'none',
           smooth: true,
           lineStyle: { width: 1.7, color: '#2563eb' },
+          itemStyle: { color: '#2563eb' },
           markLine: {
             silent: true,
             symbol: 'none',
@@ -781,8 +806,8 @@
       yAxis: { type: 'value', scale: true },
       series: [
         { name: 'MACD', type: 'bar', data: bars, barMaxWidth: 8 },
-        { name: 'DIF', type: 'line', data: macd.dif || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#2563eb' } },
-        { name: 'DEA', type: 'line', data: macd.dea || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#c7834c' } },
+        { name: 'DIF', type: 'line', data: macd.dif || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#2563eb' }, itemStyle: { color: '#2563eb' } },
+        { name: 'DEA', type: 'line', data: macd.dea || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#c7834c' }, itemStyle: { color: '#c7834c' } },
       ],
     }, true);
   }
@@ -801,9 +826,9 @@
       xAxis: { type: 'category', data: dates, boundaryGap: false },
       yAxis: { type: 'value', scale: true, axisLabel: { formatter: (v) => `${num(v, 1)}%` } },
       series: [
-        { name: 'BIAS6', type: 'line', data: bias['6'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#7c3aed' } },
-        { name: 'BIAS12', type: 'line', data: bias['12'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#0d7a71' } },
-        { name: 'BIAS24', type: 'line', data: bias['24'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#c7834c' } },
+        { name: 'BIAS6', type: 'line', data: bias['6'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#7c3aed' }, itemStyle: { color: '#7c3aed' } },
+        { name: 'BIAS12', type: 'line', data: bias['12'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#0d7a71' }, itemStyle: { color: '#0d7a71' } },
+        { name: 'BIAS24', type: 'line', data: bias['24'] || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#c7834c' }, itemStyle: { color: '#c7834c' } },
       ],
     }, true);
   }
@@ -847,6 +872,7 @@
     // Update trades table to show active strategy's trades
     if (currentBacktest) {
       renderBacktestTrades(currentBacktest);
+      renderBacktestReturns(currentBacktest);
     }
     // Update row highlights
     for (const row of backtestSummaryEl.querySelectorAll('tr[data-strategy-id]')) {
@@ -951,13 +977,173 @@
     return map[reason] || reason || '-';
   }
 
-  function renderBacktestTrades(result) {
-    // Use trades from the active strategy if available, otherwise first result
-    let tradesSource = result;
+  function pickBacktestSource(result) {
+    // Use the active strategy's result if available, otherwise the top-level (first) result
     if (activeStrategyId && result?.results) {
       const active = result.results.find(r => r.strategy_id === activeStrategyId);
-      if (active) tradesSource = active;
+      if (active) return active;
     }
+    return result;
+  }
+
+  function ensureHeatChart() {
+    if (heatChart) return heatChart;
+    const el = document.getElementById('mvHeatChart');
+    if (!el) return null;
+    try {
+      heatChart = echarts.init(el);
+    } catch (err) {
+      console.warn('月度收益热力图初始化失败：', err);
+      heatChart = null;
+    }
+    return heatChart;
+  }
+
+  function metricTone(value, tone = 'neutral') {
+    const n = Number(value);
+    if (!Number.isFinite(n) || tone === 'neutral') return '';
+    if (tone === 'risk') return n < 0 ? 'metric-risk' : '';
+    if (n > 0) return 'metric-positive';
+    if (n < 0) return 'metric-negative';
+    return '';
+  }
+
+  function diffCellHtml(value, formatter) {
+    const n = Number(value);
+    if (!Number.isFinite(n)) return '<span>-</span>';
+    const sign = n > 0 ? '+' : '';
+    const cls = n > 0 ? 'pnl-profit' : (n < 0 ? 'pnl-loss' : '');
+    return `<span class="${cls}">${sign}${formatter(n)}</span>`;
+  }
+
+  function renderMonthlyHeatmap(monthly) {
+    const chart = ensureHeatChart();
+    if (!chart) return;
+    const years = Array.isArray(monthly?.years) ? monthly.years : [];
+    const months = Array.isArray(monthly?.months) && monthly.months.length
+      ? monthly.months
+      : ['01', '02', '03', '04', '05', '06', '07', '08', '09', '10', '11', '12'];
+    const data = Array.isArray(monthly?.data) ? monthly.data : [];
+
+    let absMax = 1;
+    for (const row of data) {
+      const v = Number(row?.[2]);
+      if (Number.isFinite(v)) absMax = Math.max(absMax, Math.abs(v));
+    }
+
+    chart.setOption({
+      tooltip: { formatter: p => `${years[p.value[1]]}-${months[p.value[0]]}: ${Number(p.value[2]).toFixed(2)}%` },
+      grid: { left: 62, right: 28, top: 20, bottom: 70 },
+      xAxis: { type: 'category', data: months },
+      yAxis: { type: 'category', data: years.map(String) },
+      visualMap: {
+        min: -absMax,
+        max: absMax,
+        calculable: true,
+        orient: 'horizontal',
+        left: 'center',
+        bottom: 0,
+        inRange: {
+          color: ['#0b8a4a', '#86cfaa', '#f7f7f7', '#f0a0a0', '#c81010']
+        },
+      },
+      series: [{
+        type: 'heatmap',
+        data,
+        label: { show: true, formatter: p => `${Number(p.value[2]).toFixed(1)}%` }
+      }],
+      graphic: data.length ? [] : [{
+        type: 'text',
+        left: 'center',
+        top: 'middle',
+        style: { text: '暂无月度收益数据', fill: '#6b7280', fontSize: 14 },
+      }],
+    }, true);
+    setTimeout(() => { if (heatChart) heatChart.resize(); }, 0);
+  }
+
+  function renderAnnualTable(rows, strategyName) {
+    if (!annualTableHeadEl || !annualTableBodyEl) return;
+    const hasBenchmark = (rows || []).some((r) => (
+      Number.isFinite(Number(r?.benchmark_return)) || Number.isFinite(Number(r?.benchmark_sharpe))
+    ));
+    const benchmarkCols = hasBenchmark ? 4 : 0;
+    annualTableHeadEl.innerHTML = `
+      <tr>
+        <th rowspan="2">年份</th>
+        <th colspan="5" class="table-group-head">策略${strategyName ? `（${esc(strategyName)}）` : ''}</th>
+        ${hasBenchmark ? '<th colspan="4" class="table-group-head">买入持有</th>' : ''}
+      </tr>
+      <tr>
+        <th>收益</th>
+        <th>夏普</th>
+        <th>交易数</th>
+        <th>胜率</th>
+        <th>盈亏比</th>
+        ${hasBenchmark ? `
+          <th>收益</th>
+          <th>收益超额</th>
+          <th>夏普</th>
+          <th>夏普差值</th>
+        ` : ''}
+      </tr>
+    `;
+
+    if (!rows || !rows.length) {
+      annualTableBodyEl.innerHTML = `<tr><td colspan="${6 + benchmarkCols}">暂无年度收益数据</td></tr>`;
+      return;
+    }
+    annualTableBodyEl.innerHTML = rows.map((r) => {
+      const benchmarkCells = hasBenchmark ? (() => {
+        const returnExcess = Number.isFinite(Number(r?.return)) && Number.isFinite(Number(r?.benchmark_return))
+          ? Number(r.return) - Number(r.benchmark_return)
+          : null;
+        const sharpeExcess = Number.isFinite(Number(r?.sharpe)) && Number.isFinite(Number(r?.benchmark_sharpe))
+          ? Number(r.sharpe) - Number(r.benchmark_sharpe)
+          : null;
+        return `
+          <td class="num-cell ${metricTone(r?.benchmark_return, 'return')}">${pct(r?.benchmark_return)}</td>
+          <td class="num-cell">${diffCellHtml(returnExcess, pct)}</td>
+          <td class="num-cell ${metricTone(r?.benchmark_sharpe, 'score')}">${num(r?.benchmark_sharpe, 2)}</td>
+          <td class="num-cell">${diffCellHtml(sharpeExcess, (v) => num(v, 2))}</td>
+        `;
+      })() : '';
+      return `
+        <tr>
+          <th scope="row" class="year-cell">${r.year ?? '-'}</th>
+          <td class="num-cell ${metricTone(r.return, 'return')}">${pct(r.return)}</td>
+          <td class="num-cell ${metricTone(r.sharpe, 'score')}">${num(r.sharpe, 2)}</td>
+          <td class="num-cell">${Number.isFinite(Number(r.trade_count)) ? Math.round(Number(r.trade_count)) : '-'}</td>
+          <td class="num-cell ${metricTone(r.win_rate, 'score')}">${pct(r.win_rate)}</td>
+          <td class="num-cell ${metricTone(r.profit_factor, 'score')}">${num(r.profit_factor, 2)}</td>
+          ${benchmarkCells}
+        </tr>
+      `;
+    }).join('');
+  }
+
+  function renderBacktestReturns(result) {
+    if (!returnsPanelEl) return;
+    const source = pickBacktestSource(result);
+    const strategyName = source?.strategy_name || strategyLabel(source) || '';
+    if (heatTitleEl) heatTitleEl.textContent = `月度收益热力图${strategyName ? `（${strategyName}）` : ''}`;
+    if (annualTitleEl) annualTitleEl.textContent = '年度收益表';
+    returnsPanelEl.hidden = false;
+    renderMonthlyHeatmap(source?.monthly_heatmap || {});
+    renderAnnualTable(source?.annual_returns || [], strategyName);
+  }
+
+  function clearBacktestReturns() {
+    if (returnsPanelEl) returnsPanelEl.hidden = true;
+    if (heatChart) {
+      heatChart.clear();
+    }
+    if (annualTableHeadEl) annualTableHeadEl.innerHTML = '';
+    if (annualTableBodyEl) annualTableBodyEl.innerHTML = '';
+  }
+
+  function renderBacktestTrades(result) {
+    const tradesSource = pickBacktestSource(result);
     const trades = attachHoldingDays(tradesSource?.trades || [])
       .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
     const strategyName = tradesSource?.strategy_name || strategyLabel(tradesSource) || '';
@@ -1001,6 +1187,7 @@
     activeStrategyId = null;
     renderBacktestSummary(result);
     renderBacktestTrades(result);
+    renderBacktestReturns(result);
     renderBacktestDebug(result);
     if (currentPayload) {
       currentZoom = zoomForDateRange(currentPayload.dates || [], result.start_date, result.end_date);
@@ -1176,6 +1363,7 @@
         updateBacktestRangeLabel();
         tradeMetaEl.textContent = '运行回测后显示。';
         tradesBodyEl.innerHTML = '<tr><td colspan="10">暂无交易明细。</td></tr>';
+        clearBacktestReturns();
         debugInfoEl.textContent = '暂无结果。';
         debugPreviewEl.textContent = '';
       }
@@ -1345,7 +1533,10 @@
   symbolInputEl.addEventListener('keydown', (event) => {
     if (event.key === 'Enter') loadDaily();
   });
-  window.addEventListener('resize', () => { if (charts.length) charts.forEach((chart) => chart.resize()); });
+  window.addEventListener('resize', () => {
+    if (charts.length) charts.forEach((chart) => chart.resize());
+    if (heatChart) heatChart.resize();
+  });
 
   // Cap backtest end date to yesterday (intraday data not persisted).
   (function setBacktestDateMax() {

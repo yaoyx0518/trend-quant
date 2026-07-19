@@ -175,3 +175,13 @@ async def save_rule_strategy(payload: RuleStrategySaveRequest) -> dict:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/api/strategies/{strategy_id}")
+async def delete_rule_strategy(strategy_id: str) -> dict:
+    try:
+        return service.delete_strategy(strategy_id)
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

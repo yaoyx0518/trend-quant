@@ -207,8 +207,40 @@
 }
 
 .rule-strategy-page .strategy-edit-btn,
-.rule-strategy-page .strategy-copy-btn {
+.rule-strategy-page .strategy-copy-btn,
+.rule-strategy-page .strategy-delete-btn {
   min-width: 76px;
+}
+
+.rule-strategy-page .strategy-delete-btn {
+  border-color: rgba(193, 91, 88, 0.42);
+  color: var(--danger);
+}
+
+.rule-strategy-page .strategy-delete-btn:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: rgba(193, 91, 88, 0.08);
+}
+
+.rule-strategy-page .strategy-delete-dialog {
+  width: min(520px, 100%);
+}
+
+.rule-strategy-page .strategy-delete-text {
+  margin: 4px 0 18px;
+  color: var(--text-soft);
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+
+.rule-strategy-page .strategy-danger-btn {
+  border-color: var(--danger);
+  background: linear-gradient(135deg, #c15b58 0%, #a54441 100%);
+  box-shadow: 0 14px 26px rgba(193, 91, 88, 0.24);
+}
+
+.rule-strategy-page .strategy-danger-btn:hover:not(:disabled) {
+  box-shadow: 0 20px 32px rgba(193, 91, 88, 0.28);
 }
 
 @media (max-width: 1100px) {
@@ -299,6 +331,24 @@
       <span id="strategySaveStatus"></span>
       <button id="cancelStrategyBtn" type="button" class="ghost-btn">取消</button>
       <button id="saveStrategyBtn" type="button">保存策略</button>
+    </div>
+  </div>
+</div>
+
+<div id="strategyDeleteConfirm" class="rule-strategy-modal" hidden>
+  <div class="rule-strategy-dialog strategy-delete-dialog" role="alertdialog" aria-modal="true" aria-labelledby="strategyDeleteTitle">
+    <div class="rule-strategy-dialog-head">
+      <div>
+        <h3 id="strategyDeleteTitle">删除策略</h3>
+        <p class="context-hint">删除后不可恢复，请再次确认。</p>
+      </div>
+      <button id="closeDeleteBtn" type="button" class="ghost-btn">关闭</button>
+    </div>
+    <p id="strategyDeleteText" class="strategy-delete-text"></p>
+    <div class="rule-strategy-dialog-actions">
+      <span id="strategyDeleteStatus"></span>
+      <button id="cancelDeleteBtn" type="button" class="ghost-btn">取消</button>
+      <button id="confirmDeleteBtn" type="button" class="strategy-danger-btn">确认删除</button>
     </div>
   </div>
 </div>
@@ -401,6 +451,7 @@ function renderStrategyCards() {
           <div class="strategy-row-actions">
             <button type="button" class="ghost-btn strategy-edit-btn" data-strategy-id="${esc(item.id)}" title="编辑策略">编辑</button>
             <button type="button" class="ghost-btn strategy-copy-btn" data-strategy-id="${esc(item.id)}" title="复制策略">复制</button>
+            <button type="button" class="ghost-btn strategy-delete-btn" data-strategy-id="${esc(item.id)}" title="删除策略">删除</button>
           </div>
         </header>
         <div class="strategy-row-rules">
@@ -786,6 +837,48 @@ function closeStrategyModal() {
   document.body.classList.remove("modal-open");
 }
 
+let deletingStrategyItem = null;
+
+function openDeleteConfirm(item) {
+  deletingStrategyItem = item;
+  document.getElementById("strategyDeleteText").textContent =
+    `确定要删除策略「${item.name || item.id}」（ID：${item.id}）吗？删除后不可恢复。`;
+  document.getElementById("strategyDeleteStatus").textContent = "";
+  document.getElementById("confirmDeleteBtn").disabled = false;
+  document.getElementById("strategyDeleteConfirm").hidden = false;
+  document.body.classList.add("modal-open");
+  requestAnimationFrame(() => document.getElementById("confirmDeleteBtn").focus());
+}
+
+function closeDeleteConfirm() {
+  deletingStrategyItem = null;
+  document.getElementById("strategyDeleteConfirm").hidden = true;
+  document.body.classList.remove("modal-open");
+}
+
+async function confirmDeleteStrategy() {
+  if (!deletingStrategyItem) return;
+  const status = document.getElementById("strategyDeleteStatus");
+  const btn = document.getElementById("confirmDeleteBtn");
+  status.textContent = "删除中...";
+  btn.disabled = true;
+  try {
+    const resp = await fetch(`/rule-backtest/api/strategies/${encodeURIComponent(deletingStrategyItem.id)}`, {
+      method: "DELETE"
+    });
+    if (!resp.ok) {
+      status.textContent = `删除失败：${await resp.text()}`;
+      return;
+    }
+    closeDeleteConfirm();
+    await loadMeta();
+  } catch (err) {
+    status.textContent = `删除失败：${err.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 document.getElementById("newStrategyBtn").addEventListener("click", () => openStrategyModal());
 document.getElementById("strategyGrid").addEventListener("click", (event) => {
   const editBtn = event.target.closest(".strategy-edit-btn");
@@ -800,6 +893,12 @@ document.getElementById("strategyGrid").addEventListener("click", (event) => {
     if (item) openCopyStrategyModal(item);
     return;
   }
+  const deleteBtn = event.target.closest(".strategy-delete-btn");
+  if (deleteBtn) {
+    const item = (metaCache.strategies || []).find(x => String(x.id) === String(deleteBtn.dataset.strategyId));
+    if (item) openDeleteConfirm(item);
+    return;
+  }
 });
 document.getElementById("addEntryConditionBtn").addEventListener("click", () => addCondition("entry"));
 document.getElementById("addExitConditionBtn").addEventListener("click", () => addCondition("exit"));
@@ -809,8 +908,19 @@ document.getElementById("closeStrategyBtn").addEventListener("click", closeStrat
 document.getElementById("strategyEditor").addEventListener("click", (event) => {
   if (event.target.id === "strategyEditor") closeStrategyModal();
 });
+document.getElementById("cancelDeleteBtn").addEventListener("click", closeDeleteConfirm);
+document.getElementById("closeDeleteBtn").addEventListener("click", closeDeleteConfirm);
+document.getElementById("confirmDeleteBtn").addEventListener("click", confirmDeleteStrategy);
+document.getElementById("strategyDeleteConfirm").addEventListener("click", (event) => {
+  if (event.target.id === "strategyDeleteConfirm") closeDeleteConfirm();
+});
 document.addEventListener("keydown", (event) => {
-  if (event.key === "Escape" && !document.getElementById("strategyEditor").hidden) closeStrategyModal();
+  if (event.key !== "Escape") return;
+  if (!document.getElementById("strategyDeleteConfirm").hidden) {
+    closeDeleteConfirm();
+    return;
+  }
+  if (!document.getElementById("strategyEditor").hidden) closeStrategyModal();
 });
 loadMeta().catch(err => {
   document.getElementById("status").textContent = `加载失败：${err.message}`;

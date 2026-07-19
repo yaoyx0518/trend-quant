@@ -29,6 +29,10 @@ class StrategyLoader:
             rows = db.list_rule_strategies()
             if rows:
                 return [self._db_row_to_list_item(row) for row in rows]
+            if self._db_has_any_rows(db):
+                # Every DB strategy is soft-deleted: report empty instead of
+                # falling back to (and resurrecting) the YAML files.
+                return []
         return self._list_yaml_strategies()
 
     def _list_yaml_strategies(self) -> list[dict]:
@@ -66,6 +70,10 @@ class StrategyLoader:
                 if not validation.ok:
                     raise ValueError("; ".join(validation.errors))
                 return validation.normalized or data
+            if self._db_has_any_rows(db):
+                # DB holds (soft-deleted) strategies: a missing active row
+                # means deleted, so do not fall back to the YAML files.
+                raise FileNotFoundError(f"rule strategy not found: {strategy_id}")
 
         for path in sorted(self.base_dir.glob("*.yaml")):
             data = self._load_yaml(path)
@@ -110,6 +118,26 @@ class StrategyLoader:
             "strategy": normalized,
         }
 
+    def delete(self, strategy_id: str) -> dict:
+        strategy_id = str(strategy_id).strip()
+        if not strategy_id:
+            raise ValueError("strategy id is required")
+        if not _SAFE_ID_RE.match(strategy_id):
+            raise ValueError("strategy id can only contain letters, numbers, underscore, and hyphen")
+
+        db = self._get_db()
+        if db is not None:
+            if not db.delete_rule_strategy(strategy_id):
+                raise FileNotFoundError(f"rule strategy not found: {strategy_id}")
+            return {"id": strategy_id, "storage": "db", "deleted": True}
+
+        for path in sorted(self.base_dir.glob("*.yaml")):
+            data = self._load_yaml(path)
+            if str(data.get("id", path.stem)).strip() == strategy_id:
+                path.unlink()
+                return {"id": strategy_id, "path": str(path), "storage": "yaml", "deleted": True}
+        raise FileNotFoundError(f"rule strategy not found: {strategy_id}")
+
     def validate_file(self, path: str | Path) -> ValidationResult:
         return self.validator.validate_and_normalize(self._load_yaml(Path(path)))
 
@@ -133,11 +161,32 @@ class StrategyLoader:
             return True
         return Path(db_path).parent.exists()
 
+    @staticmethod
+    def _db_has_any_rows(db: object) -> bool:
+        """True if the DB has any rule_strategies rows, incl. soft-deleted.
+
+        Duck-typed DBs without ``has_any_rule_strategy`` keep the legacy
+        YAML-fallback behavior.
+        """
+        has_any = getattr(db, "has_any_rule_strategy", None)
+        if not callable(has_any):
+            return False
+        try:
+            return bool(has_any())
+        except Exception:
+            return False
+
     def _seed_db_from_yaml_if_empty(self, db: object) -> None:
         if not self.base_dir.exists():
             return
         try:
-            if db.list_rule_strategies():
+            # Count soft-deleted rows too: deleting every strategy must not
+            # trigger a re-seed that resurrects the YAML strategies.
+            has_any = getattr(db, "has_any_rule_strategy", None)
+            if callable(has_any):
+                if has_any():
+                    return
+            elif db.list_rule_strategies():
                 return
         except AttributeError:
             return

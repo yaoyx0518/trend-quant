@@ -57,6 +57,12 @@ class InstrumentAddRequest(BaseModel):
     adjust: str = Field(default="")
 
 
+class InstrumentUpdateRequest(BaseModel):
+    category_l1: str
+    category_l2: str
+    category_l3: str
+
+
 _config_write_lock = threading.Lock()
 
 
@@ -713,6 +719,43 @@ def _append_instrument_config(record: dict, path: str | Path = "config/instrumen
     return 1
 
 
+def _update_instrument_config_categories(
+    symbol: str,
+    updates: dict,
+    path: str | Path = "config/instruments.yaml",
+) -> int:
+    target = Path(path)
+    if not target.exists():
+        return 0
+    with _config_write_lock:
+        payload = _load_yaml(str(target))
+        items = payload.get("instruments", []) if isinstance(payload, dict) else []
+        if not isinstance(items, list):
+            return 0
+
+        updated = 0
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if _normalize_symbol(item.get("symbol", "")) != symbol:
+                continue
+            item["category_l1"] = str(updates.get("category_l1") or "").strip()
+            item["category_l2"] = str(updates.get("category_l2") or "").strip()
+            item["category_l3"] = str(updates.get("category_l3") or "").strip()
+            item["priority_l1"] = updates.get("priority_l1")
+            item["priority_l2"] = updates.get("priority_l2")
+            item["priority_l3"] = updates.get("priority_l3")
+            item["asset_type"] = str(updates.get("asset_type") or item.get("asset_type") or "etf")
+            updated += 1
+
+        if updated:
+            target.write_text(
+                yaml.safe_dump({"instruments": items}, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+    return updated
+
+
 def _category_options() -> list[dict]:
     db = get_db()
     rows = db.list_instrument_categories()
@@ -967,6 +1010,73 @@ async def list_instruments() -> dict:
         )
     )
     return {"items": items, "count": len(items), "as_of": datetime.now().isoformat()}
+
+
+@router.post("/api/{symbol}/update")
+async def update_instrument(symbol: str, payload: InstrumentUpdateRequest) -> dict:
+    normalized_symbol = _normalize_symbol(symbol)
+    if normalized_symbol == "":
+        raise HTTPException(status_code=400, detail="标的无效")
+
+    db = get_db()
+    existing_meta = db.get_instrument_metadata(normalized_symbol)
+    in_config = any(
+        isinstance(item, dict) and _normalize_symbol(item.get("symbol", "")) == normalized_symbol
+        for item in _config_items()
+    )
+    if not existing_meta and not in_config:
+        raise HTTPException(status_code=404, detail=f"{normalized_symbol} 不在标的管理列表中")
+
+    category_values = [
+        str(payload.category_l1 or "").strip(),
+        str(payload.category_l2 or "").strip(),
+        str(payload.category_l3 or "").strip(),
+    ]
+    if not all(category_values):
+        raise HTTPException(status_code=400, detail="一二三级类目均必选")
+
+    valid_paths = {str(item.get("path") or "").strip() for item in _category_options()}
+    category_path = _category_path_from_parts(*category_values)
+    if category_path not in valid_paths:
+        raise HTTPException(status_code=400, detail="类目组合不存在，请重新选择")
+
+    priorities = _category_priority_map()
+    updates = {
+        "category_l1": category_values[0],
+        "category_l2": category_values[1],
+        "category_l3": category_values[2],
+        "priority_l1": priorities.get(_category_path_from_parts(category_values[0])),
+        "priority_l2": priorities.get(_category_path_from_parts(category_values[0], category_values[1])),
+        "priority_l3": priorities.get(category_path),
+        "asset_type": "stock" if category_values[0] == "股票" else "etf",
+    }
+
+    config_saved = _update_instrument_config_categories(normalized_symbol, updates) if in_config else 0
+
+    meta = dict(existing_meta or {})
+    meta.update(updates)
+    meta["symbol"] = normalized_symbol
+    if not str(meta.get("name") or "").strip():
+        meta["name"] = _config_name_map().get(normalized_symbol, "")
+    if meta.get("sort_order") is None:
+        meta["sort_order"] = _next_sort_order()
+    if not str(meta.get("source") or "").strip():
+        meta["source"] = "manual_edit"
+    metadata_saved = db.save_instrument_metadata([meta])
+
+    return {
+        "ok": True,
+        "symbol": normalized_symbol,
+        "category_l1": updates["category_l1"],
+        "category_l2": updates["category_l2"],
+        "category_l3": updates["category_l3"],
+        "category_path": category_path,
+        "priority_l1": updates["priority_l1"],
+        "priority_l2": updates["priority_l2"],
+        "priority_l3": updates["priority_l3"],
+        "config_saved": config_saved,
+        "metadata_saved": metadata_saved,
+    }
 
 
 @router.post("/api/{symbol}/backfill")

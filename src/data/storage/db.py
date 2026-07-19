@@ -431,6 +431,16 @@ class Database:
             ).fetchall()
         return [self._rule_strategy_row(row) for row in rows]
 
+    def has_any_rule_strategy(self) -> bool:
+        """True if rule_strategies has any row, including soft-deleted ones.
+
+        Used by the YAML seeding logic so that soft-deleting every strategy
+        does not resurrect the YAML seed strategies on the next read.
+        """
+        with self._connect() as conn:
+            row = conn.execute("SELECT 1 FROM rule_strategies LIMIT 1").fetchone()
+        return row is not None
+
     def delete_rule_strategy(self, strategy_id: str) -> bool:
         with self._connect() as conn:
             cur = conn.execute(

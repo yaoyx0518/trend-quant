@@ -5,7 +5,9 @@ from __future__ import annotations
 import pytest
 
 from rule_backtest.metrics import (
+    compute_annual_returns,
     compute_drawdown,
+    compute_monthly_heatmap,
     compute_summary,
     annual_returns,
     monthly_returns,
@@ -64,3 +66,62 @@ class TestMonthlyReturns:
         nav = _make_nav([100_000, 105_000] * 15)
         result = monthly_returns(nav)
         assert isinstance(result, list)
+
+
+class TestComputeMonthlyHeatmap:
+    def test_empty_nav_returns_empty_payload(self) -> None:
+        result = compute_monthly_heatmap([])
+        assert result["years"] == []
+        assert len(result["months"]) == 12
+        assert result["data"] == []
+
+    def test_heatmap_shape_and_values(self) -> None:
+        # 约 90 个自然日，横跨 3 个月度周期
+        nav = _make_nav([100_000 + i * 500 for i in range(90)])
+        result = compute_monthly_heatmap(nav)
+        assert result["years"], "应至少包含一个年份"
+        assert len(result["months"]) == 12
+        assert result["data"], "应至少有一个月度收益点"
+        for month_idx, year_idx, value in result["data"]:
+            assert 0 <= month_idx <= 11
+            assert 0 <= year_idx < len(result["years"])
+            assert isinstance(value, float)
+        # 单调上涨的净值，月度收益应为正
+        assert all(point[2] > 0 for point in result["data"])
+
+
+class TestComputeAnnualReturns:
+    def test_empty_nav_returns_empty(self) -> None:
+        assert compute_annual_returns([]) == []
+
+    def test_enriched_fields_present(self) -> None:
+        nav = _make_nav([100_000 + (i % 7) * 800 + i * 300 for i in range(120)])
+        trades = [
+            {"date": nav[10]["date"], "side": "SELL", "pnl": 1200.0},
+            {"date": nav[40]["date"], "side": "SELL", "pnl": -300.0},
+            {"date": nav[41]["date"], "side": "BUY", "pnl": 0.0},
+        ]
+        result = compute_annual_returns(nav, trades=trades)
+        assert len(result) >= 1
+        row = result[0]
+        for key in ("year", "return", "sharpe", "trade_count",
+                    "win_rate", "profit_factor", "benchmark_return", "benchmark_sharpe"):
+            assert key in row
+        # 只有 SELL 计入交易统计
+        assert row["trade_count"] == 2
+        assert row["win_rate"] == pytest.approx(0.5)
+        assert row["profit_factor"] == pytest.approx(4.0)
+        # 未传基准时基准字段为 None
+        assert row["benchmark_return"] is None
+        assert row["benchmark_sharpe"] is None
+
+    def test_benchmark_fields_when_provided(self) -> None:
+        nav = _make_nav([100_000 + i * 400 for i in range(90)])
+        benchmark_nav = _make_nav([100_000 + i * 200 for i in range(90)])
+        result = compute_annual_returns(nav, benchmark_daily_nav=benchmark_nav)
+        assert len(result) >= 1
+        row = result[0]
+        assert row["benchmark_return"] is not None
+        assert row["benchmark_sharpe"] is not None
+        # 策略净值增长快于基准，收益应高于基准
+        assert row["return"] > row["benchmark_return"]

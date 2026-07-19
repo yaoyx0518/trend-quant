@@ -62,6 +62,11 @@ class SubjectMarketApiTest(unittest.TestCase):
         self.assertEqual(service["child_count"], 2)
         self.assertEqual({item["symbol"] for item in service["children"]}, {"AAA", "BBB"})
         self.assertEqual(service["amount"], 400.0)
+        # 热力图面积字段：近20日平均成交额（标量为自身日均，聚合为成员合计日均）。
+        self.assertEqual(service["amount_avg20"], 400.0)
+        instrument_avg = {item["symbol"]: item["amount_avg20"] for item in service["children"]}
+        self.assertEqual(instrument_avg, {"AAA": 100.0, "BBB": 300.0})
+        self.assertEqual(l2["amount_avg20"], 600.0)
         self.assertEqual(len(service["trend_history"]), 61)
         self.assertAlmostEqual(service["trend_history"][-1], service["trend_ma5"])
         self.assertEqual(len(service["trend_upper_history"]), 61)

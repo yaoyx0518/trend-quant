@@ -37,6 +37,9 @@ class RuleBacktestService:
             strategy["id"] = self._generate_strategy_id(str(strategy.get("name", "") or "strategy"))
         return self.strategy_loader.save(strategy=strategy, overwrite=overwrite)
 
+    def delete_strategy(self, strategy_id: str) -> dict:
+        return self.strategy_loader.delete(strategy_id)
+
     def list_instruments(self) -> list[dict]:
         path = Path("config/instruments.yaml")
         if not path.exists():
@@ -173,6 +176,7 @@ class RuleBacktestService:
             "drawdown": first.get("drawdown", []),
             "annual_returns": first.get("annual_returns", []),
             "monthly_returns": first.get("monthly_returns", []),
+            "monthly_heatmap": first.get("monthly_heatmap", {}),
             "benchmark": first.get("benchmark", {}),
             "charts": first.get("charts", {}),
         }
