@@ -13,7 +13,6 @@ from app.routers import (
     logs,
     market_view,
     overview,
-    parameter_optimization,
     rule_backtest,
     subject_market,
     trades,
@@ -82,7 +81,6 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 app.include_router(overview.router)
-app.include_router(parameter_optimization.router)
 app.include_router(backtest.router)
 app.include_router(rule_backtest.router)
 app.include_router(trades.router)
