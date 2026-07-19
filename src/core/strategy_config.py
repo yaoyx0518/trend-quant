@@ -10,7 +10,6 @@ were dropped during the storage consolidation.
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 from typing import Any
 
 DEFAULT_STRATEGY_CONFIG: dict[str, Any] = {
@@ -38,7 +37,6 @@ DEFAULT_STRATEGY_CONFIG: dict[str, Any] = {
 
 _LIVE_KEYS = frozenset(DEFAULT_STRATEGY_CONFIG)
 _CONFIG_KEY = "strategy"
-_LEGACY_YAML = "config/strategy.yaml"
 
 
 def get_strategy_config() -> dict[str, Any]:
@@ -56,25 +54,8 @@ def get_strategy_config() -> dict[str, Any]:
             cfg = dict(DEFAULT_STRATEGY_CONFIG)
             cfg.update({k: v for k, v in stored.items() if k in _LIVE_KEYS})
             return cfg
-        # Fresh database: seed it (legacy yaml values overlay the defaults).
-        db.set_config(_CONFIG_KEY, _seed_payload())
+        # Fresh database: seed it with the code defaults.
+        db.set_config(_CONFIG_KEY, dict(DEFAULT_STRATEGY_CONFIG))
         return get_strategy_config()
     except (RuntimeError, sqlite3.Error):
         return dict(DEFAULT_STRATEGY_CONFIG)
-
-
-def _seed_payload() -> dict[str, Any]:
-    cfg = dict(DEFAULT_STRATEGY_CONFIG)
-    path = Path(_LEGACY_YAML)
-    if not path.exists():
-        return cfg
-    try:
-        import yaml
-
-        payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-        legacy = payload.get("strategy", {}) if isinstance(payload, dict) else {}
-        if isinstance(legacy, dict):
-            cfg.update({k: v for k, v in legacy.items() if k in _LIVE_KEYS})
-    except Exception:
-        pass
-    return cfg

@@ -856,22 +856,25 @@ async def get_add_instrument_status() -> dict:
 
 @router.get("/api/list")
 async def list_instruments() -> dict:
+    db = get_db()
+    # Single table scan; derive every lookup from the same rows.
+    metadata_rows = db.list_instrument_metadata()
     config_by_symbol: dict[str, dict] = {}
-    for item in _config_items():
+    metadata_by_symbol: dict[str, dict] = {}
+    name_map: dict[str, str] = {}
+    for item in metadata_rows:
         symbol = str(item.get("symbol", "")).strip().upper()
         if symbol == "":
             continue
         config_by_symbol[symbol] = item
+        metadata_by_symbol[symbol] = item
+        name_map[symbol] = str(item.get("name", "") or "").strip()
 
     benchmark_by_symbol = {
         str(item.get("symbol", "")).strip().upper(): item
         for item in benchmark_instruments()
         if str(item.get("symbol", "")).strip()
     }
-
-    db = get_db()
-    name_map = _config_name_map()
-    metadata_by_symbol = db.get_instrument_metadata_map()
 
     known_symbols = set(config_by_symbol.keys()) | set(benchmark_by_symbol.keys()) | set(metadata_by_symbol.keys())
     for symbol in db.list_market_symbols():

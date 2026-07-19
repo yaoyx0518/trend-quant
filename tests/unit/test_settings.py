@@ -16,16 +16,15 @@ class TestLoadSettings:
             config_path = Path(tmp) / "app.yaml"
             config_path.write_text(
                 yaml.dump({
-                    "app": {"name": "test-app"},
+                    "app": {"timezone": "UTC"},
                     "tickflow": {},
-                    "runtime": {},
                     "logging": {},
                 }),
                 encoding="utf-8",
             )
             settings = load_settings(config_path)
             assert isinstance(settings, Settings)
-            assert settings.app.name == "test-app"
+            assert settings.app.timezone == "UTC"
 
     def test_default_values(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -35,9 +34,8 @@ class TestLoadSettings:
                 encoding="utf-8",
             )
             settings = load_settings(config_path)
-            assert settings.app.port == 8000
-            assert settings.app.host == "127.0.0.1"
             assert settings.app.update_time_after_close == "16:30"
+            assert settings.app.timezone == "Asia/Shanghai"
             assert settings.logging.level == "INFO"
 
     def test_app_settings_defaults(self) -> None:
@@ -50,4 +48,4 @@ class TestLoadSettings:
             settings = load_settings(config_path)
             assert settings.app.daily_update_max_retries == 2
             assert settings.tickflow.plan == "starter"
-            assert settings.app.timezone == "Asia/Shanghai"
+            assert settings.app.data_provider_priority == ["tickflow"]

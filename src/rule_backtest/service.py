@@ -6,7 +6,6 @@ from pathlib import Path
 import re
 
 import pandas as pd
-import yaml
 
 from data.storage.market_store import MarketStore
 from rule_backtest.engine import SingleSymbolAllInBacktestEngine

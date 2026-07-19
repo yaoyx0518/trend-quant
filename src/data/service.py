@@ -615,7 +615,8 @@ class DataService:
             "results": results,
         }
         day = end_date.isoformat()
-        record_job_run_safely("daily_update", payload, run_date=day, status="completed")
+        status = "completed" if failed_count == 0 else "partial"
+        record_job_run_safely("daily_update", payload, run_date=day, status=status)
 
         return payload
 

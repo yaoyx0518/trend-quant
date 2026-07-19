@@ -9,10 +9,7 @@ import yaml
 
 @dataclass(slots=True)
 class AppSettings:
-    name: str
     timezone: str
-    host: str
-    port: int
     data_provider_priority: list[str]
     update_time_after_close: str
     daily_update_max_retries: int
@@ -22,7 +19,6 @@ class AppSettings:
 @dataclass(slots=True)
 class LoggingSettings:
     level: str
-    keep_forever: bool
 
 
 @dataclass(slots=True)
@@ -64,10 +60,7 @@ def load_settings(config_path: Path | None = None) -> Settings:
 
     return Settings(
         app=AppSettings(
-            name=str(app_raw.get("name", "trend-etf-system")),
             timezone=str(app_raw.get("timezone", "Asia/Shanghai")),
-            host=str(app_raw.get("host", "127.0.0.1")),
-            port=int(app_raw.get("port", 8000)),
             data_provider_priority=list(
                 app_raw.get(
                     "data_provider_priority",
@@ -102,6 +95,5 @@ def load_settings(config_path: Path | None = None) -> Settings:
         ),
         logging=LoggingSettings(
             level=str(logging_raw.get("level", "INFO")),
-            keep_forever=bool(logging_raw.get("keep_forever", True)),
         ),
     )

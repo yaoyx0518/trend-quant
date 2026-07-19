@@ -352,11 +352,11 @@ def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
     hard_stop_mul = float(strategy_cfg.get("hard_stop_atr_mul_default", 1.5))
     chandelier_mul = float(strategy_cfg.get("chandelier_stop_atr_mul", 2.5))
 
-    # Per-instrument stop_atr_mul override
+    # Per-instrument stop_atr_mul override (DB rows may carry NULL)
     instruments = _load_instruments_raw()
     for item in instruments:
         if item.get("symbol", "").strip().upper() == symbol:
-            if "stop_atr_mul" in item:
+            if item.get("stop_atr_mul") is not None:
                 hard_stop_mul = float(item["stop_atr_mul"])
             break
 

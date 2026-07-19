@@ -145,11 +145,12 @@ class Database:
             "start_date": "TEXT",
         }
         with self._connect() as conn:
+            existing = {
+                row["name"] for row in conn.execute("PRAGMA table_info(instrument_metadata)")
+            }
             for name, ddl in new_columns.items():
-                try:
+                if name not in existing:
                     conn.execute(f"ALTER TABLE instrument_metadata ADD COLUMN {name} {ddl}")
-                except sqlite3.OperationalError:
-                    pass  # column already exists
 
     # ------------------------------------------------------------------
     # rule_strategies

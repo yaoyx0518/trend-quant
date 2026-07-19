@@ -34,7 +34,12 @@ async def lifespan(app: FastAPI):
 
     def update_job() -> None:
         payload = daily_market_update_job(settings)
-        logger.info("Daily market data update (16:30) status: %s", payload.get("status", "ok"))
+        logger.info(
+            "Daily market data update (16:30): %s success, %s failed out of %s",
+            payload.get("success", 0),
+            payload.get("failed", 0),
+            payload.get("total", 0),
+        )
 
     disable_scheduler = str(os.getenv("TREND_QUANT_DISABLE_SCHEDULER", "")).strip().lower() in {
         "1",

@@ -25,7 +25,6 @@ class StrategyLoader:
     def list_strategies(self) -> list[dict]:
         db = self._get_db()
         if db is not None:
-            self._seed_db_from_yaml_if_empty(db)
             rows = db.list_rule_strategies()
             if rows:
                 return [self._db_row_to_list_item(row) for row in rows]
@@ -62,7 +61,6 @@ class StrategyLoader:
         strategy_id = str(strategy_id).strip()
         db = self._get_db()
         if db is not None:
-            self._seed_db_from_yaml_if_empty(db)
             row = db.get_rule_strategy(strategy_id)
             if row:
                 data = row.get("strategy", {})
@@ -175,30 +173,6 @@ class StrategyLoader:
             return bool(has_any())
         except Exception:
             return False
-
-    def _seed_db_from_yaml_if_empty(self, db: object) -> None:
-        if not self.base_dir.exists():
-            return
-        try:
-            # Count soft-deleted rows too: deleting every strategy must not
-            # trigger a re-seed that resurrects the YAML strategies.
-            has_any = getattr(db, "has_any_rule_strategy", None)
-            if callable(has_any):
-                if has_any():
-                    return
-            elif db.list_rule_strategies():
-                return
-        except AttributeError:
-            return
-
-        for path in sorted(self.base_dir.glob("*.yaml")):
-            try:
-                data = self._load_yaml(path)
-                validation = self.validator.validate_and_normalize(data)
-                if validation.ok:
-                    db.save_rule_strategy(validation.normalized or data, overwrite=True)
-            except Exception:
-                continue
 
     def _db_row_to_list_item(self, row: dict) -> dict:
         data = row.get("strategy", {})

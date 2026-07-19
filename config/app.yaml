@@ -1,8 +1,5 @@
 ﻿app:
-  name: trend-etf-system
   timezone: Asia/Shanghai
-  host: 127.0.0.1
-  port: 8000
   data_provider_priority:
     - tickflow
   update_time_after_close: "16:30"
@@ -24,4 +21,3 @@ tickflow:
 
 logging:
   level: INFO
-  keep_forever: true
