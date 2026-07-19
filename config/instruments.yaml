@@ -7929,3 +7929,16 @@ instruments:
   priority_l2: 1
   priority_l3: 6
   sort_order: 456
+- symbol: 688072.SS
+  name: 拓荆科技
+  enabled: true
+  risk_budget_pct: 0.01
+  stop_atr_mul: 1.5
+  asset_type: stock
+  category_l1: 股票
+  category_l2: 科技硬件
+  category_l3: 半导体-设备
+  priority_l1: 3
+  priority_l2: 1
+  priority_l3: 3
+  sort_order: 457

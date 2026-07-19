@@ -3,17 +3,16 @@ from __future__ import annotations
 import logging
 import threading
 from datetime import date, datetime
-from pathlib import Path
 from typing import Callable
 
 import pandas as pd
-import yaml
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from core.benchmarks import benchmark_instruments
+from core.strategy_config import get_strategy_config
 from data.service import DataService
 from data.storage.db import get_db
 from data.storage.market_store import MarketStore
@@ -518,13 +517,6 @@ def _to_date(text: str, fallback: date) -> date:
     return datetime.strptime(raw, "%Y-%m-%d").date()
 
 
-def _load_yaml(path: str) -> dict:
-    p = Path(path)
-    if not p.exists():
-        return {}
-    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-
-
 def _symbol_to_code(symbol: str) -> str:
     text = str(symbol or "").strip().upper()
     if "." in text:
@@ -770,9 +762,7 @@ def _provider_priority_from_request(request: Request) -> list[str] | None:
 
 
 def _default_adjust() -> str:
-    strategy_payload = _load_yaml("config/strategy.yaml")
-    strategy_cfg = strategy_payload.get("strategy", {}) if isinstance(strategy_payload, dict) else {}
-    return str(strategy_cfg.get("adjust", "qfq")) if isinstance(strategy_cfg, dict) else "qfq"
+    return str(get_strategy_config().get("adjust", "qfq"))
 
 
 @router.get("", response_class=HTMLResponse)

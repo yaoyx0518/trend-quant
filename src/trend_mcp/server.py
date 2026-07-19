@@ -18,10 +18,8 @@ Exposes 5 tools to external agents via MCP SSE transport:
 from __future__ import annotations
 
 from datetime import datetime
-from pathlib import Path
 
 import pandas as pd
-import yaml
 from mcp.server.fastmcp import FastMCP
 
 from app.instrument_display import format_symbol_display
@@ -33,6 +31,7 @@ from app.routers.market_view import (
 )
 from app.routers.subject_market import build_subject_dashboard_payload
 from core.calendar import is_realtime_available, is_trading_day
+from core.strategy_config import get_strategy_config
 from data.intraday_service import (
     build_intraday_dashboard,
     build_synthetic_bar,
@@ -57,17 +56,8 @@ mcp = FastMCP(
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _load_yaml(path: str) -> dict:
-    p = Path(path)
-    if not p.exists():
-        return {}
-    return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
-
-
 def _load_strategy_config() -> dict:
-    payload = _load_yaml("config/strategy.yaml")
-    cfg = payload.get("strategy", {}) if isinstance(payload, dict) else {}
-    return dict(cfg) if isinstance(cfg, dict) else {}
+    return get_strategy_config()
 
 
 def _load_instruments_raw() -> list[dict]:

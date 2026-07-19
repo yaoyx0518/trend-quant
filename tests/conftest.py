@@ -250,7 +250,7 @@ def test_env(tmp_path: Path, test_db) -> TestEnvironment:
 
 
 # ---------------------------------------------------------------------------
-# Default strategy config (matches config/strategy.yaml defaults)
+# Default strategy config (matches core/strategy_config.py defaults)
 # ---------------------------------------------------------------------------
 
 @pytest.fixture

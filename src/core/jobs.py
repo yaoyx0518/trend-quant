@@ -7,23 +7,17 @@ migrated from the retired signal engine's ``run_daily_update``.
 from __future__ import annotations
 
 from datetime import date, datetime
-from pathlib import Path
 
-import yaml
 
 from audit.app_logger import get_logger
 from core.benchmarks import benchmark_market_symbols
 from core.calendar import is_trading_day
 from core.settings import Settings
+from core.strategy_config import get_strategy_config
 from data.service import DataService
 from data.storage.runtime_store import RuntimeStore
 
 logger = get_logger(__name__)
-
-
-def _load_yaml(path: str) -> dict:
-    with Path(path).open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
 
 
 def _pool_symbols() -> list[str]:
@@ -68,7 +62,7 @@ def daily_market_update_job(settings: Settings, data_service: DataService | None
         RuntimeStore().write_json(f"advice/data_update_{today.isoformat()}.json", payload)
         return payload
 
-    strategy_cfg = _load_yaml("config/strategy.yaml").get("strategy", {})
+    strategy_cfg = get_strategy_config()
     symbols = _pool_symbols()
 
     app_cfg = settings.app
