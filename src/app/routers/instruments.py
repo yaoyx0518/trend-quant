@@ -343,7 +343,6 @@ class InstrumentAddJobManager:
         self,
         data_service_factory: Callable[[list[str] | None], DataService] | None = None,
         runtime_store_obj: RuntimeStore | None = None,
-        config_path: str | Path = "config/instruments.yaml",
     ) -> None:
         self._lock = threading.Lock()
         self._status = _empty_add_status()
@@ -352,7 +351,6 @@ class InstrumentAddJobManager:
             lambda provider_priority: DataService(provider_priority=provider_priority)
         )
         self._runtime_store = runtime_store_obj or runtime_store
-        self._config_path = Path(config_path)
 
     def snapshot(self) -> dict:
         with self._lock:
@@ -453,14 +451,13 @@ class InstrumentAddJobManager:
         try:
             self._set_progress(job_id, 0, f"正在写入 {symbol} 的配置与分类信息。")
             record = _build_new_instrument_record(item)
-            config_saved = _append_instrument_config(record, self._config_path)
-            metadata_saved = get_db().save_instrument_metadata([record])
+            saved = _append_instrument_config(record)
             with self._lock:
                 if self._status.get("job_id") == job_id:
                     summary = self._status["summary"]
                     summary["name"] = record.get("name")
-                    summary["metadata_saved"] = metadata_saved
-                    summary["config_saved"] = config_saved
+                    summary["metadata_saved"] = saved
+                    summary["config_saved"] = saved
                     self._status["progress_current"] = 1
                     self._status["message"] = f"{symbol} 已写入配置，正在补齐历史行情。"
 
@@ -568,15 +565,8 @@ def _date_span(df: pd.DataFrame) -> tuple[str | None, str | None]:
 
 
 def _config_name_map() -> dict[str, str]:
-    payload = _load_yaml("config/instruments.yaml")
-    instruments = payload.get("instruments", []) if isinstance(payload, dict) else []
-    if not isinstance(instruments, list):
-        return {}
-
     out: dict[str, str] = {}
-    for item in instruments:
-        if not isinstance(item, dict):
-            continue
+    for item in get_db().list_instrument_metadata():
         symbol = str(item.get("symbol", "")).strip().upper()
         if symbol == "":
             continue
@@ -588,10 +578,8 @@ def _config_name_map() -> dict[str, str]:
     return out
 
 
-def _config_items(path: str | Path = "config/instruments.yaml") -> list[dict]:
-    payload = _load_yaml(str(path))
-    items = payload.get("instruments", []) if isinstance(payload, dict) else []
-    return items if isinstance(items, list) else []
+def _config_items() -> list[dict]:
+    return [dict(item) for item in get_db().list_instrument_metadata()]
 
 
 def _known_managed_symbols() -> set[str]:
@@ -682,78 +670,32 @@ def _build_new_instrument_record(item: dict) -> dict:
     }
 
 
-def _append_instrument_config(record: dict, path: str | Path = "config/instruments.yaml") -> int:
-    target = Path(path)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    with _config_write_lock:
-        payload = _load_yaml(str(target))
-        items = payload.get("instruments", []) if isinstance(payload, dict) else []
-        if not isinstance(items, list):
-            items = []
+def _append_instrument_config(record: dict) -> int:
+    """Insert a new managed instrument into the metadata table (dup-rejecting)."""
+    db = get_db()
+    symbol = _normalize_symbol(record.get("symbol", ""))
+    if db.get_instrument_metadata(symbol) is not None:
+        raise ValueError(f"{symbol} 已在标的配置中")
 
-        symbol = _normalize_symbol(record.get("symbol", ""))
-        for item in items:
-            if isinstance(item, dict) and _normalize_symbol(item.get("symbol", "")) == symbol:
-                raise ValueError(f"{symbol} 已在标的配置中")
-
-        config_record = {
-            "symbol": symbol,
-            "name": str(record.get("name") or "").strip(),
-            "enabled": bool(record.get("enabled", True)),
-            "risk_budget_pct": record.get("risk_budget_pct", 0.01),
-            "stop_atr_mul": record.get("stop_atr_mul", 1.5),
-            "asset_type": str(record.get("asset_type") or "etf"),
-            "category_l1": str(record.get("category_l1") or "").strip(),
-            "category_l2": str(record.get("category_l2") or "").strip(),
-            "category_l3": str(record.get("category_l3") or "").strip(),
-            "priority_l1": record.get("priority_l1"),
-            "priority_l2": record.get("priority_l2"),
-            "priority_l3": record.get("priority_l3"),
-            "sort_order": record.get("sort_order"),
-        }
-        items.append(config_record)
-        target.write_text(
-            yaml.safe_dump({"instruments": items}, sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
-    return 1
-
-
-def _update_instrument_config_categories(
-    symbol: str,
-    updates: dict,
-    path: str | Path = "config/instruments.yaml",
-) -> int:
-    target = Path(path)
-    if not target.exists():
-        return 0
-    with _config_write_lock:
-        payload = _load_yaml(str(target))
-        items = payload.get("instruments", []) if isinstance(payload, dict) else []
-        if not isinstance(items, list):
-            return 0
-
-        updated = 0
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            if _normalize_symbol(item.get("symbol", "")) != symbol:
-                continue
-            item["category_l1"] = str(updates.get("category_l1") or "").strip()
-            item["category_l2"] = str(updates.get("category_l2") or "").strip()
-            item["category_l3"] = str(updates.get("category_l3") or "").strip()
-            item["priority_l1"] = updates.get("priority_l1")
-            item["priority_l2"] = updates.get("priority_l2")
-            item["priority_l3"] = updates.get("priority_l3")
-            item["asset_type"] = str(updates.get("asset_type") or item.get("asset_type") or "etf")
-            updated += 1
-
-        if updated:
-            target.write_text(
-                yaml.safe_dump({"instruments": items}, sort_keys=False, allow_unicode=True),
-                encoding="utf-8",
-            )
-    return updated
+    config_record = {
+        "symbol": symbol,
+        "name": str(record.get("name") or "").strip(),
+        "enabled": bool(record.get("enabled", True)),
+        "risk_budget_pct": record.get("risk_budget_pct", 0.01),
+        "stop_atr_mul": record.get("stop_atr_mul", 1.5),
+        "asset_type": str(record.get("asset_type") or "etf"),
+        "category_l1": str(record.get("category_l1") or "").strip(),
+        "category_l2": str(record.get("category_l2") or "").strip(),
+        "category_l3": str(record.get("category_l3") or "").strip(),
+        "factor_tags": record.get("factor_tags") or [],
+        "region_tag": str(record.get("region_tag") or ""),
+        "priority_l1": record.get("priority_l1"),
+        "priority_l2": record.get("priority_l2"),
+        "priority_l3": record.get("priority_l3"),
+        "sort_order": record.get("sort_order"),
+        "source": str(record.get("source") or ""),
+    }
+    return db.save_instrument_metadata([config_record])
 
 
 def _category_options() -> list[dict]:
@@ -931,15 +873,8 @@ async def get_add_instrument_status() -> dict:
 
 @router.get("/api/list")
 async def list_instruments() -> dict:
-    config_payload = _load_yaml("config/instruments.yaml")
-    config_items = config_payload.get("instruments", []) if isinstance(config_payload, dict) else []
-    if not isinstance(config_items, list):
-        config_items = []
-
     config_by_symbol: dict[str, dict] = {}
-    for item in config_items:
-        if not isinstance(item, dict):
-            continue
+    for item in _config_items():
         symbol = str(item.get("symbol", "")).strip().upper()
         if symbol == "":
             continue
@@ -1020,11 +955,7 @@ async def update_instrument(symbol: str, payload: InstrumentUpdateRequest) -> di
 
     db = get_db()
     existing_meta = db.get_instrument_metadata(normalized_symbol)
-    in_config = any(
-        isinstance(item, dict) and _normalize_symbol(item.get("symbol", "")) == normalized_symbol
-        for item in _config_items()
-    )
-    if not existing_meta and not in_config:
+    if not existing_meta:
         raise HTTPException(status_code=404, detail=f"{normalized_symbol} 不在标的管理列表中")
 
     category_values = [
@@ -1051,8 +982,6 @@ async def update_instrument(symbol: str, payload: InstrumentUpdateRequest) -> di
         "asset_type": "stock" if category_values[0] == "股票" else "etf",
     }
 
-    config_saved = _update_instrument_config_categories(normalized_symbol, updates) if in_config else 0
-
     meta = dict(existing_meta or {})
     meta.update(updates)
     meta["symbol"] = normalized_symbol
@@ -1062,7 +991,7 @@ async def update_instrument(symbol: str, payload: InstrumentUpdateRequest) -> di
         meta["sort_order"] = _next_sort_order()
     if not str(meta.get("source") or "").strip():
         meta["source"] = "manual_edit"
-    metadata_saved = db.save_instrument_metadata([meta])
+    saved = db.save_instrument_metadata([meta])
 
     return {
         "ok": True,
@@ -1074,8 +1003,8 @@ async def update_instrument(symbol: str, payload: InstrumentUpdateRequest) -> di
         "priority_l1": updates["priority_l1"],
         "priority_l2": updates["priority_l2"],
         "priority_l3": updates["priority_l3"],
-        "config_saved": config_saved,
-        "metadata_saved": metadata_saved,
+        "config_saved": saved,
+        "metadata_saved": saved,
     }
 
 

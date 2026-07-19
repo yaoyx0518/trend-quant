@@ -41,22 +41,20 @@ class RuleBacktestService:
         return self.strategy_loader.delete(strategy_id)
 
     def list_instruments(self) -> list[dict]:
-        path = Path("config/instruments.yaml")
-        if not path.exists():
-            return []
-        with path.open("r", encoding="utf-8") as f:
-            payload = yaml.safe_load(f) or {}
-        instruments = payload.get("instruments", [])
-        if not isinstance(instruments, list):
-            return []
+        import sqlite3
+
+        from data.storage.db import get_db
+
+        try:
+            instruments = get_db().list_instrument_metadata()
+        except (RuntimeError, sqlite3.Error):
+            instruments = []  # database unavailable (bare test/script context)
         rows: list[dict] = []
         try:
             stored_symbols = set(self.market_store.list_stored_symbols())
         except Exception:
             stored_symbols = set()
         for item in instruments:
-            if not isinstance(item, dict):
-                continue
             symbol = str(item.get("symbol", "")).strip().upper()
             if not symbol:
                 continue
@@ -65,7 +63,7 @@ class RuleBacktestService:
                     "symbol": symbol,
                     "name": str(item.get("name", "") or ""),
                     "enabled": bool(item.get("enabled", True)),
-                    "asset_type": str(item.get("asset_type", "etf") or "etf"),
+                    "asset_type": str(item.get("asset_type") or "etf"),
                     "has_market_data": symbol in stored_symbols,
                 }
             )

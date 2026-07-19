@@ -71,9 +71,12 @@ def _load_strategy_config() -> dict:
 
 
 def _load_instruments_raw() -> list[dict]:
-    payload = _load_yaml("config/instruments.yaml")
-    instruments = payload.get("instruments", []) if isinstance(payload, dict) else []
-    return [dict(item) for item in instruments if isinstance(item, dict)]
+    import sqlite3
+
+    try:
+        return [dict(item) for item in get_db().list_instrument_metadata()]
+    except (RuntimeError, sqlite3.Error):
+        return []  # database unavailable
 
 
 def _instrument_metadata_map(instruments: list[dict]) -> dict[str, dict]:

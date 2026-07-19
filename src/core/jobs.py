@@ -27,9 +27,19 @@ def _load_yaml(path: str) -> dict:
 
 
 def _pool_symbols() -> list[str]:
-    """Enabled instruments from config plus benchmark index symbols, deduped."""
-    instruments_cfg = _load_yaml("config/instruments.yaml")
-    instruments = [item for item in instruments_cfg.get("instruments", []) if item.get("enabled", True)]
+    """Enabled instruments from the metadata table plus benchmark symbols, deduped."""
+    from data.storage.db import get_db
+
+    import sqlite3
+
+    try:
+        instruments = [
+            item
+            for item in get_db().list_instrument_metadata()
+            if item.get("enabled", 1) in (1, True)
+        ]
+    except (RuntimeError, sqlite3.Error):
+        instruments = []  # database unavailable; fall back to benchmarks only
 
     symbols: list[str] = []
     seen: set[str] = set()

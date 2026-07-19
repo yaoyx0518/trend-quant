@@ -7,8 +7,6 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-import yaml
-
 from app.routers.instruments import BulkBackfillJobManager, InstrumentAddJobManager
 from data.storage.db import get_db, init_db
 
@@ -269,11 +267,9 @@ class InstrumentAddJobManagerTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_add_job_writes_config_metadata_and_backfills(self) -> None:
-        config_path = self.tmp_path / "instruments.yaml"
         manager = InstrumentAddJobManager(
             data_service_factory=lambda provider_priority: FakeBackfillService(),
             runtime_store_obj=FakeRuntimeStore(),
-            config_path=config_path,
         )
 
         started, status = manager.start(
@@ -298,17 +294,17 @@ class InstrumentAddJobManagerTest(unittest.TestCase):
         self.assertEqual(done["summary"]["config_saved"], 1)
         self.assertEqual(done["summary"]["metadata_saved"], 1)
         self.assertEqual(done["summary"]["added_rows"], 2)
-        saved_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        self.assertEqual(saved_config["instruments"][0]["symbol"], "301516.SZ")
-        self.assertEqual(saved_config["instruments"][0]["asset_type"], "stock")
-        self.assertEqual(get_db().get_instrument_metadata("301516.SZ")["category_path"], "股票-创业板-电源设备")
+        saved = get_db().get_instrument_metadata("301516.SZ")
+        self.assertEqual(saved["asset_type"], "stock")
+        self.assertEqual(saved["category_path"], "股票-创业板-电源设备")
+        self.assertEqual(saved["enabled"], 1)
+        self.assertEqual(saved["stop_atr_mul"], 1.5)
 
     def test_rejects_second_add_job_while_running(self) -> None:
         release = threading.Event()
         manager = InstrumentAddJobManager(
             data_service_factory=lambda provider_priority: BlockingBackfillService(release),
             runtime_store_obj=FakeRuntimeStore(),
-            config_path=self.tmp_path / "instruments.yaml",
         )
 
         started, status = manager.start(
