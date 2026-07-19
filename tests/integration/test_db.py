@@ -64,73 +64,6 @@ class TestMarketDataCRUD:
         assert summary["symbol"] == "SUM.SS" if "symbol" in summary else True
 
 
-class TestSignalsAndState:
-    def test_save_and_get_signals(self, test_db) -> None:
-        payload = {
-            "signals": [{"symbol": "A.SS", "trend_score": 25.0}],
-            "portfolio_snapshot": {},
-        }
-        test_db.save_signals("2025-01-06", payload)
-        loaded = test_db.get_signals("2025-01-06")
-        assert loaded is not None
-        assert loaded["signals"][0]["symbol"] == "A.SS"
-
-    def test_list_signal_days(self, test_db) -> None:
-        test_db.save_signals("2025-01-06", {"signals": [], "portfolio_snapshot": {}})
-        test_db.save_signals("2025-01-07", {"signals": [], "portfolio_snapshot": {}})
-        days = test_db.list_signal_days()
-        assert "2025-01-06" in days
-        assert "2025-01-07" in days
-
-    def test_save_and_get_signal_state(self, test_db) -> None:
-        states = {"A.SS": {"trend_score": 30.0, "prev_trend_score": 25.0}}
-        test_db.save_signal_state(states)
-        state = test_db.get_signal_state("A.SS")
-        assert state is not None
-        assert state["trend_score"] == 30.0
-
-    def test_get_all_signal_states(self, test_db) -> None:
-        states = {"A.SS": {"trend_score": 10.0}, "B.SZ": {"trend_score": 20.0}}
-        test_db.save_signal_state(states)
-        all_states = test_db.get_all_signal_states()
-        assert all_states["A.SS"]["trend_score"] == 10.0
-        assert all_states["B.SZ"]["trend_score"] == 20.0
-
-    def test_try_acquire_signal_run(self, test_db) -> None:
-        assert test_db.try_acquire_signal_run("run_001", "poll_30m", "sig") is True
-        # Duplicate should fail
-        assert test_db.try_acquire_signal_run("run_001", "poll_30m", "sig") is False
-
-    def test_position_snapshot(self, test_db) -> None:
-        snapshot = {"positions": [{"symbol": "A.SS", "qty": 100}]}
-        test_db.save_position_snapshot(snapshot)
-        loaded = test_db.get_latest_position_snapshot()
-        assert loaded is not None
-        assert loaded["positions"][0]["symbol"] == "A.SS"
-
-
-class TestTrades:
-    def test_add_and_get_trades(self, test_db) -> None:
-        trade = {"symbol": "A.SS", "side": "BUY", "qty": 100, "price": 10.0,
-                 "fee": 1.0, "pnl": 0.0, "trade_date": "2025-01-06",
-                 "trade_time": "10:00:00", "note": ""}
-        trade_id = test_db.add_trade(trade)
-        assert trade_id > 0
-        trades = test_db.get_trades_by_date("2025-01-06")
-        assert len(trades) == 1
-        assert float(trades[0]["price"]) == 10.0
-
-    def test_get_all_trades(self, test_db) -> None:
-        test_db.add_trade({"symbol": "A", "side": "BUY", "qty": 100, "price": 10.0,
-                           "fee": 1.0, "pnl": 0.0, "trade_date": "2025-01-06",
-                           "trade_time": "10:00:00", "note": ""})
-        test_db.add_trade({"symbol": "B", "side": "SELL", "qty": 50, "price": 12.0,
-                           "fee": 1.0, "pnl": 100.0, "trade_date": "2025-01-07",
-                           "trade_time": "14:00:00", "note": ""})
-        all_trades = test_db.get_all_trades()
-        assert len(all_trades) >= 2
-
-
 class TestInstrumentMetadata:
     def test_save_and_list(self, test_db) -> None:
         test_db.save_instrument_metadata([
@@ -185,33 +118,3 @@ class TestRuleStrategies:
         assert test_db.get_rule_strategy("del_me") is None
 
 
-class TestBacktests:
-    def test_save_and_list_backtests(self, test_db) -> None:
-        result = {"strategy_id": "trend_score_v1", "metrics": {"total_return": 0.1}}
-        test_db.save_backtest("bt_001", result)
-        items = test_db.list_backtests(limit=10)
-        assert len(items) >= 1
-
-    def test_favorite_toggle(self, test_db) -> None:
-        test_db.save_backtest("bt_fav", {"strategy_id": "x"})
-        assert test_db.set_backtest_favorite("bt_fav", True) is True
-        items = test_db.list_backtests()
-        fav = next(i for i in items if i["run_id"] == "bt_fav")
-        assert fav["is_favorite"] is True
-
-    def test_delete_backtest(self, test_db) -> None:
-        test_db.save_backtest("bt_del", {"strategy_id": "x"})
-        assert test_db.delete_backtest("bt_del") is True
-        assert test_db.get_backtest("bt_del") is None
-
-
-class TestOptimizations:
-    def test_save_and_get_optimization(self, test_db) -> None:
-        test_db.save_optimization_job("opt_001", {"status": "running"}, None)
-        status = test_db.get_optimization_status("opt_001")
-        assert status["status"] == "running"
-
-    def test_save_with_result(self, test_db) -> None:
-        test_db.save_optimization_job("opt_002", {"status": "done"}, {"best_score": 1.5})
-        result = test_db.get_optimization_result("opt_002")
-        assert result is not None

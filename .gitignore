@@ -18,6 +18,7 @@ logs/app/*.log
 logs/calc/*.jsonl
 data/runtime/**
 data/*.db
+data/*.db.bak-*
 
 # Local Codex app state
 .codex/config.toml

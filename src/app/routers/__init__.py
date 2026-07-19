@@ -1,21 +1,5 @@
-from app.routers import (
-    backtest,
-    instruments,
-    logs,
-    market_view,
-    overview,
-    parameter_optimization,
-    subject_market,
-    trades,
-)
+"""API routers package.
 
-__all__ = [
-    "overview",
-    "backtest",
-    "parameter_optimization",
-    "trades",
-    "logs",
-    "instruments",
-    "market_view",
-    "subject_market",
-]
+Submodules are imported explicitly by ``app.main``; no re-exports here
+so that removing a router module never breaks package import.
+"""

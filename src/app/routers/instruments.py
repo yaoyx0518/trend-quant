@@ -1153,3 +1153,12 @@ async def start_bulk_backfill(payload: InstrumentBulkBackfillRequest, request: R
 @router.get("/api/backfill-all/status")
 async def get_bulk_backfill_status() -> dict:
     return {"ok": True, "job": bulk_backfill_manager.snapshot()}
+
+
+@router.get("/api/daily-update/status")
+async def daily_update_status() -> dict:
+    """Latest 16:30 daily data update status for the global notification bar."""
+    status = runtime_store.read_json("daily_update_status.json")
+    if not status:
+        return {"ts": None, "completed": False, "message": "暂无更新记录"}
+    return status
