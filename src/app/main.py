@@ -8,7 +8,6 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.routers import (
-    backtest,
     instruments,
     logs,
     market_view,
@@ -81,7 +80,6 @@ if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 app.include_router(overview.router)
-app.include_router(backtest.router)
 app.include_router(rule_backtest.router)
 app.include_router(trades.router)
 app.include_router(logs.router)
