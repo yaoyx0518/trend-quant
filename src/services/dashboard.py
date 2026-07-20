@@ -14,6 +14,7 @@ from math import isfinite
 import numpy as np
 import pandas as pd
 
+from data.indicator_store import get_series
 from data.intraday_service import _detect_trend_phase
 from data.storage.db import get_db
 from services.market_indicators import compute_trend_indicator, trend_config
@@ -222,10 +223,24 @@ def build_subject_dashboard_payload(db=None) -> dict:
         source[column] = pd.to_numeric(source[column], errors="coerce")
 
     instrument_frames: list[pd.DataFrame] = []
-    cfg = trend_config()
-    for _, history in source.groupby("symbol", sort=False):
+    since = (pd.Timestamp.now() - pd.Timedelta(days=SOURCE_HISTORY_DAYS * 2)).date().isoformat()
+    # One bulk query for all cached trend scores (live fallback per symbol
+    # only when the cache has no rows for it — the store handles freshness).
+    trend_lookup: dict[tuple[str, str], float | None] = {}
+    if db.get_param_set("default") is not None:
+        for row in db.load_trend_daily_bulk(since):
+            trend_lookup[(row["symbol"], str(row["time"])[:10])] = row["trend_score"]
+    for symbol, history in source.groupby("symbol", sort=False):
         data = history.sort_values("time").reset_index(drop=True).copy()
-        data["trend_score"] = compute_trend_indicator(data, cfg).get("score", [])
+        if any((str(symbol), str(t)[:10]) in trend_lookup for t in data["time"]):
+            data["trend_score"] = [
+                trend_lookup.get((str(symbol), str(t)[:10]), np.nan) for t in data["time"]
+            ]
+        else:
+            data["trend_score"] = [
+                get_series(str(symbol), "trend_score", db=db, since=since).get(pd.Timestamp(t), np.nan)
+                for t in data["time"]
+            ]
         for period in (1, 5, 20, 60):
             data[f"return_{period}d"] = data["close"].pct_change(periods=period) * 100.0
         instrument_frames.append(data)

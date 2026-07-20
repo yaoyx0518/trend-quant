@@ -33,6 +33,7 @@ from app.routers.subject_market import build_subject_dashboard_payload
 from core.calendar import is_realtime_available, is_trading_day
 from core.symbols import normalize_symbol as _normalize_symbol
 from core.strategy_config import get_strategy_config
+from data.indicator_store import get_series
 from data.intraday_service import (
     build_intraday_dashboard,
     build_synthetic_bar,
@@ -352,7 +353,6 @@ def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
         return {"ok": False, "error": f"未找到 {symbol} 的数据"}
 
     strategy_cfg = _load_strategy_config()
-    atr_period = int(strategy_cfg.get("atr_period", 20))
     hard_stop_mul = float(strategy_cfg.get("hard_stop_atr_mul_default", 1.5))
     chandelier_mul = float(strategy_cfg.get("chandelier_stop_atr_mul", 2.5))
 
@@ -364,7 +364,9 @@ def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
                 hard_stop_mul = float(item["stop_atr_mul"])
             break
 
-    atr_series = atr(df, period=atr_period)
+    # ATR from the precomputed cache (single source, D11); the store falls
+    # back to a live full-history compute when the cache is stale/missing.
+    atr_series = get_series(symbol, "atr", db=db)
     if atr_series.empty:
         return {"ok": False, "error": "数据不足，无法计算 ATR"}
 
@@ -378,11 +380,9 @@ def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
 
     # ATR at buy date (look back up to and including buy_date)
     atr_at_buy = current_atr
-    mask_until = df["time"] <= buy_ts
-    if mask_until.any():
-        subset = atr_series[mask_until.values]
-        if not subset.empty and pd.notna(subset.iloc[-1]):
-            atr_at_buy = safe_float(subset.iloc[-1], current_atr)
+    subset = atr_series[atr_series.index <= buy_ts]
+    if not subset.empty and pd.notna(subset.iloc[-1]):
+        atr_at_buy = safe_float(subset.iloc[-1], current_atr)
 
     # Highest price since buy date (inclusive)
     highs = pd.to_numeric(df["high"], errors="coerce")

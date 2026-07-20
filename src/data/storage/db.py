@@ -790,14 +790,29 @@ class Database:
             )
         return len(records)
 
-    def load_trend_daily(self, symbol: str, param_set: str = "default"):
-        import pandas as pd
-
+    def load_trend_daily_bulk(self, since: str, param_set: str = "default") -> list[dict]:
+        """All symbols' trend rows since a date — one bulk query for dashboards."""
         with self._connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM trend_daily WHERE symbol = ? AND param_set = ? ORDER BY time",
-                (symbol, param_set),
+                """SELECT symbol, time, trend_score, trend_ma5, trend_ma10,
+                          price_direction, confidence
+                   FROM trend_daily WHERE param_set = ? AND time >= ?
+                   ORDER BY symbol, time""",
+                (param_set, str(since)),
             ).fetchall()
+        return [dict(r) for r in rows]
+
+    def load_trend_daily(self, symbol: str, param_set: str = "default", since: str | None = None):
+        import pandas as pd
+
+        query = "SELECT * FROM trend_daily WHERE symbol = ? AND param_set = ?"
+        params: list = [symbol, param_set]
+        if since is not None:
+            query += " AND time >= ?"
+            params.append(str(since))
+        query += " ORDER BY time"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
         if not rows:
             return pd.DataFrame()
         return pd.DataFrame([dict(r) for r in rows])
