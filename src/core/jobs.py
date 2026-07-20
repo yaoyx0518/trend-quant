@@ -30,7 +30,7 @@ def _pool_symbols() -> list[str]:
         instruments = [
             item
             for item in get_db().list_instrument_metadata()
-            if item.get("enabled", 1) in (1, True)
+            if bool(item.get("enabled", True))
         ]
     except (RuntimeError, sqlite3.Error) as exc:
         logger.warning("Instrument metadata unavailable (%s); daily update will cover benchmarks only", exc)
