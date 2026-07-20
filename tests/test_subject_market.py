@@ -46,7 +46,7 @@ class SubjectMarketApiTest(unittest.TestCase):
                     *_rows("CCC", "化学制药", 200.0, -0.15),
                 ]
 
-        with patch("app.routers.subject_market.get_db", return_value=FakeDb()):
+        with patch("services.dashboard.get_db", return_value=FakeDb()):
             payload = build_subject_dashboard_payload()
 
         self.assertEqual(payload["secondary_count"], 1)

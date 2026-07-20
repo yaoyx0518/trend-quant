@@ -11,15 +11,23 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.instrument_display import format_symbol_display, load_instrument_name_map, strip_etf_suffix
-from core import indicators as core_ind
 from core.calendar import is_realtime_available, previous_trading_day
-from core.strategy_config import get_strategy_config
 from core.symbols import normalize_symbol
-from core.trend import calculate_trend_score_series
 from data.intraday_service import compute_intraday_trend_score
 from data.service import DataService
 from data.storage.db import get_db
 from core.trend import safe_float
+
+from services.market_indicators import (
+    ATR_PERIODS,
+    BIAS_PERIODS,
+    DEFAULT_RSI_PERIOD,
+    MA_PERIODS,
+    TREND_MA_PERIODS,
+    VOL_MA_PERIODS,
+    compute_market_indicators,
+    trend_config as _trend_config,
+)
 
 router = APIRouter(prefix="/market-view", tags=["market-view"])
 templates = Jinja2Templates(directory="web/templates")
@@ -27,16 +35,6 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 20000
 MAX_LIMIT = 50000
-MA_PERIODS = (5, 10, 20, 30, 40, 60, 120, 200)
-ATR_PERIODS = (20,)
-BIAS_PERIODS = (6, 12, 24)
-VOL_MA_PERIODS = (5, 10)
-TREND_MA_PERIODS = (5, 10)
-DEFAULT_RSI_PERIOD = 14
-
-
-def _strategy_config() -> dict:
-    return get_strategy_config()
 
 
 def _normalize_symbol(raw_symbol: str) -> str:
@@ -126,19 +124,6 @@ def _date_only(value: object) -> str:
     return ts.date().isoformat()
 
 
-def _validate_rsi_period(period: int) -> int:
-    value = int(period)
-    if value <= 1:
-        raise HTTPException(status_code=400, detail="RSI 周期必须大于 1")
-    return value
-
-
-def _trend_config(overrides: dict | None = None) -> dict:
-    cfg = _strategy_config()
-    cfg.update(overrides or {})
-    return cfg
-
-
 def _validate_trend_config(cfg: dict) -> None:
     n_short = int(cfg.get("n_short", 5))
     n_mid = int(cfg.get("n_mid", 10))
@@ -148,85 +133,6 @@ def _validate_trend_config(cfg: dict) -> None:
         raise HTTPException(status_code=400, detail="趋势值参数必须为正整数")
     if not (n_short < n_mid < n_long):
         raise HTTPException(status_code=400, detail="要求趋势值参数 n_short < n_mid < n_long")
-
-
-def compute_trend_indicator(df: pd.DataFrame, cfg: dict) -> dict:
-    _validate_trend_config(cfg)
-    series = calculate_trend_score_series(df, cfg)
-    score_series = series["trend_score"].astype("float64")
-    ma = {
-        str(period): _series(series[f"trend_ma{period}"])
-        for period in TREND_MA_PERIODS
-    }
-    return {
-        "score": _series(score_series),
-        "ma": ma,
-        "price_direction": _series(series["price_direction"]),
-        "confidence": _series(series["confidence"]),
-        "config": {
-            "n_short": int(cfg.get("n_short", 5)),
-            "n_mid": int(cfg.get("n_mid", 10)),
-            "n_long": int(cfg.get("n_long", 20)),
-            "atr_period": int(cfg.get("atr_period", 20)),
-        },
-    }
-
-
-def compute_market_indicators(
-    df: pd.DataFrame,
-    trend_cfg: dict | None = None,
-    rsi_period: int = DEFAULT_RSI_PERIOD,
-) -> dict:
-    close = pd.to_numeric(df["close"], errors="coerce")
-    volume = pd.to_numeric(df.get("volume", pd.Series(index=df.index)), errors="coerce")
-    rsi_period = _validate_rsi_period(rsi_period)
-
-    ma = {
-        str(period): _series(core_ind.sma(close, period))
-        for period in MA_PERIODS
-    }
-
-    boll_out = core_ind.bollinger(close)
-    boll = {
-        "mid": _series(boll_out["mid"]),
-        "upper": _series(boll_out["up"]),
-        "lower": _series(boll_out["dn"]),
-    }
-
-    macd_out = core_ind.macd(close, warmup=False)
-    macd = {
-        "dif": _series(macd_out["dif"]),
-        "dea": _series(macd_out["dea"]),
-        "bar": _series(macd_out["hist"]),
-    }
-
-    bias: dict[str, list[float | None]] = {}
-    for period in BIAS_PERIODS:
-        bias[str(period)] = _series(core_ind.bias(close, period) * 100)
-
-    volume_ma = {
-        str(period): _series(core_ind.sma(volume, period))
-        for period in VOL_MA_PERIODS
-    }
-    rsi = {
-        "series": _series(core_ind.rsi(close, rsi_period)),
-        "period": rsi_period,
-    }
-    atr_values = {
-        str(period): _series(core_ind.atr(df, period=period))
-        for period in ATR_PERIODS
-    }
-
-    return {
-        "ma": ma,
-        "atr": atr_values,
-        "boll": boll,
-        "macd": macd,
-        "bias": bias,
-        "volume_ma": volume_ma,
-        "rsi": rsi,
-        "trend": compute_trend_indicator(df, _trend_config(trend_cfg)),
-    }
 
 
 def build_market_payload(

@@ -348,7 +348,7 @@ def build_intraday_dashboard(
 
         # --- Compute trend history for phase detection -----------------
         # Late import to avoid circular dependency (market_view → intraday_service).
-        from app.routers.market_view import compute_trend_indicator  # noqa: PLC0415
+        from services.market_indicators import compute_trend_indicator  # noqa: PLC0415
 
         trend_result = compute_trend_indicator(hist, trend_config)
         hist_trend_scores = trend_result.get("score", [])

@@ -32,3 +32,6 @@ Thumbs.db
 
 # Git bundle backups (never commit bundles into the repo they back up)
 *.bundle
+
+# DB backup snapshots
+data/backups/
