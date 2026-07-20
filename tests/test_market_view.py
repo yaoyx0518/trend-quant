@@ -8,7 +8,7 @@ import pandas as pd
 
 from app.routers import market_view
 from app.routers.market_view import build_market_payload, compute_market_indicators
-from strategy.trend_score_core import calculate_trend_score_snapshot
+from core.trend import calculate_trend_score_snapshot
 
 
 def sample_daily_bars(rows: int = 80) -> pd.DataFrame:

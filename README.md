@@ -1,358 +1,68 @@
-﻿# Trend ETF System
+# Trend Quant — A 股 ETF 趋势跟踪系统
 
-A 股 ETF 趋势交易系统（单用户、本地运行、人工执行交易），围绕自定义 `Trend Score` 指标实现数据更新、盘中信号、风险预算仓位建议、回测分析与可视化。
+## 系统概览
 
-本 README 作为项目开发总览与 AI 协作输入文档，优先描述当前代码的真实实现（as-built）。
+FastAPI + SQLite 的单机应用：日 K 行情驱动的趋势看板、单标的分析、配置化规则回测，以及对外提供数据的 MCP 服务。
 
-## 1. 当前能力边界
+- **标的看板**（`/subject-market`）：全标的池三级分类趋势看板（趋势值、MA5、强度百分位、相位），EOD + 盘中实时两套视图；
+- **标的查看**（`/market-view`）：单标的 K 线 + 全套指标（MA/ATR/RSI/MACD/BOLL/BIAS/趋势值），支持盘中实时叠加；
+- **策略管理**（`/rule-backtest`）：配置化规则策略（JSON 条件树）的创建与单标的回测，多策略对比；
+- **标的管理**（`/instruments`）：标的增改、分类编辑、历史行情回填；
+- **MCP 服务**（`/mcp/sse`）：5 个工具（trend_dashboard / intraday_dashboard / symbol_detail / calc_stop_loss / list_instruments）；
+- **每日任务**：16:30 增量补齐日 K → 除权检测（必要时整标重拉）→ 指标缓存重建。
 
-- 市场：A 股场内 ETF
-- 策略：`TrendScoreStrategy`（趋势值模型）
-- 执行：系统给出信号与建议数量，实际成交由人工录入
-- 调度：交易日盘中轮询 + 14:45 最终信号 + 收盘后日线更新
-- 存储：SQLite + 日志文件（advice 与审计日志保留 JSON/JSONL）
-- 可视化：FastAPI + Jinja2 + ECharts
+## 架构
 
-## 2. 快速启动（Windows）
-
-### 2.1 环境
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e .
 ```
-
-### 2.2 运行
-
-```powershell
-.\scripts\run_dev.ps1
-```
-
-如果 PowerShell 执行策略拦截脚本：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\run_dev.ps1
-```
-
-访问：`http://127.0.0.1:8000`
-
-## 3. 项目结构（代码组织）
-
-```text
 src/
-  app/
-    main.py                  # FastAPI 入口 + 生命周期 + 调度注册
-    routers/
-      overview.py            # 概览页与概览 API
-      config.py              # 配置查看/更新 API
-      backtest.py            # 回测页面与回测 API
-      trades.py              # 手工成交录入与组合快照 API
-      logs.py                # 日志查询 API
-
-  core/
-    settings.py              # app/runtime/logging 配置加载
-    scheduler.py             # APScheduler 封装
-    enums.py                 # SignalAction / SignalLevel
-
-  data/
-    provider_base.py         # IDataProvider 协议
-    provider_tickflow.py     # 当前唯一启用数据源（注册版 Starter）
-    provider_utils.py        # 字段归一化工具
-    service.py               # DataService（TickFlow-only，失败即报错）
-    storage/
-      db.py                  # SQLite 数据库封装
-      market_store.py        # SQLite 行情存取
-      runtime_store.py       # JSON 文件存取（保留 advice / 审计日志）
-
-  strategy/
-    base.py                  # IStrategy 协议
-    indicators.py            # ATR / Efficiency Ratio
-    trend_score_strategy.py  # 趋势值策略核心
-
-  portfolio/
-    service.py               # 由手工成交重建仓位快照（含 T+1 可卖）
-    risk_sizer.py            # 风险预算仓位建议 + 等比缩放
-
-  engine/
-    signal_engine.py         # 盘中信号主引擎
-
-  backtest/
-    backtest_engine.py       # 回测主引擎
-    metrics.py               # 收益、回撤、热力图、分标的统计
-    benchmark.py             # 等权池基准
-
-  notify/
-    feishu_notifier.py       # 通知桩（当前写日志）
-    email_notifier.py        # SMTP 邮件通知
-
-  audit/
-    app_logger.py            # 应用日志
-    calc_logger.py           # 计算明细日志（jsonl）
-
-web/
-  templates/                 # Jinja2 页面模板
-  static/style.css
-
-config/
-  app.yaml
-  instruments.yaml
-  strategy.yaml
-
-data/
-  market/etf/*.parquet       # ETF 历史行情
-  runtime/**                 # 信号、回测、成交、仓位快照
-
-logs/
-  app/app.log
-  calc/calc.jsonl
+├─ core/            领域核心（纯计算）：indicators（统一指标库）、trend（趋势值）、
+│                   symbols、calendar、benchmarks、strategy_config、settings、jobs、scheduler
+├─ data/            数据层：db（SQLite）、indicator_store（缓存读取门面）、service（行情）、
+│                   provider_tickflow、intraday_service（盘中合成）
+├─ services/        应用服务：market_indicators、dashboard、instrument_jobs、
+│                   instrument_admin、indicator_builder（预计算管线）
+├─ rule_backtest/   规则回测领域：engine、condition_engine、value_resolver（全序列记忆化）、
+│                   indicators（core 薄适配）、registry、loader、service、metrics
+├─ app/             HTTP 层：main + routers（只做编排）
+└─ trend_mcp/       MCP 薄适配层
 ```
 
-## 4. 核心实现类与职责
+依赖方向单向：`app / trend_mcp → services → core / data`。
 
-### 4.1 数据与存储
+## 关键设计
 
-- `IDataProvider` (`src/data/provider_base.py`)
-  - 统一接口：
-    - `fetch_daily_history`
-    - `fetch_minute_history`
-    - `fetch_latest_quote`
-    - `fetch_trading_calendar`
+### 指标唯一实现与预计算缓存
 
-- `TickFlowProvider`
-  - 字段标准化后返回统一 OHLCV 结构；当前唯一生产数据源。
-  - TickFlow 固定使用已注册账户的 Starter 接口，必须设置环境变量 `TICKFLOW_API_KEY`。
-  - Starter：日 K 批量请求最多 100 个标的、30 次/分钟；单标的日 K 和实时行情各 60 次/分钟。
-  - Starter 不含分钟 K；调用分钟 K 会明确报出套餐能力不足。
-  - TickFlow 获取失败或返回空数据时直接抛错，阻塞流程，不进行数据源降级。
+- 所有指标/趋势值只有一份实现（`core/indicators.py`、`core/trend.py`），带 `INDICATOR_FORMULA_VERSION` / `TREND_FORMULA_VERSION`；
+- 预计算表：`indicator_daily`（含盘中递推状态列）、`trend_daily`（按参数集）、`trend_param_sets`（default 参数集 hash 注册）；
+- 读取门面 `data/indicator_store.py`：**缓存优先、未命中实时算**——缓存只是加速器，回退是永久特性；
+- 整标全量重建（qfq 除权会回溯改写历史，行级增量不可行）；16:30 日更尾部重建变动标的；启动时 hash/version 校验，漂移自动全量重建（`VACUUM INTO` 备份至 `data/backups/`）。
 
-- `DataService` (`src/data/service.py`)
-  - 固定使用 TickFlow 获取数据。
-  - 负责增量更新 ETF 池历史数据到 SQLite。
+### 实时叠加
 
-- `Database` (`src/data/storage/db.py`)
-  - SQLite 单文件数据库，统一存储行情、信号、回测、成交、仓位快照、优化任务。
+交易时段内，查看类接口通过"EOD 缓存 + 当日实时行"呈现：当日行由实时报价合成 bar + 缓存状态递推（EMA/MACD/RSI 精确递推、有限记忆指标尾窗重算）。**实时行永不落库；回测/止损只用 EOD 数据。**
 
-- `MarketStore`
-  - `symbol -> SQLite` 的读写封装（`market_data` 表）。
+### 回测性能
 
-- `RuntimeStore`
-  - 读写保留为 JSON 的运行态文件（advice / 审计日志）。
+规则回测引擎开局一次性构建全序列指标（ValueResolver 记忆化），日循环为纯状态机：典型趋势策略从 ~40-80s/次 降至 ~0.5s/次，结果与旧实现逐笔一致（golden-master 锁定）。
 
-### 4.2 策略与信号
+## 数据存储
 
-- `IStrategy` (`src/strategy/base.py`)
-  - 约束 `evaluate(symbol, bars, state, cfg)` 输出标准信号结构。
+单一 SQLite（`data/trend_quant.db`）：`market_data_qfq`（前复权日 K，主数据）、`market_data_raw`、`instrument_metadata`（标的唯一来源）、`instrument_categories`、`rule_strategies`、`job_runs`（任务记录）、`app_config`（策略参数）、`indicator_daily` / `trend_daily` / `trend_param_sets`（预计算缓存）。config/ 仅 `app.yaml`（基础设施）。密钥在 `.env`（TICKFLOW_API_KEY）。
 
-- `TrendScoreStrategy` (`src/strategy/trend_score_strategy.py`)
-  - 计算 `trend_score`、`action`、`level`、`reason`、`calc_details`。
-  - 包含入场、离场、预警（watch）与 T+1 阻塞逻辑。
+## 运行
 
-- `SignalEngine` (`src/engine/signal_engine.py`)
-  - 盘中轮询主流程：
-    1. 读取配置与当前事实仓位
-    2. 拉取/补齐行情 + 最新价融合
-    3. 计算每标的信号
-    4. 风险预算计算建议股数并做资金缩放
-    5. 写入 SQLite `signals` 与 `signal_states` 表
+```bash
+# 开发
+PYTHONPATH=src .venv/bin/python -m uvicorn app.main:app --reload
 
-### 4.3 组合与风控
+# 测试
+.venv/bin/python -m pytest tests/ -q
 
-- `PortfolioService` (`src/portfolio/service.py`)
-  - 从 SQLite `manual_trades` 表回放成交，重建当前现金/持仓/可卖数量。
-  - SELL 按 FIFO 消耗买入 lot。
+# 部署（systemd）
+sudo systemctl restart trend-quant.service
+```
 
-- `RiskSizer` (`src/portfolio/risk_sizer.py`)
-  - `suggest_qty`：按 ATR 风险单位给出理论仓位（100 整手约束）。
-  - `scale_allocations`：当总成本超现金时按比例缩放所有候选买入。
+## 备份
 
-### 4.4 回测
-
-- `BacktestEngine` (`src/backtest/backtest_engine.py`)
-  - 日频遍历时间线，先卖后买，模拟手续费/滑点与 T+1。
-  - 输出 summary、trades、annual/monthly、charts payload。
-
-- `metrics.py`
-  - `compute_metrics`、`compute_drawdown`、`compute_annual_returns`、`compute_monthly_heatmap`、`compute_symbol_trade_stats`。
-
-- `benchmark.py`
-  - 4 ETF 池等权基准：初始等权分配，按整手买入并持有。
-
-### 4.5 调度与应用
-
-- `SchedulerManager` (`src/core/scheduler.py`)
-  - 注册三类任务：`poll`、`final_signal(14:45)`、`daily_update(15:30)`。
-  - 使用 APScheduler cron trigger，适合在 Windows / Linux 上以常驻服务方式运行。
-  - 本地 Windows 建议用 Task Scheduler 只负责拉起/守护应用；Linux/云服务器建议用 systemd/supervisor 守护应用进程。
-
-- `app.main` (`src/app/main.py`)
-  - 应用生命周期中初始化 `SignalEngine` 与调度器。
-  - 14:45 信号任务内置“数据不可用重试”。
-
-## 5. 核心接口（Web/API）
-
-### 5.1 页面路由
-
-- `/`：系统概览
-- `/config`：配置查看
-- `/backtest`：回测中心
-- `/trades`：手工成交录入
-- `/logs`：日志页面
-
-### 5.2 主要 API
-
-- `GET /api/overview`
-- `GET /config/api/raw`
-- `POST /config/api/raw`
-- `POST /backtest/api/run`
-- `GET /backtest/api/list`
-- `GET /backtest/api/{run_id}`
-- `GET /trades/api/manual?trade_date=YYYY-MM-DD`
-- `POST /trades/api/manual`
-- `GET /trades/api/portfolio?as_of_date=YYYY-MM-DD`
-- `GET /logs/api/calc?limit=100`
-
-## 6. 算法核心（Trend Score）
-
-### 6.1 指标分解
-
-- 总公式：
-  - `Trend Score = Price Direction * Confidence`
-
-- `Price Direction`
-  - 基于短中长周期 Bias 与 Slope 加权合成。
-  - `Bias_n = (Close - MA_n) / ATR`
-  - `Slope_n = (EMA_n(now) - EMA_n(prev)) / (ATR * n)`
-  - 归一化：
-    - `norm_bias = tanh(bias_mix / 2) * 100`
-    - `norm_slope = tanh(slope_mix) * 100`
-
-- `Confidence`
-  - `Volume Factor` + `Efficiency Ratio` 组合。
-  - `vol_ratio = volume / MA(volume, 20)`，上限按 3 截断映射到 `[0,1]`。
-  - `ER` 使用 10 日效率比率（噪声越小 ER 越高）。
-  - `confidence = volume_factor^w_vol * er^w_er`
-
-### 6.2 交易规则
-
-- 买入（全部满足）：
-  1. 当前无持仓
-  2. `entry_threshold_min <= trend_score <= entry_threshold_max`
-  3. 当前价 > `MA_mid`
-
-- 卖出（持仓时任一触发）：
-  1. 跌破硬止损
-  2. 跌破吊灯止损
-
-- T+1：
-  - 当天买入不可卖；若触发卖出但 `sellable_qty=0`，输出 WARN + `t1_blocked`。
-
-### 6.3 仓位与资金约束
-
-- 每标的风险预算：`equity * risk_budget_pct`
-- 每股风险：`ATR * stop_atr_mul`
-- 理论股数：`risk_budget / per_share_risk`，再按 100 整手向下取整
-- 总候选超资金：按比例整体缩放，允许保留少量现金
-
-## 7. 回测输出与可视化数据契约
-
-`BacktestEngine.run()` 输出存入 SQLite `backtests` 表，主要字段：
-
-- `summary`：策略指标（收益、回撤、夏普、Sortino、Calmar、胜率、盈亏比等）
-- `benchmark_summary`：基准指标
-- `annual_returns`
-- `monthly_heatmap`
-- `symbol_stats`
-- `trades`
-- `charts`
-  - `dates`
-  - `nav` / `benchmark_nav`
-  - `drawdown`
-  - `buy_points` / `sell_points`
-  - `trend`（所有标的趋势值序列）
-  - `holdings`（分标的 + 现金堆叠序列）
-  - `kline`（每标的 K 线 + 买卖标记）
-
-## 8. 配置说明
-
-### 8.1 `config/app.yaml`
-
-- 运行参数：host/port/timezone
-- 数据源配置：`data_provider_priority` 当前只应配置 `tickflow`
-- 调度时点：`polling_times`、`final_signal_time`、`update_time_after_close`（16:30 收盘后数据更新）
-- 重试参数：`daily_update_max_retries`（日更新失败重试次数）、行情拉取与通知重试
-- 交易整手：`lot_size`
-
-### 8.2 `config/instruments.yaml`
-
-- 标的池与标的级参数：
-  - `symbol`
-  - `enabled`
-  - `risk_budget_pct`
-  - `stop_atr_mul`
-
-### 8.3 `config/strategy.yaml`
-
-- 趋势模型参数（周期/权重/阈值）
-- 成本参数（fee/slippage）
-- 回测默认区间（当前主起始 `2024-01-01`，回退 `2018-01-01`）
-
-## 9. 关键数据文件
-
-- 数据库：`data/trend_quant.db`（SQLite）
-  - `market_data`：ETF 历史行情
-  - `signals`：每日信号
-  - `signal_states`：最新信号状态
-  - `backtests`：回测结果
-  - `manual_trades`：手工成交
-  - `position_snapshots`：仓位快照
-  - `optimization_jobs`：参数优化任务
-- 操作建议：`data/runtime/advice/*.json`
-- 计算日志：`logs/calc/calc.jsonl`
-
-## 10. 扩展指南（给后续 AI/开发者）
-
-### 10.1 新增数据源
-
-1. 新建 `provider_xxx.py` 实现 `IDataProvider`
-2. 在 `DataService.providers` 注册
-3. 明确是否允许降级；当前生产要求是 TickFlow-only，新增 provider 不应默认进入降级链路
-
-### 10.2 新增策略
-
-1. 新建策略类实现 `IStrategy`
-2. 在 `SignalEngine` / `BacktestEngine` 注入策略实例
-3. 扩展 `config/strategy.yaml` 参数
-4. 如需多策略并行，建议增加 `StrategyRegistry + PortfolioAllocator`
-
-### 10.3 新增通知通道
-
-1. 实现 notifier（参考 `notify/*_notifier.py`）
-2. 在信号触发链路接入分级发送与失败重试
-3. 将发送结果写入审计日志
-
-### 10.4 邮件通知配置
-
-当前邮件通知使用 `src/notify/email_notifier.py`，从环境变量读取 SMTP 配置：
-
-- `EMAIL_SMTP_HOST`
-- `EMAIL_SMTP_PORT`
-- `EMAIL_SMTP_USERNAME`
-- `EMAIL_SMTP_PASSWORD`
-- `EMAIL_FROM`
-- `EMAIL_TO`
-- `EMAIL_SMTP_USE_SSL`（可选，默认 `true`）
-
-163 邮箱建议使用 `smtp.163.com:465`，密码使用客户端授权码，不使用网页登录密码。
-
-## 11. 当前已知限制
-
-- 邮件通知能力已接入；具体盘中/收盘报告内容尚未定义。
-- 交易日历在主源不可用时可能退化为工作日判断。
-- 当前仅单账户、人工执行，不含自动下单。
-
-## 12. 开发建议顺序
-
-1. 定义盘中/收盘邮件报告内容
-2. 盘前/盘后通知任务
-3. 多策略框架（为“行业 ETF TopN 动量”预留）
-4. 日志检索与配置页增强
+代码用 git bundle（仓库根目录带时间戳的 `.bundle`）；数据 = `data/trend_quant.db`（含全部行情/策略/缓存）+ `.env`。恢复：clone bundle → 放回 DB 与 .env → 装依赖 → deploy.sh。

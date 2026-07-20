@@ -115,5 +115,5 @@ calc_stop_loss(symbol, ...)     → 计算止损价
 - **首次调用 `trend_dashboard` 较慢**（5-10 秒），因需计算 600+ 标的趋势值。后续命中缓存秒返。
 - **`symbol_detail` 指标需要至少 30 根 K 线**做回看。设置 `days` 过小时，OHLCV 数据正确截断，但指标序列可能包含更多回看数据点。
 - **标的代码格式**：支持 `510300.SS`（带后缀）和 `510300`（自动补全）。`.SS` 上海、`.SZ` 深圳。
-- **`calc_stop_loss`**：若标的在 `config/instruments.yaml` 中自定义了 `stop_atr_mul`，自动覆盖默认值 1.5。
+- **`calc_stop_loss`**：若标的在 DB（instrument_metadata 表）中自定义了 `stop_atr_mul`，自动覆盖默认值 1.5。ATR 来自预计算缓存（indicator_daily.atr，单一来源）。
 - **数据时效**：依赖 Trend Quant 后端每日 16:30 的数据更新，若未正常运行数据会滞后。

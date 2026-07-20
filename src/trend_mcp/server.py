@@ -229,11 +229,11 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: b
     if df.empty:
         return {"ok": False, "error": f"未找到 {symbol} 的数据，请确认代码正确且数据已入库"}
 
-    # Load enough bars for indicator bootstrapping, then tail to requested days.
-    # Trend-score needs max(n_long, atr_period) + 2 ≈ 22 bars minimum.
-    MIN_BARS = 30
+    # Compute indicators over FULL history (EMA-family indicators have
+    # infinite memory; truncating before computing made values depend on
+    # the requested window — the old window-truncation bug). Output arrays
+    # are tailed afterwards to the requested number of days.
     requested = max(int(days), 1)
-    df = df.tail(max(requested, MIN_BARS)).copy()
 
     name_map = _config_name_map()
     instruments = _load_instruments_raw()
@@ -253,7 +253,8 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: b
         return [round(float(v), 4) if pd.notna(v) else None for v in series_like]
 
     n = min(requested, len(df))
-    dates_out = [str(d.date()) for d in df["time"]][-n:]
+    df = df.tail(n).copy()
+    dates_out = [str(d.date()) for d in df["time"]]
 
     payload = {
         "ok": True,
