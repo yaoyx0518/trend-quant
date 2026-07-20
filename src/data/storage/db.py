@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,11 +23,29 @@ class Database:
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # WAL: readers are not blocked during indicator cache rebuilds.
+        conn.execute("PRAGMA journal_mode=WAL")
         try:
             yield conn
             conn.commit()
         finally:
             conn.close()
+
+    def backup_to(self, backup_dir: str | Path = "data/backups", keep: int = 3) -> Path:
+        """Online backup via VACUUM INTO (WAL-safe), keeping the newest ``keep`` files."""
+        target_dir = Path(backup_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        dest = target_dir / f"trend_quant-{stamp}.db"
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(f"VACUUM INTO '{dest}'")
+        finally:
+            conn.close()
+        backups = sorted(target_dir.glob("trend_quant-*.db"))
+        for old in backups[:-keep]:
+            old.unlink(missing_ok=True)
+        return dest
 
     def _init_tables(self) -> None:
         with self._connect() as conn:

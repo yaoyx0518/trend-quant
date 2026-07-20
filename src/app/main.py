@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
+import threading
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -30,6 +31,19 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI):
     Path("data").mkdir(exist_ok=True)
     init_db()
+
+    # Startup cache check: full rebuild in background when trend params or
+    # formula versions drifted (also covers first-ever bootstrap).
+    def _rebuild_check() -> None:
+        try:
+            from services.indicator_builder import rebuild_if_needed
+
+            result = rebuild_if_needed()
+            logger.info("Indicator cache startup check: %s", result.get("status"))
+        except Exception:
+            logger.exception("Indicator cache startup check failed")
+
+    threading.Thread(target=_rebuild_check, daemon=True).start()
 
     scheduler_manager = SchedulerManager(settings=settings)
 
