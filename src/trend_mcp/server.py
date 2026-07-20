@@ -24,12 +24,9 @@ import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
 from app.instrument_display import format_symbol_display
-from app.routers.market_view import (
-    _config_name_map,
-    _trend_config,
-    compute_market_indicators,
-)
-from app.routers.subject_market import build_subject_dashboard_payload
+from services.instrument_admin import _config_name_map
+from services.market_indicators import compute_market_indicators, trend_config as _trend_config
+from services.dashboard import build_subject_dashboard_payload
 from core.calendar import is_realtime_available, is_trading_day
 from core.symbols import normalize_symbol as _normalize_symbol
 from core.strategy_config import get_strategy_config

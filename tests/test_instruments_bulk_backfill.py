@@ -7,7 +7,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from app.routers.instruments import BulkBackfillJobManager, InstrumentAddJobManager
+from services.instrument_jobs import BulkBackfillJobManager, InstrumentAddJobManager
 from data.storage.db import get_db, init_db
 
 
