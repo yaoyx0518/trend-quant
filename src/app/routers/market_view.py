@@ -13,12 +13,12 @@ from fastapi.templating import Jinja2Templates
 from app.instrument_display import format_symbol_display, load_instrument_name_map, strip_etf_suffix
 from core import indicators as core_ind
 from core.calendar import is_realtime_available, previous_trading_day
-from core.indicators import efficiency_ratio
 from core.strategy_config import get_strategy_config
+from core.trend import calculate_trend_score_series
 from data.intraday_service import compute_intraday_trend_score
 from data.service import DataService
 from data.storage.db import get_db
-from strategy.trend_score_core import safe_float
+from core.trend import safe_float
 
 router = APIRouter(prefix="/market-view", tags=["market-view"])
 templates = Jinja2Templates(directory="web/templates")
@@ -160,99 +160,17 @@ def _validate_trend_config(cfg: dict) -> None:
 
 def compute_trend_indicator(df: pd.DataFrame, cfg: dict) -> dict:
     _validate_trend_config(cfg)
-    n_short = int(cfg.get("n_short", 5))
-    n_mid = int(cfg.get("n_mid", 10))
-    n_long = int(cfg.get("n_long", 20))
-    atr_period = int(cfg.get("atr_period", 20))
-    min_bars = max(n_long, atr_period) + 2
-
-    close = pd.to_numeric(df.get("close"), errors="coerce")
-    high = pd.to_numeric(df.get("high"), errors="coerce")
-    low = pd.to_numeric(df.get("low"), errors="coerce")
-    volume = pd.to_numeric(df.get("volume", pd.Series(index=df.index)), errors="coerce").fillna(0.0)
-    calc_df = pd.DataFrame(
-        {"close": close, "high": high, "low": low, "volume": volume},
-        index=df.index,
-    ).dropna(subset=["close", "high", "low"])
-
-    trend_full = pd.Series(np.nan, index=df.index, dtype="float64")
-    price_direction_full = pd.Series(np.nan, index=df.index, dtype="float64")
-    confidence_full = pd.Series(np.nan, index=df.index, dtype="float64")
-
-    if len(calc_df) >= min_bars:
-        close_series = calc_df["close"]
-        atr_series = core_ind.atr(calc_df, period=atr_period)
-
-        weights_bias = np.array(
-            [
-                safe_float(cfg.get("w_bias_short", 0.4), 0.4),
-                safe_float(cfg.get("w_bias_mid", 0.4), 0.4),
-                safe_float(cfg.get("w_bias_long", 0.2), 0.2),
-            ]
-        )
-        weights_slope = np.array(
-            [
-                safe_float(cfg.get("w_slope_short", 0.4), 0.4),
-                safe_float(cfg.get("w_slope_mid", 0.4), 0.4),
-                safe_float(cfg.get("w_slope_long", 0.2), 0.2),
-            ]
-        )
-
-        bias_parts: list[pd.Series] = []
-        slope_parts: list[pd.Series] = []
-        for n in (n_short, n_mid, n_long):
-            ma_n = close_series.rolling(n, min_periods=n).mean()
-            bias_parts.append(((close_series - ma_n) / atr_series).fillna(0.0))
-            ema_n = close_series.ewm(span=n, adjust=False).mean()
-            slope_parts.append((ema_n.diff() / (atr_series * n)).fillna(0.0))
-
-        bias_mix = (
-            weights_bias[0] * bias_parts[0]
-            + weights_bias[1] * bias_parts[1]
-            + weights_bias[2] * bias_parts[2]
-        )
-        slope_mix = (
-            weights_slope[0] * slope_parts[0]
-            + weights_slope[1] * slope_parts[1]
-            + weights_slope[2] * slope_parts[2]
-        )
-
-        norm_bias = np.tanh(bias_mix / 2.0) * 100.0
-        norm_slope = np.tanh(slope_mix) * 100.0
-        price_direction = (
-            safe_float(cfg.get("w_bias_norm", 0.5), 0.5) * norm_bias
-            + safe_float(cfg.get("w_slope_norm", 0.5), 0.5) * norm_slope
-        )
-
-        vol_ma_period = int(cfg.get("vol_ma_period", 20))
-        er_period = int(cfg.get("er_period", 10))
-        vol_ma = calc_df["volume"].rolling(vol_ma_period, min_periods=1).mean()
-        vol_ratio = calc_df["volume"] / vol_ma.replace(0, np.nan)
-        volume_factor = (vol_ratio / 3.0).clip(lower=0.0, upper=1.0).fillna(0.0)
-        er_now = efficiency_ratio(close_series, period=er_period).clip(lower=0.0, upper=1.0)
-
-        confidence = (volume_factor ** safe_float(cfg.get("w_vol", 0.3), 0.3)) * (
-            er_now ** safe_float(cfg.get("w_er", 0.7), 0.7)
-        )
-        trend_score = (price_direction * confidence).clip(lower=-100.0, upper=100.0)
-
-        valid = (pd.Series(range(1, len(calc_df) + 1), index=calc_df.index) >= min_bars) & (
-            atr_series > 0
-        )
-        trend_full.loc[calc_df.index] = trend_score.where(valid)
-        price_direction_full.loc[calc_df.index] = price_direction.where(valid)
-        confidence_full.loc[calc_df.index] = confidence.where(valid)
-
-    score_series = trend_full.astype("float64")
+    series = calculate_trend_score_series(df, cfg)
+    score_series = series["trend_score"].astype("float64")
     ma = {
-        str(period): _series(score_series.rolling(period, min_periods=period).mean())
+        str(period): _series(series[f"trend_ma{period}"])
         for period in TREND_MA_PERIODS
     }
     return {
-        "score": _series(trend_full),
+        "score": _series(score_series),
         "ma": ma,
-        "price_direction": _series(price_direction_full),
-        "confidence": _series(confidence_full),
+        "price_direction": _series(series["price_direction"]),
+        "confidence": _series(series["confidence"]),
         "config": {
             "n_short": int(cfg.get("n_short", 5)),
             "n_mid": int(cfg.get("n_mid", 10)),

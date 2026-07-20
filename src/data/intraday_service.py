@@ -19,7 +19,7 @@ import pandas as pd
 from data.storage.db import Database
 from data.service import DataService
 from core.indicators import atr as _compute_atr
-from strategy.trend_score_core import calculate_trend_score_snapshot, safe_float
+from core.trend import calculate_trend_score_snapshot, safe_float
 
 # ---------------------------------------------------------------------------
 # synthetic bar construction

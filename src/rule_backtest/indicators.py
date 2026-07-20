@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from core import indicators as core_ind
-from strategy.trend_score_core import calculate_trend_score_snapshot
+from core.trend import calculate_trend_score_snapshot
 
 
 def safe_float(value: object, default: float | None = None) -> float | None:
