@@ -40,7 +40,7 @@ from data.intraday_service import (
 )
 from data.service import DataService
 from data.storage.db import get_db
-from strategy.indicators import atr
+from core.indicators import atr
 from strategy.trend_score_core import safe_float
 
 # ---------------------------------------------------------------------------

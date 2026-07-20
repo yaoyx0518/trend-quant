@@ -11,12 +11,13 @@ from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 
 from app.instrument_display import format_symbol_display, load_instrument_name_map, strip_etf_suffix
+from core import indicators as core_ind
 from core.calendar import is_realtime_available, previous_trading_day
+from core.indicators import efficiency_ratio
 from core.strategy_config import get_strategy_config
 from data.intraday_service import compute_intraday_trend_score
 from data.service import DataService
 from data.storage.db import get_db
-from strategy.indicators import atr, efficiency_ratio
 from strategy.trend_score_core import safe_float
 
 router = APIRouter(prefix="/market-view", tags=["market-view"])
@@ -133,29 +134,11 @@ def _date_only(value: object) -> str:
     return ts.date().isoformat()
 
 
-def _ema(series: pd.Series, span: int) -> pd.Series:
-    return series.ewm(span=span, adjust=False, min_periods=span).mean()
-
-
 def _validate_rsi_period(period: int) -> int:
     value = int(period)
     if value <= 1:
         raise HTTPException(status_code=400, detail="RSI 周期必须大于 1")
     return value
-
-
-def _rsi(close: pd.Series, period: int) -> pd.Series:
-    period = _validate_rsi_period(period)
-    delta = close.diff()
-    gain = delta.clip(lower=0.0)
-    loss = (-delta).clip(lower=0.0)
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
-    rsi = rsi.mask((avg_loss == 0) & (avg_gain == 0), 50.0)
-    return rsi
 
 
 def _trend_config(overrides: dict | None = None) -> dict:
@@ -198,7 +181,7 @@ def compute_trend_indicator(df: pd.DataFrame, cfg: dict) -> dict:
 
     if len(calc_df) >= min_bars:
         close_series = calc_df["close"]
-        atr_series = atr(calc_df, period=atr_period)
+        atr_series = core_ind.atr(calc_df, period=atr_period)
 
         weights_bias = np.array(
             [
@@ -289,44 +272,38 @@ def compute_market_indicators(
     rsi_period = _validate_rsi_period(rsi_period)
 
     ma = {
-        str(period): _series(close.rolling(period, min_periods=period).mean())
+        str(period): _series(core_ind.sma(close, period))
         for period in MA_PERIODS
     }
 
-    boll_mid = close.rolling(20, min_periods=20).mean()
-    boll_std = close.rolling(20, min_periods=20).std(ddof=0)
+    boll_out = core_ind.bollinger(close)
     boll = {
-        "mid": _series(boll_mid),
-        "upper": _series(boll_mid + 2 * boll_std),
-        "lower": _series(boll_mid - 2 * boll_std),
+        "mid": _series(boll_out["mid"]),
+        "upper": _series(boll_out["up"]),
+        "lower": _series(boll_out["dn"]),
     }
 
-    ema_short = _ema(close, 12)
-    ema_long = _ema(close, 26)
-    dif = ema_short - ema_long
-    dea = _ema(dif, 9)
-    macd_bar = (dif - dea) * 2
+    macd_out = core_ind.macd(close, warmup=False)
     macd = {
-        "dif": _series(dif),
-        "dea": _series(dea),
-        "bar": _series(macd_bar),
+        "dif": _series(macd_out["dif"]),
+        "dea": _series(macd_out["dea"]),
+        "bar": _series(macd_out["hist"]),
     }
 
     bias: dict[str, list[float | None]] = {}
     for period in BIAS_PERIODS:
-        ma_n = close.rolling(period, min_periods=period).mean()
-        bias[str(period)] = _series((close - ma_n) / ma_n * 100)
+        bias[str(period)] = _series(core_ind.bias(close, period) * 100)
 
     volume_ma = {
-        str(period): _series(volume.rolling(period, min_periods=period).mean())
+        str(period): _series(core_ind.sma(volume, period))
         for period in VOL_MA_PERIODS
     }
     rsi = {
-        "series": _series(_rsi(close, rsi_period)),
+        "series": _series(core_ind.rsi(close, rsi_period)),
         "period": rsi_period,
     }
     atr_values = {
-        str(period): _series(atr(df, period=period))
+        str(period): _series(core_ind.atr(df, period=period))
         for period in ATR_PERIODS
     }
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from core import indicators as core_ind
 from strategy.trend_score_core import calculate_trend_score_snapshot
 
 
@@ -35,7 +36,7 @@ def sma(bars: pd.DataFrame, field: str = "close", period: int = 20) -> tuple[flo
     if len(series) < period:
         return None, {"reason": "insufficient_bars", "rows": int(len(series)), "period": int(period)}
     window = series.tail(period)
-    value = safe_float(window.mean())
+    value = safe_float(core_ind.sma(series, period).iloc[-1])
     return value, {
         "field": field,
         "period": int(period),
@@ -48,7 +49,7 @@ def ema(bars: pd.DataFrame, field: str = "close", period: int = 20) -> tuple[flo
     series = field_series(bars, field).dropna()
     if len(series) < period:
         return None, {"reason": "insufficient_bars", "rows": int(len(series)), "period": int(period)}
-    ema_series = series.ewm(span=period, adjust=False).mean()
+    ema_series = core_ind.ema(series, period, min_periods=0)
     value = safe_float(ema_series.iloc[-1])
     return value, {"field": field, "period": int(period), "value": value}
 
@@ -56,6 +57,8 @@ def ema(bars: pd.DataFrame, field: str = "close", period: int = 20) -> tuple[flo
 def atr(bars: pd.DataFrame, period: int = 20) -> tuple[float | None, dict]:
     if bars.empty or not {"high", "low", "close"}.issubset(bars.columns):
         return None, {"reason": "missing_ohlc"}
+    atr_series = core_ind.atr(bars, period=period)
+    value = safe_float(atr_series.iloc[-1])
     high = field_series(bars, "high")
     low = field_series(bars, "low")
     close = field_series(bars, "close")
@@ -67,8 +70,6 @@ def atr(bars: pd.DataFrame, period: int = 20) -> tuple[float | None, dict]:
         ],
         axis=1,
     ).max(axis=1)
-    atr_series = tr.rolling(period, min_periods=1).mean()
-    value = safe_float(atr_series.iloc[-1])
     window = tr.tail(period)
     return value, {
         "period": int(period),
@@ -113,12 +114,8 @@ def rsi(bars: pd.DataFrame, field: str = "close", period: int = 14) -> tuple[flo
     series = field_series(bars, field).dropna()
     if len(series) < period + 1:
         return None, {"reason": "insufficient_bars", "rows": int(len(series)), "period": int(period)}
-    delta = series.diff()
-    gain = delta.clip(lower=0).rolling(period, min_periods=period).mean()
-    loss = (-delta.clip(upper=0)).rolling(period, min_periods=period).mean()
-    rs = gain / loss.replace(0, np.nan)
-    rsi_series = 100.0 - (100.0 / (1.0 + rs))
-    value = safe_float(rsi_series.iloc[-1], 100.0 if safe_float(loss.iloc[-1], 0.0) == 0 else None)
+    rsi_series = core_ind.rsi(series, period=period)
+    value = safe_float(rsi_series.iloc[-1])
     return value, {"field": field, "period": int(period), "value": value}
 
 
@@ -134,15 +131,11 @@ def macd(
     if len(series) < min_rows:
         trace = {"reason": "insufficient_bars", "rows": int(len(series)), "required": int(min_rows)}
         return {"line": None, "signal": None, "histogram": None}, trace
-    fast = series.ewm(span=fast_period, adjust=False).mean()
-    slow = series.ewm(span=slow_period, adjust=False).mean()
-    line = fast - slow
-    signal = line.ewm(span=signal_period, adjust=False).mean()
-    histogram = line - signal
+    out = core_ind.macd(series, fast_period=fast_period, slow_period=slow_period, signal_period=signal_period, warmup=True)
     values = {
-        "line": safe_float(line.iloc[-1]),
-        "signal": safe_float(signal.iloc[-1]),
-        "histogram": safe_float(histogram.iloc[-1]),
+        "line": safe_float(out["dif"].iloc[-1]),
+        "signal": safe_float(out["dea"].iloc[-1]),
+        "histogram": safe_float(out["hist"].iloc[-1]),
     }
     return values, {
         "field": field,
@@ -163,13 +156,15 @@ def bollinger(
     if len(series) < period:
         trace = {"reason": "insufficient_bars", "rows": int(len(series)), "period": int(period)}
         return {"upper": None, "middle": None, "lower": None}, trace
-    window = series.tail(period)
-    middle = safe_float(window.mean())
-    std = safe_float(window.std(ddof=0))
-    if middle is None or std is None:
+    out = core_ind.bollinger(series, period=period, std_mul=std_mul)
+    middle = safe_float(out["mid"].iloc[-1])
+    upper = safe_float(out["up"].iloc[-1])
+    lower = safe_float(out["dn"].iloc[-1])
+    if middle is None or upper is None or lower is None:
         values = {"upper": None, "middle": middle, "lower": None}
     else:
-        values = {"upper": middle + std_mul * std, "middle": middle, "lower": middle - std_mul * std}
+        values = {"upper": upper, "middle": middle, "lower": lower}
+    window = series.tail(period)
     return values, {
         "field": field,
         "period": int(period),
