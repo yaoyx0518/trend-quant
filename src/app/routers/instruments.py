@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from core.benchmarks import benchmark_instruments
 from core.strategy_config import get_strategy_config
+from core.symbols import normalize_symbol, symbol_suffix, symbol_to_code
 from data.service import DataService
 from data.storage.db import get_db, record_job_run_safely
 from data.storage.market_store import MarketStore
@@ -511,33 +512,15 @@ def _to_date(text: str, fallback: date) -> date:
 
 
 def _symbol_to_code(symbol: str) -> str:
-    text = str(symbol or "").strip().upper()
-    if "." in text:
-        return text.split(".", 1)[0]
-    return text
+    return symbol_to_code(symbol)
 
 
 def _symbol_suffix(symbol: str) -> str:
-    text = str(symbol or "").strip().upper()
-    if "." in text:
-        return text.split(".", 1)[1]
-    return ""
+    return symbol_suffix(symbol)
 
 
 def _normalize_symbol(raw_symbol: str) -> str:
-    text = str(raw_symbol or "").strip().upper()
-    if text == "":
-        return ""
-    if "." in text:
-        code, suffix = text.split(".", 1)
-        if suffix == "SH":
-            suffix = "SS"
-        return f"{code}.{suffix}"
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if len(digits) != 6:
-        return text
-    suffix = ".SS" if digits.startswith(("5", "6")) else ".SZ"
-    return f"{digits}{suffix}"
+    return normalize_symbol(raw_symbol)
 
 
 def _date_span(df: pd.DataFrame) -> tuple[str | None, str | None]:

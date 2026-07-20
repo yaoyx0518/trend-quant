@@ -14,6 +14,7 @@ from app.instrument_display import format_symbol_display, load_instrument_name_m
 from core import indicators as core_ind
 from core.calendar import is_realtime_available, previous_trading_day
 from core.strategy_config import get_strategy_config
+from core.symbols import normalize_symbol
 from core.trend import calculate_trend_score_series
 from data.intraday_service import compute_intraday_trend_score
 from data.service import DataService
@@ -39,16 +40,7 @@ def _strategy_config() -> dict:
 
 
 def _normalize_symbol(raw_symbol: str) -> str:
-    text = str(raw_symbol or "").strip().upper()
-    if text == "":
-        return ""
-    if "." in text:
-        return text
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if len(digits) != 6:
-        return text
-    suffix = ".SS" if digits.startswith(("5", "6")) else ".SZ"
-    return f"{digits}{suffix}"
+    return normalize_symbol(raw_symbol)
 
 
 def _config_name_map() -> dict[str, str]:

@@ -26,12 +26,12 @@ from mcp.server.fastmcp import FastMCP
 from app.instrument_display import format_symbol_display
 from app.routers.market_view import (
     _config_name_map,
-    _normalize_symbol,
     _trend_config,
     compute_market_indicators,
 )
 from app.routers.subject_market import build_subject_dashboard_payload
 from core.calendar import is_realtime_available, is_trading_day
+from core.symbols import normalize_symbol as _normalize_symbol
 from core.strategy_config import get_strategy_config
 from data.intraday_service import (
     build_intraday_dashboard,
