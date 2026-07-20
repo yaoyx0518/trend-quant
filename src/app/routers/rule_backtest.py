@@ -111,6 +111,14 @@ async def run_rule_backtest(payload: RuleBacktestRunRequest) -> dict:
         }
 
     body = payload.model_dump()
+    logger.info(
+        "Rule backtest started run_id=%s symbol=%s strategies=%s range=%s~%s",
+        run_id,
+        payload.symbol,
+        payload.strategy_ids,
+        payload.start_date or "-",
+        payload.end_date or "-",
+    )
 
     def _progress_callback(current: int, total: int) -> None:
         with _rule_jobs_lock:
@@ -120,6 +128,7 @@ async def run_rule_backtest(payload: RuleBacktestRunRequest) -> dict:
                 job["progress_total"] = max(int(total), 1)
 
     def _run() -> None:
+        started_at = datetime.now()
         try:
             # Per-run service instance to avoid sharing engine state across threads.
             result = RuleBacktestService().run(body, progress_callback=_progress_callback)
@@ -129,7 +138,14 @@ async def run_rule_backtest(payload: RuleBacktestRunRequest) -> dict:
                     job["status"] = result.get("status", "ok")
                     job["progress_current"] = job.get("progress_total", 1)
                     job["result"] = result
+            logger.info(
+                "Rule backtest completed run_id=%s status=%s elapsed=%.1fs",
+                run_id,
+                result.get("status", "ok"),
+                (datetime.now() - started_at).total_seconds(),
+            )
         except (FileNotFoundError, ValueError) as exc:
+            logger.warning("Rule backtest run_id=%s failed: %s", run_id, exc)
             with _rule_jobs_lock:
                 job = _rule_jobs.get(run_id)
                 if job:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import random
+
 import pandas as pd
 
 from rule_backtest import indicators
@@ -9,6 +11,9 @@ from rule_backtest.models import PositionState
 class ValueResolver:
     def __init__(self, strategy_cfg: dict | None = None) -> None:
         self.strategy_cfg = strategy_cfg or {}
+        # RNG 实例随 resolver 生命周期（= 单次回测运行）存活，保证跨天序列独立；
+        # seed 为 None 时 random.Random 从 OS 熵源播种，每次运行结果不同。
+        self._rngs: dict[int | None, random.Random] = {}
 
     def resolve(
         self,
@@ -119,9 +124,20 @@ class ValueResolver:
             value, trace = indicators.trend_score_series(
                 bars, period=int(params.get("period", 5)), mode="ema", cfg=self.strategy_cfg
             )
+        elif name == "random_uniform":
+            value, trace = self._random_uniform(params)
         else:
             value, trace = None, {"reason": "unsupported_indicator", "name": name}
 
         if debug:
             return value, {"type": "indicator", "name": name, "params": dict(params), "trace": trace, "value": value}
         return value, {}
+
+    def _random_uniform(self, params: dict) -> tuple[float, dict]:
+        seed = params.get("seed")
+        if seed is not None:
+            seed = int(seed)
+        if seed not in self._rngs:
+            self._rngs[seed] = random.Random(seed)
+        value = self._rngs[seed].random()
+        return value, {"seed": seed, "value": value}

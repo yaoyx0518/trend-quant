@@ -592,7 +592,8 @@ def _category_path_from_parts(l1: str, l2: str = "", l3: str = "") -> str:
 def _category_priority_map() -> dict[str, int | None]:
     try:
         rows = get_db().list_instrument_categories()
-    except RuntimeError:
+    except RuntimeError as exc:
+        logger.warning("Instrument categories unavailable: %s", exc)
         rows = []
     return {
         str(row.get("path") or "").strip(): row.get("priority")
@@ -615,8 +616,8 @@ def _next_sort_order(config_items: list[dict] | None = None) -> int:
                 values.append(int(item.get("sort_order") or 0))
             except (TypeError, ValueError):
                 pass
-    except RuntimeError:
-        pass
+    except RuntimeError as exc:
+        logger.warning("Instrument metadata unavailable while computing sort order: %s", exc)
     return max(values or [0]) + 1
 
 

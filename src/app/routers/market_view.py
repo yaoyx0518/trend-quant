@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Iterable
 
@@ -20,6 +21,7 @@ from strategy.trend_score_core import safe_float
 
 router = APIRouter(prefix="/market-view", tags=["market-view"])
 templates = Jinja2Templates(directory="web/templates")
+logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 20000
 MAX_LIMIT = 50000
@@ -549,8 +551,8 @@ async def get_market_daily(
                         }
                         payload["meta"]["is_intraday"] = True
                         payload["meta"]["intraday_ts"] = datetime.now().isoformat()
-        except Exception:
-            # Silently fall back to EOD data if intraday fetch fails.
-            pass
+        except Exception as exc:
+            # Fall back to EOD data if intraday fetch fails.
+            logger.warning("Intraday overlay failed for %s; falling back to EOD: %s", normalized_symbol, exc)
 
     return payload

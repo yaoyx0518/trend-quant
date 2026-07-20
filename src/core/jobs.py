@@ -32,7 +32,8 @@ def _pool_symbols() -> list[str]:
             for item in get_db().list_instrument_metadata()
             if item.get("enabled", 1) in (1, True)
         ]
-    except (RuntimeError, sqlite3.Error):
+    except (RuntimeError, sqlite3.Error) as exc:
+        logger.warning("Instrument metadata unavailable (%s); daily update will cover benchmarks only", exc)
         instruments = []  # database unavailable; fall back to benchmarks only
 
     symbols: list[str] = []
@@ -54,6 +55,7 @@ def daily_market_update_job(settings: Settings, data_service: DataService | None
     """
     today = date.today()
     if not is_trading_day(today):
+        logger.info("Daily market update skipped: %s is not a trading day", today.isoformat())
         payload = {
             "ts": datetime.now().isoformat(),
             "status": "skipped_non_trading_day",

@@ -17,6 +17,7 @@ Exposes 5 tools to external agents via MCP SSE transport:
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 import pandas as pd
@@ -46,6 +47,8 @@ from strategy.trend_score_core import safe_float
 # Server instance
 # ---------------------------------------------------------------------------
 
+logger = logging.getLogger(__name__)
+
 mcp = FastMCP(
     "trend-quant",
     transport_security={"enable_dns_rebinding_protection": False},
@@ -65,8 +68,9 @@ def _load_instruments_raw() -> list[dict]:
 
     try:
         return [dict(item) for item in get_db().list_instrument_metadata()]
-    except (RuntimeError, sqlite3.Error):
-        return []  # database unavailable
+    except (RuntimeError, sqlite3.Error) as exc:
+        logger.warning("Instrument metadata unavailable: %s", exc)
+        return []
 
 
 def _instrument_metadata_map(instruments: list[dict]) -> dict[str, dict]:
@@ -312,9 +316,9 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: b
                     }
                     payload["meta"]["is_intraday"] = True
                     payload["meta"]["intraday_ts"] = datetime.now().isoformat()
-        except Exception:
-            # Silently fall back to EOD data if intraday fetch fails.
-            pass
+        except Exception as exc:
+            # Fall back to EOD data if intraday fetch fails.
+            logger.warning("Intraday overlay failed for %s; falling back to EOD: %s", symbol, exc)
 
     return payload
 

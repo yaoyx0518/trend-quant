@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 
 ETF_SUFFIX_RE = re.compile(r"\s*ETF\s*$", flags=re.IGNORECASE)
 
@@ -33,7 +36,8 @@ def load_instrument_name_map() -> dict[str, str]:
 
     try:
         items = get_db().list_instrument_metadata()
-    except (RuntimeError, sqlite3.Error):
+    except (RuntimeError, sqlite3.Error) as exc:
+        logger.warning("Instrument metadata unavailable; name map is empty: %s", exc)
         return {}  # database unavailable (e.g. bare unit-test context)
     out: dict[str, str] = {}
     for item in items:

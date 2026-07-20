@@ -135,6 +135,13 @@ def default_indicator_registry() -> dict[str, IndicatorSpec]:
             category="trend",
             params={"period": ParamSpec(type="int", required=True, min_value=1)},
         ),
+        "random_uniform": IndicatorSpec(
+            id="random_uniform",
+            version=1,
+            label="随机数 [0,1)",
+            category="random",
+            params={"seed": ParamSpec(type="int", required=False, default=None)},
+        ),
     }
 
 

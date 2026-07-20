@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import date, datetime
+import logging
 from pathlib import Path
 import re
 
@@ -12,6 +13,8 @@ from rule_backtest.engine import SingleSymbolAllInBacktestEngine
 from rule_backtest.loader import StrategyLoader
 from rule_backtest.models import BacktestExecutionConfig, RuleBacktestRequest
 from rule_backtest.registry import registry_payload
+
+logger = logging.getLogger(__name__)
 
 
 class RuleBacktestService:
@@ -46,12 +49,14 @@ class RuleBacktestService:
 
         try:
             instruments = get_db().list_instrument_metadata()
-        except (RuntimeError, sqlite3.Error):
+        except (RuntimeError, sqlite3.Error) as exc:
+            logger.warning("Instrument metadata unavailable; instrument list is empty: %s", exc)
             instruments = []  # database unavailable (bare test/script context)
         rows: list[dict] = []
         try:
             stored_symbols = set(self.market_store.list_stored_symbols())
-        except Exception:
+        except Exception as exc:
+            logger.warning("Stored market symbols unavailable: %s", exc)
             stored_symbols = set()
         for item in instruments:
             symbol = str(item.get("symbol", "")).strip().upper()

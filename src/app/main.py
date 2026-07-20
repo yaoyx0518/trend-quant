@@ -4,9 +4,10 @@ from contextlib import asynccontextmanager
 import os
 from pathlib import Path
 
-from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.routers import (
     instruments,
@@ -64,6 +65,33 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Trend ETF System", version="0.1.0", lifespan=lifespan)
+
+
+@app.exception_handler(StarletteHTTPException)
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+    # 4xx is client noise (internet scanners hit 404 constantly); only 5xx
+    # indicates a server-side problem worth investigating.
+    if exc.status_code >= 500:
+        logger.warning(
+            "HTTP %s on %s %s: %s",
+            exc.status_code,
+            request.method,
+            request.url.path,
+            exc.detail,
+        )
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": exc.detail},
+        headers=getattr(exc, "headers", None),
+    )
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    # Keep a traceback in app.log; without this handler uncaught errors only
+    # reach stderr/journald with no request context.
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": "Internal Server Error"})
 
 static_dir = Path("web/static")
 style_file = static_dir / "style.css"

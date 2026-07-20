@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time as _time
 import uuid
@@ -22,6 +23,7 @@ from data.storage.db import get_db
 
 router = APIRouter(prefix="/subject-market", tags=["subject-market"])
 templates = Jinja2Templates(directory="web/templates")
+logger = logging.getLogger(__name__)
 
 DISPLAY_DAYS = 61
 SOURCE_HISTORY_DAYS = 90
@@ -399,6 +401,7 @@ async def start_intraday_dashboard() -> dict:
                     job["message"] = "完成"
                     job["result"] = payload
         except Exception as exc:
+            logger.exception("Intraday dashboard job_id=%s failed", job_id)
             with _intraday_jobs_lock:
                 job = _intraday_jobs.get(job_id)
                 if job:

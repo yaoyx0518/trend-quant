@@ -163,6 +163,9 @@ class StrategyConfigValidator:
         errors: list[str],
     ) -> None:
         value = params.get(name)
+        if value is None and not param_spec.required:
+            params[name] = None
+            return
         try:
             if param_spec.type == "int":
                 value = int(value)

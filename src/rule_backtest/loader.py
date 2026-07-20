@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 import re
 
 import yaml
 
 from rule_backtest.validators import StrategyConfigValidator, ValidationResult
+
+logger = logging.getLogger(__name__)
 
 _SAFE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
@@ -149,7 +152,8 @@ class StrategyLoader:
 
             db = get_db()
             return db if self._db_path_available(db) else None
-        except RuntimeError:
+        except RuntimeError as exc:
+            logger.warning("Database unavailable; falling back to YAML strategies: %s", exc)
             return None
 
     @staticmethod
@@ -171,7 +175,8 @@ class StrategyLoader:
             return False
         try:
             return bool(has_any())
-        except Exception:
+        except Exception as exc:
+            logger.warning("has_any_rule_strategy check failed; assuming empty: %s", exc)
             return False
 
     def _db_row_to_list_item(self, row: dict) -> dict:

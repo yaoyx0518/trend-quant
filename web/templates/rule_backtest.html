@@ -563,7 +563,7 @@ function renderValueDetail(editor) {
 function setValueParams(container, params = {}) {
   for (const el of container.querySelectorAll("[data-param]")) {
     if (Object.prototype.hasOwnProperty.call(params, el.dataset.param)) {
-      el.value = params[el.dataset.param];
+      el.value = params[el.dataset.param] ?? "";
     }
   }
 }
@@ -656,6 +656,7 @@ function collectValue(editor) {
   const params = {};
   for (const el of editor.querySelectorAll("[data-param]")) {
     const raw = el.value;
+    if (el.tagName !== "SELECT" && raw === "") continue;  // 留空 = 不传该参数（如 random_uniform 的 seed）
     params[el.dataset.param] = el.tagName === "SELECT" ? raw : Number(raw);
   }
   return { type: "indicator", name, params };

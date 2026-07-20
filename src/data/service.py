@@ -617,6 +617,13 @@ class DataService:
         day = end_date.isoformat()
         status = "completed" if failed_count == 0 else "partial"
         record_job_run_safely("daily_update", payload, run_date=day, status=status)
+        if failed_symbols:
+            logger.warning(
+                "update_pool_daily finished with %s/%s failed symbols: %s",
+                failed_count,
+                len(symbols),
+                failed_symbols,
+            )
 
         return payload
 

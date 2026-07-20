@@ -9,8 +9,11 @@ were dropped during the storage consolidation.
 
 from __future__ import annotations
 
+import logging
 import sqlite3
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_STRATEGY_CONFIG: dict[str, Any] = {
     "adjust": "qfq",
@@ -57,5 +60,6 @@ def get_strategy_config() -> dict[str, Any]:
         # Fresh database: seed it with the code defaults.
         db.set_config(_CONFIG_KEY, dict(DEFAULT_STRATEGY_CONFIG))
         return get_strategy_config()
-    except (RuntimeError, sqlite3.Error):
+    except (RuntimeError, sqlite3.Error) as exc:
+        logger.warning("Strategy config unavailable in DB; using code defaults: %s", exc)
         return dict(DEFAULT_STRATEGY_CONFIG)
