@@ -12,12 +12,22 @@ from fastapi.templating import Jinja2Templates
 
 from app.instrument_display import format_symbol_display, load_instrument_name_map, strip_etf_suffix
 from core.calendar import is_realtime_available, previous_trading_day
-from core.strategy_config import get_strategy_config
+from core.symbols import normalize_symbol
 from data.intraday_service import compute_intraday_trend_score
 from data.service import DataService
 from data.storage.db import get_db
-from strategy.indicators import atr, efficiency_ratio
-from strategy.trend_score_core import safe_float
+from core.trend import safe_float
+
+from services.market_indicators import (
+    ATR_PERIODS,
+    BIAS_PERIODS,
+    DEFAULT_RSI_PERIOD,
+    MA_PERIODS,
+    TREND_MA_PERIODS,
+    VOL_MA_PERIODS,
+    compute_market_indicators,
+    trend_config as _trend_config,
+)
 
 router = APIRouter(prefix="/market-view", tags=["market-view"])
 templates = Jinja2Templates(directory="web/templates")
@@ -25,29 +35,10 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_LIMIT = 20000
 MAX_LIMIT = 50000
-MA_PERIODS = (5, 10, 20, 30, 40, 60, 120, 200)
-ATR_PERIODS = (20,)
-BIAS_PERIODS = (6, 12, 24)
-VOL_MA_PERIODS = (5, 10)
-TREND_MA_PERIODS = (5, 10)
-DEFAULT_RSI_PERIOD = 14
-
-
-def _strategy_config() -> dict:
-    return get_strategy_config()
 
 
 def _normalize_symbol(raw_symbol: str) -> str:
-    text = str(raw_symbol or "").strip().upper()
-    if text == "":
-        return ""
-    if "." in text:
-        return text
-    digits = "".join(ch for ch in text if ch.isdigit())
-    if len(digits) != 6:
-        return text
-    suffix = ".SS" if digits.startswith(("5", "6")) else ".SZ"
-    return f"{digits}{suffix}"
+    return normalize_symbol(raw_symbol)
 
 
 def _config_name_map() -> dict[str, str]:
@@ -133,37 +124,6 @@ def _date_only(value: object) -> str:
     return ts.date().isoformat()
 
 
-def _ema(series: pd.Series, span: int) -> pd.Series:
-    return series.ewm(span=span, adjust=False, min_periods=span).mean()
-
-
-def _validate_rsi_period(period: int) -> int:
-    value = int(period)
-    if value <= 1:
-        raise HTTPException(status_code=400, detail="RSI 周期必须大于 1")
-    return value
-
-
-def _rsi(close: pd.Series, period: int) -> pd.Series:
-    period = _validate_rsi_period(period)
-    delta = close.diff()
-    gain = delta.clip(lower=0.0)
-    loss = (-delta).clip(lower=0.0)
-    avg_gain = gain.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    avg_loss = loss.ewm(alpha=1 / period, adjust=False, min_periods=period).mean()
-    rs = avg_gain / avg_loss.replace(0, np.nan)
-    rsi = 100 - (100 / (1 + rs))
-    rsi = rsi.mask((avg_loss == 0) & (avg_gain > 0), 100.0)
-    rsi = rsi.mask((avg_loss == 0) & (avg_gain == 0), 50.0)
-    return rsi
-
-
-def _trend_config(overrides: dict | None = None) -> dict:
-    cfg = _strategy_config()
-    cfg.update(overrides or {})
-    return cfg
-
-
 def _validate_trend_config(cfg: dict) -> None:
     n_short = int(cfg.get("n_short", 5))
     n_mid = int(cfg.get("n_mid", 10))
@@ -173,173 +133,6 @@ def _validate_trend_config(cfg: dict) -> None:
         raise HTTPException(status_code=400, detail="趋势值参数必须为正整数")
     if not (n_short < n_mid < n_long):
         raise HTTPException(status_code=400, detail="要求趋势值参数 n_short < n_mid < n_long")
-
-
-def compute_trend_indicator(df: pd.DataFrame, cfg: dict) -> dict:
-    _validate_trend_config(cfg)
-    n_short = int(cfg.get("n_short", 5))
-    n_mid = int(cfg.get("n_mid", 10))
-    n_long = int(cfg.get("n_long", 20))
-    atr_period = int(cfg.get("atr_period", 20))
-    min_bars = max(n_long, atr_period) + 2
-
-    close = pd.to_numeric(df.get("close"), errors="coerce")
-    high = pd.to_numeric(df.get("high"), errors="coerce")
-    low = pd.to_numeric(df.get("low"), errors="coerce")
-    volume = pd.to_numeric(df.get("volume", pd.Series(index=df.index)), errors="coerce").fillna(0.0)
-    calc_df = pd.DataFrame(
-        {"close": close, "high": high, "low": low, "volume": volume},
-        index=df.index,
-    ).dropna(subset=["close", "high", "low"])
-
-    trend_full = pd.Series(np.nan, index=df.index, dtype="float64")
-    price_direction_full = pd.Series(np.nan, index=df.index, dtype="float64")
-    confidence_full = pd.Series(np.nan, index=df.index, dtype="float64")
-
-    if len(calc_df) >= min_bars:
-        close_series = calc_df["close"]
-        atr_series = atr(calc_df, period=atr_period)
-
-        weights_bias = np.array(
-            [
-                safe_float(cfg.get("w_bias_short", 0.4), 0.4),
-                safe_float(cfg.get("w_bias_mid", 0.4), 0.4),
-                safe_float(cfg.get("w_bias_long", 0.2), 0.2),
-            ]
-        )
-        weights_slope = np.array(
-            [
-                safe_float(cfg.get("w_slope_short", 0.4), 0.4),
-                safe_float(cfg.get("w_slope_mid", 0.4), 0.4),
-                safe_float(cfg.get("w_slope_long", 0.2), 0.2),
-            ]
-        )
-
-        bias_parts: list[pd.Series] = []
-        slope_parts: list[pd.Series] = []
-        for n in (n_short, n_mid, n_long):
-            ma_n = close_series.rolling(n, min_periods=n).mean()
-            bias_parts.append(((close_series - ma_n) / atr_series).fillna(0.0))
-            ema_n = close_series.ewm(span=n, adjust=False).mean()
-            slope_parts.append((ema_n.diff() / (atr_series * n)).fillna(0.0))
-
-        bias_mix = (
-            weights_bias[0] * bias_parts[0]
-            + weights_bias[1] * bias_parts[1]
-            + weights_bias[2] * bias_parts[2]
-        )
-        slope_mix = (
-            weights_slope[0] * slope_parts[0]
-            + weights_slope[1] * slope_parts[1]
-            + weights_slope[2] * slope_parts[2]
-        )
-
-        norm_bias = np.tanh(bias_mix / 2.0) * 100.0
-        norm_slope = np.tanh(slope_mix) * 100.0
-        price_direction = (
-            safe_float(cfg.get("w_bias_norm", 0.5), 0.5) * norm_bias
-            + safe_float(cfg.get("w_slope_norm", 0.5), 0.5) * norm_slope
-        )
-
-        vol_ma_period = int(cfg.get("vol_ma_period", 20))
-        er_period = int(cfg.get("er_period", 10))
-        vol_ma = calc_df["volume"].rolling(vol_ma_period, min_periods=1).mean()
-        vol_ratio = calc_df["volume"] / vol_ma.replace(0, np.nan)
-        volume_factor = (vol_ratio / 3.0).clip(lower=0.0, upper=1.0).fillna(0.0)
-        er_now = efficiency_ratio(close_series, period=er_period).clip(lower=0.0, upper=1.0)
-
-        confidence = (volume_factor ** safe_float(cfg.get("w_vol", 0.3), 0.3)) * (
-            er_now ** safe_float(cfg.get("w_er", 0.7), 0.7)
-        )
-        trend_score = (price_direction * confidence).clip(lower=-100.0, upper=100.0)
-
-        valid = (pd.Series(range(1, len(calc_df) + 1), index=calc_df.index) >= min_bars) & (
-            atr_series > 0
-        )
-        trend_full.loc[calc_df.index] = trend_score.where(valid)
-        price_direction_full.loc[calc_df.index] = price_direction.where(valid)
-        confidence_full.loc[calc_df.index] = confidence.where(valid)
-
-    score_series = trend_full.astype("float64")
-    ma = {
-        str(period): _series(score_series.rolling(period, min_periods=period).mean())
-        for period in TREND_MA_PERIODS
-    }
-    return {
-        "score": _series(trend_full),
-        "ma": ma,
-        "price_direction": _series(price_direction_full),
-        "confidence": _series(confidence_full),
-        "config": {
-            "n_short": int(cfg.get("n_short", 5)),
-            "n_mid": int(cfg.get("n_mid", 10)),
-            "n_long": int(cfg.get("n_long", 20)),
-            "atr_period": int(cfg.get("atr_period", 20)),
-        },
-    }
-
-
-def compute_market_indicators(
-    df: pd.DataFrame,
-    trend_cfg: dict | None = None,
-    rsi_period: int = DEFAULT_RSI_PERIOD,
-) -> dict:
-    close = pd.to_numeric(df["close"], errors="coerce")
-    volume = pd.to_numeric(df.get("volume", pd.Series(index=df.index)), errors="coerce")
-    rsi_period = _validate_rsi_period(rsi_period)
-
-    ma = {
-        str(period): _series(close.rolling(period, min_periods=period).mean())
-        for period in MA_PERIODS
-    }
-
-    boll_mid = close.rolling(20, min_periods=20).mean()
-    boll_std = close.rolling(20, min_periods=20).std(ddof=0)
-    boll = {
-        "mid": _series(boll_mid),
-        "upper": _series(boll_mid + 2 * boll_std),
-        "lower": _series(boll_mid - 2 * boll_std),
-    }
-
-    ema_short = _ema(close, 12)
-    ema_long = _ema(close, 26)
-    dif = ema_short - ema_long
-    dea = _ema(dif, 9)
-    macd_bar = (dif - dea) * 2
-    macd = {
-        "dif": _series(dif),
-        "dea": _series(dea),
-        "bar": _series(macd_bar),
-    }
-
-    bias: dict[str, list[float | None]] = {}
-    for period in BIAS_PERIODS:
-        ma_n = close.rolling(period, min_periods=period).mean()
-        bias[str(period)] = _series((close - ma_n) / ma_n * 100)
-
-    volume_ma = {
-        str(period): _series(volume.rolling(period, min_periods=period).mean())
-        for period in VOL_MA_PERIODS
-    }
-    rsi = {
-        "series": _series(_rsi(close, rsi_period)),
-        "period": rsi_period,
-    }
-    atr_values = {
-        str(period): _series(atr(df, period=period))
-        for period in ATR_PERIODS
-    }
-
-    return {
-        "ma": ma,
-        "atr": atr_values,
-        "boll": boll,
-        "macd": macd,
-        "bias": bias,
-        "volume_ma": volume_ma,
-        "rsi": rsi,
-        "trend": compute_trend_indicator(df, _trend_config(trend_cfg)),
-    }
 
 
 def build_market_payload(

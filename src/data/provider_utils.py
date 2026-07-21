@@ -6,14 +6,6 @@ from typing import Iterable
 import pandas as pd
 
 
-def normalize_symbol(symbol: str) -> str:
-    value = (symbol or "").strip().upper()
-    for suffix in (".SS", ".SZ", ".SH"):
-        if value.endswith(suffix):
-            return value.split(".")[0]
-    return value
-
-
 def safe_float(value: object, default: float | None = None) -> float | None:
     if value is None:
         return default

@@ -23,16 +23,14 @@ from datetime import datetime
 import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
-from app.instrument_display import format_symbol_display
-from app.routers.market_view import (
-    _config_name_map,
-    _normalize_symbol,
-    _trend_config,
-    compute_market_indicators,
-)
-from app.routers.subject_market import build_subject_dashboard_payload
+from core.display import format_symbol_display
+from core.display import load_instrument_name_map as _config_name_map
+from services.market_indicators import compute_market_indicators, trend_config as _trend_config
+from services.dashboard import RevisionCache, build_subject_dashboard_payload
 from core.calendar import is_realtime_available, is_trading_day
+from core.symbols import normalize_symbol as _normalize_symbol
 from core.strategy_config import get_strategy_config
+from data.indicator_store import get_series
 from data.intraday_service import (
     build_intraday_dashboard,
     build_synthetic_bar,
@@ -40,8 +38,8 @@ from data.intraday_service import (
 )
 from data.service import DataService
 from data.storage.db import get_db
-from strategy.indicators import atr
-from strategy.trend_score_core import safe_float
+from core.indicators import atr
+from core.trend import safe_float
 
 # ---------------------------------------------------------------------------
 # Server instance
@@ -93,10 +91,10 @@ def _category_path(meta: dict | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Dashboard cache (same strategy as subject_market.py)
+# Dashboard cache — shared RevisionCache from services.dashboard
 # ---------------------------------------------------------------------------
 
-_dashboard_cache: tuple[tuple[str, int, str], dict] | None = None
+_dashboard_cache = RevisionCache()
 
 
 # ---------------------------------------------------------------------------
@@ -119,14 +117,9 @@ def trend_dashboard() -> dict:
     数据来自本地日K库，最新一根K线通常是上一个交易日。
     如需当天实时数据请使用 intraday_dashboard。
     """
-    global _dashboard_cache
     db = get_db()
     revision = db.get_market_dashboard_revision()
-    if _dashboard_cache is not None and _dashboard_cache[0] == revision:
-        return _dashboard_cache[1]
-    payload = build_subject_dashboard_payload(db)
-    _dashboard_cache = (revision, payload)
-    return payload
+    return _dashboard_cache.get_or_compute(revision, lambda: build_subject_dashboard_payload(db))
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +161,7 @@ def intraday_dashboard(category: str = "") -> dict:
     if not symbols:
         return {"ok": False, "error": "本地无日K数据"}
 
-    # Filter to fully classified instruments (mirrors the web intraday job).
+    # Filter to fully classified instruments (same rule as the web intraday job).
     metadata_map = db.get_instrument_metadata_map()
     classified = [
         s for s in symbols
@@ -231,11 +224,11 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: b
     if df.empty:
         return {"ok": False, "error": f"未找到 {symbol} 的数据，请确认代码正确且数据已入库"}
 
-    # Load enough bars for indicator bootstrapping, then tail to requested days.
-    # Trend-score needs max(n_long, atr_period) + 2 ≈ 22 bars minimum.
-    MIN_BARS = 30
+    # Compute indicators over FULL history (EMA-family indicators have
+    # infinite memory; truncating before computing made values depend on
+    # the requested window — the old window-truncation bug). Output arrays
+    # are tailed afterwards to the requested number of days.
     requested = max(int(days), 1)
-    df = df.tail(max(requested, MIN_BARS)).copy()
 
     name_map = _config_name_map()
     instruments = _load_instruments_raw()
@@ -255,7 +248,9 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: b
         return [round(float(v), 4) if pd.notna(v) else None for v in series_like]
 
     n = min(requested, len(df))
-    dates_out = [str(d.date()) for d in df["time"]][-n:]
+    full_df = df  # keep full history for the intraday trend computation
+    df = df.tail(n).copy()
+    dates_out = [str(d.date()) for d in df["time"]]
 
     payload = {
         "ok": True,
@@ -281,14 +276,16 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: b
     }
     payload["meta"]["is_intraday"] = False
 
-    # --- Intraday overlay (mirrors market_view.get_market_daily) ----------
+    # --- Intraday overlay (synthetic bar from live quotes) ----------------
     # Gate on is_realtime_available (not is_trading_time) so the midday
     # lunch break still serves an intraday snapshot from live quotes.
     if intraday and is_realtime_available():
         try:
             quote = DataService().fetch_latest_quote(symbol)
             if quote and quote.get("price") is not None:
-                hist = df.copy()
+                # Intraday trend uses FULL history (same ruler as EOD), not
+                # the display-truncated window (kimi review §3.3).
+                hist = full_df.copy()
                 hist["time"] = pd.to_datetime(hist["time"], errors="coerce")
                 hist = (
                     hist.dropna(subset=["time", "open", "high", "low", "close"])
@@ -352,7 +349,6 @@ def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
         return {"ok": False, "error": f"未找到 {symbol} 的数据"}
 
     strategy_cfg = _load_strategy_config()
-    atr_period = int(strategy_cfg.get("atr_period", 20))
     hard_stop_mul = float(strategy_cfg.get("hard_stop_atr_mul_default", 1.5))
     chandelier_mul = float(strategy_cfg.get("chandelier_stop_atr_mul", 2.5))
 
@@ -364,7 +360,9 @@ def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
                 hard_stop_mul = float(item["stop_atr_mul"])
             break
 
-    atr_series = atr(df, period=atr_period)
+    # ATR from the precomputed cache (single source, D11); the store falls
+    # back to a live full-history compute when the cache is stale/missing.
+    atr_series = get_series(symbol, "atr", db=db)
     if atr_series.empty:
         return {"ok": False, "error": "数据不足，无法计算 ATR"}
 
@@ -378,11 +376,9 @@ def calc_stop_loss(symbol: str, buy_date: str, buy_price: float) -> dict:
 
     # ATR at buy date (look back up to and including buy_date)
     atr_at_buy = current_atr
-    mask_until = df["time"] <= buy_ts
-    if mask_until.any():
-        subset = atr_series[mask_until.values]
-        if not subset.empty and pd.notna(subset.iloc[-1]):
-            atr_at_buy = safe_float(subset.iloc[-1], current_atr)
+    subset = atr_series[atr_series.index <= buy_ts]
+    if not subset.empty and pd.notna(subset.iloc[-1]):
+        atr_at_buy = safe_float(subset.iloc[-1], current_atr)
 
     # Highest price since buy date (inclusive)
     highs = pd.to_numeric(df["high"], errors="coerce")

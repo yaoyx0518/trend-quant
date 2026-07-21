@@ -11,12 +11,15 @@ Operator = Literal[">=", "<="]
 InstrumentType = Literal["etf", "stock"]
 
 
+DEFAULT_FEE_RATE = 0.0000854
+
+
 @dataclass(frozen=True, slots=True)
 class BacktestExecutionConfig:
     initial_capital: float = 1_000_000.0
     signal_timing: str = "close"
     fill_timing: str = "close"
-    fee_rate: float = 0.0000854
+    fee_rate: float = DEFAULT_FEE_RATE
     fee_min: float = 5.0
     slippage: float = 0.002
     lot_size: int = 100

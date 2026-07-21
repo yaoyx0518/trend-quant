@@ -354,12 +354,14 @@
 </div>
 
 <script>
-let metaCache = { strategies: [], instruments: [], indicators: [] };
+let metaCache = { strategies: [], instruments: [], indicators: [], state_values: [], stop_defaults: {} };
 let conditionSeq = 0;
 let editingStrategyItem = null;
 let copySourceItem = null;
 const PRICE_FIELDS = ["open", "high", "low", "close", "volume", "amount"];
-const STATE_VALUES = ["entry_price", "hard_stop", "highest_high_since_entry", "chandelier_stop"];
+// Filled from /rule-backtest/api/meta (backend is the single source).
+let STATE_VALUES = metaCache.state_values;
+let STOP_DEFAULTS = metaCache.stop_defaults;
 
 function esc(v) {
   return String(v ?? "")
@@ -375,6 +377,8 @@ async function loadMeta() {
   if (!resp.ok) throw new Error(await resp.text());
   const meta = await resp.json();
   metaCache = meta;
+  STATE_VALUES = meta.state_values || [];
+  STOP_DEFAULTS = meta.stop_defaults || {};
   renderStrategyCards();
   document.getElementById("status").textContent = `共 ${meta.strategies?.length || 0} 个策略。`;
 }
@@ -606,15 +610,11 @@ function setConditionRowValue(row, condition = {}) {
 function renderStateParams(detail) {
   const name = detail.querySelector(".value-state").value;
   const target = detail.querySelector(".state-params");
-  if (name === "hard_stop") {
+  const defaults = STOP_DEFAULTS[name] || {};
+  if (name === "hard_stop" || name === "chandelier_stop") {
     target.innerHTML = `
-      <label>ATR <input data-param="atr_period" type="number" value="20" min="1" step="1"></label>
-      <label>倍数 <input data-param="atr_mul" type="number" value="1.5" step="0.1"></label>
-    `;
-  } else if (name === "chandelier_stop") {
-    target.innerHTML = `
-      <label>ATR <input data-param="atr_period" type="number" value="20" min="1" step="1"></label>
-      <label>倍数 <input data-param="atr_mul" type="number" value="2.5" step="0.1"></label>
+      <label>ATR <input data-param="atr_period" type="number" value="${defaults.atr_period ?? 20}" min="1" step="1"></label>
+      <label>倍数 <input data-param="atr_mul" type="number" value="${defaults.atr_mul ?? 2.5}" step="0.1"></label>
     `;
   } else {
     target.innerHTML = "";

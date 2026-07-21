@@ -256,21 +256,6 @@ def test_env(tmp_path: Path, test_db) -> TestEnvironment:
 @pytest.fixture
 def default_cfg() -> dict:
     """Return a strategy configuration dict with default parameters."""
-    return {
-        "n_short": 5,
-        "n_mid": 10,
-        "n_long": 20,
-        "atr_period": 20,
-        "vol_ma_period": 20,
-        "er_period": 10,
-        "w_bias_short": 0.4,
-        "w_bias_mid": 0.4,
-        "w_bias_long": 0.2,
-        "w_slope_short": 0.4,
-        "w_slope_mid": 0.4,
-        "w_slope_long": 0.2,
-        "w_bias_norm": 0.5,
-        "w_slope_norm": 0.5,
-        "w_vol": 0.3,
-        "w_er": 0.7,
-    }
+    from core.strategy_config import DEFAULT_STRATEGY_CONFIG
+
+    return dict(DEFAULT_STRATEGY_CONFIG)

@@ -1,15 +1,33 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pandas as pd
 
 from rule_backtest.indicators import atr, latest_field
 from rule_backtest.models import PositionState
+
+# Optional memoized ATR lookup: (day_idx, period) -> value | None.
+# When provided, stop-state ATR is an indexed lookup instead of a
+# per-day full rolling recompute (P1.3).
+AtrLookup = Callable[[int, int], float | None]
+
+
+def _atr_value(bars: pd.DataFrame, period: int, atr_at: AtrLookup | None) -> tuple[float | None, dict]:
+    if atr_at is not None:
+        value = atr_at(len(bars) - 1, period)
+        if value is not None:
+            return value, {}
+        # Lookup unavailable (no memoization context) or value missing:
+        # fall back to the legacy per-day computation for a correct answer.
+    return atr(bars, period=period)
 
 
 def update_position_state_for_day(
     position: PositionState,
     bars: pd.DataFrame,
     strategy: dict,
+    atr_at: AtrLookup | None = None,
 ) -> dict:
     if not position.is_open:
         return {}
@@ -33,7 +51,7 @@ def update_position_state_for_day(
             params = spec.get("params", {}) if isinstance(spec.get("params", {}), dict) else {}
             atr_period = int(params.get("atr_period", 20))
             atr_mul = float(params.get("atr_mul", 2.5))
-            atr_value, atr_trace = atr(bars, period=atr_period)
+            atr_value, atr_trace = _atr_value(bars, atr_period, atr_at)
             if atr_value is not None and position.highest_high_since_entry > 0:
                 position.chandelier_stop = position.highest_high_since_entry - atr_mul * atr_value
             trace["chandelier_stop"] = position.chandelier_stop
@@ -47,6 +65,7 @@ def initialize_stop_state(
     strategy: dict,
     entry_price: float,
     entry_date: str,
+    atr_at: AtrLookup | None = None,
 ) -> dict:
     position.entry_price = float(entry_price)
     position.entry_date = entry_date
@@ -65,7 +84,7 @@ def initialize_stop_state(
             if name == "hard_stop":
                 atr_period = int(params.get("atr_period", 20))
                 atr_mul = float(params.get("atr_mul", 1.5))
-                atr_value, atr_trace = atr(bars, period=atr_period)
+                atr_value, atr_trace = _atr_value(bars, atr_period, atr_at)
                 position.atr_at_entry = float(atr_value or 0.0)
                 position.hard_stop = entry_price - atr_mul * position.atr_at_entry if atr_value is not None else 0.0
                 trace["hard_stop"] = position.hard_stop
@@ -73,7 +92,7 @@ def initialize_stop_state(
             elif name == "chandelier_stop":
                 atr_period = int(params.get("atr_period", 20))
                 atr_mul = float(params.get("atr_mul", 2.5))
-                atr_value, atr_trace = atr(bars, period=atr_period)
+                atr_value, atr_trace = _atr_value(bars, atr_period, atr_at)
                 if atr_value is not None:
                     position.chandelier_stop = position.highest_high_since_entry - atr_mul * atr_value
                 trace["chandelier_stop"] = position.chandelier_stop

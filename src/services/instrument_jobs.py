@@ -1,0 +1,476 @@
+"""Instrument add / bulk-backfill job managers (service layer).
+
+Moved out of app.routers.instruments — the router now only orchestrates HTTP.
+Job runs are recorded into the job_runs table (job_type:
+instrument_add / instrument_bulk_backfill / instrument_backfill).
+"""
+
+from __future__ import annotations
+
+import logging
+import threading
+from collections.abc import Callable
+from datetime import date, datetime
+
+from fastapi import HTTPException
+
+from data.service import DataService
+from data.storage.db import get_db, record_job_run_safely
+from services.indicator_builder import rebuild_after_backfill
+from services.instrument_admin import (
+    _append_instrument_config,
+    _build_new_instrument_record,
+    _normalize_symbol,
+)
+
+logger = logging.getLogger(__name__)
+
+def _empty_bulk_status() -> dict:
+    return {
+        "job_id": None,
+        "status": "idle",
+        "started_at": None,
+        "finished_at": None,
+        "progress_current": 0,
+        "progress_total": 0,
+        "current_symbol": None,
+        "message": "空闲。",
+        "error": None,
+        "summary": {
+            "total": 0,
+            "finished": 0,
+            "updated": 0,
+            "no_data": 0,
+            "failed": 0,
+            "added_rows": 0,
+        },
+    }
+
+
+class BulkBackfillJobManager:
+    def __init__(
+        self,
+        data_service_factory: Callable[[list[str] | None], DataService] | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._status = _empty_bulk_status()
+        self._data_service_factory = data_service_factory or (
+            lambda provider_priority: DataService(provider_priority=provider_priority)
+        )
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return self._copy_status()
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._status.get("status") == "running"
+
+    def start(
+        self,
+        *,
+        items: list[dict],
+        end_date: date,
+        adjust: str,
+        provider_priority: list[str] | None,
+    ) -> tuple[bool, dict]:
+        if not items:
+            raise HTTPException(status_code=400, detail="没有可补齐的标的")
+
+        now = datetime.now()
+        job_id = now.strftime("%Y%m%d%H%M%S%f")
+        with self._lock:
+            if self._status.get("status") == "running":
+                return False, self._copy_status()
+
+            self._status = {
+                "job_id": job_id,
+                "status": "running",
+                "started_at": now.isoformat(),
+                "finished_at": None,
+                "progress_current": 0,
+                "progress_total": len(items),
+                "current_symbol": None,
+                "message": f"后台补齐任务已启动，共 {len(items)} 个标的。",
+                "error": None,
+                "summary": {
+                    "total": len(items),
+                    "finished": 0,
+                    "updated": 0,
+                    "up_to_date": 0,
+                    "no_data": 0,
+                    "failed": 0,
+                    "added_rows": 0,
+                    "attempt": 1,
+                    "max_attempts": 4,
+                    "retrying": 0,
+                },
+                "results": [],
+                "adjust": adjust,
+                "requested_end": end_date.isoformat(),
+            }
+            snapshot = self._copy_status()
+
+        thread = threading.Thread(
+            target=self._run,
+            kwargs={
+                "job_id": job_id,
+                "items": items,
+                "end_date": end_date,
+                "adjust": adjust,
+                "provider_priority": provider_priority,
+            },
+            daemon=True,
+        )
+        thread.start()
+        return True, snapshot
+
+    def _copy_status(self) -> dict:
+        status = dict(self._status)
+        status["summary"] = dict(self._status.get("summary") or {})
+        status["results"] = list(self._status.get("results") or [])
+        return status
+
+    def _run(
+        self,
+        *,
+        job_id: str,
+        items: list[dict],
+        end_date: date,
+        adjust: str,
+        provider_priority: list[str] | None,
+    ) -> None:
+        data_service = self._data_service_factory(provider_priority)
+        try:
+            def _on_progress(update: dict) -> None:
+                with self._lock:
+                    if self._status.get("job_id") != job_id:
+                        return
+                    event = str(update.get("event") or "")
+                    summary = self._status["summary"]
+                    summary["attempt"] = int(update.get("attempt") or summary.get("attempt") or 1)
+                    summary["max_attempts"] = int(update.get("max_attempts") or summary.get("max_attempts") or 4)
+                    if event == "retry_sleep":
+                        summary["retrying"] = int(update.get("remaining") or 0)
+                    else:
+                        summary["retrying"] = int(summary.get("retrying") or 0)
+                    self._status["progress_current"] = int(
+                        update.get("finished") or self._status.get("progress_current") or 0
+                    )
+                    self._status["progress_total"] = int(update.get("total") or len(items))
+                    if event == "attempt_start":
+                        self._status["message"] = (
+                            f"第 {summary['attempt']}/{summary['max_attempts']} 轮批量补齐，"
+                            f"待处理 {int(update.get('remaining') or 0)} 个标的。"
+                        )
+                    elif event == "request_start":
+                        symbols = list(update.get("symbols") or [])
+                        self._status["current_symbol"] = symbols[0] if symbols else None
+                        self._status["message"] = (
+                            f"正在批量请求第 {summary['attempt']}/{summary['max_attempts']} 轮 "
+                            f"第 {int(update.get('chunk_index') or 0)}/{int(update.get('chunk_total') or 0)} 批，"
+                            f"本批 {len(symbols)} 个标的。"
+                        )
+                    elif event == "item_done":
+                        symbol = str(update.get("symbol") or "")
+                        self._status["current_symbol"] = symbol or None
+                        self._status["message"] = (
+                            f"已完成 {self._status['progress_current']}/{self._status['progress_total']}：{symbol}"
+                        )
+                    elif event == "retry_sleep":
+                        self._status["current_symbol"] = None
+                        self._status["message"] = (
+                            f"本轮有 {int(update.get('remaining') or 0)} 个标的失败，"
+                            f"{float(update.get('wait_seconds') or 0):.1f} 秒后只重试失败标的。"
+                        )
+
+            result_payloads = data_service.backfill_daily_histories(
+                items=items,
+                end_date=end_date,
+                adjust=adjust,
+                max_retries=3,
+                batch_size=100,
+                request_interval_seconds=2.0,
+                retry_delay_seconds=2.0,
+                progress_callback=_on_progress,
+            )
+
+            for result_payload in result_payloads:
+                with self._lock:
+                    if self._status.get("job_id") != job_id:
+                        return
+                    summary = self._status["summary"]
+                    summary["finished"] = int(summary.get("finished", 0)) + 1
+                    if result_payload["ok"]:
+                        result = result_payload["result"]
+                        status = str(result.get("status") or "")
+                        if status == "no_data":
+                            summary["no_data"] = int(summary.get("no_data", 0)) + 1
+                        elif status == "up_to_date":
+                            summary["up_to_date"] = int(summary.get("up_to_date", 0)) + 1
+                        else:
+                            summary["updated"] = int(summary.get("updated", 0)) + 1
+                        summary["added_rows"] = int(summary.get("added_rows", 0)) + int(
+                            result.get("added_rows") or 0
+                        )
+                    else:
+                        summary["failed"] = int(summary.get("failed", 0)) + 1
+
+                    self._status.setdefault("results", []).append(result_payload)
+
+            with self._lock:
+                if self._status.get("job_id") != job_id:
+                    return
+                summary = self._status["summary"]
+                all_failed = (
+                    int(summary.get("total") or len(items)) > 0
+                    and int(summary.get("failed") or 0) == int(summary.get("total") or len(items))
+                    and int(summary.get("updated") or 0) == 0
+                    and int(summary.get("up_to_date") or 0) == 0
+                    and int(summary.get("no_data") or 0) == 0
+                )
+                first_error = ""
+                if all_failed:
+                    for result_payload in self._status.get("results") or []:
+                        if not result_payload.get("ok"):
+                            first_error = str(result_payload.get("error") or "")
+                            break
+                self._status["status"] = "failed" if all_failed else "completed"
+                self._status["progress_current"] = int(summary.get("total") or len(items))
+                self._status["progress_total"] = int(summary.get("total") or len(items))
+                self._status["current_symbol"] = None
+                self._status["finished_at"] = datetime.now().isoformat()
+                if all_failed:
+                    self._status["error"] = first_error or "所有标的补齐失败"
+                    self._status["message"] = (
+                        f"后台补齐失败：共 {summary.get('total', 0)} 个标的全部失败。"
+                        f"{first_error}"
+                    )
+                else:
+                    self._status["message"] = (
+                        f"后台补齐完成：共 {summary.get('total', 0)} 个标的，"
+                        f"已最新 {summary.get('up_to_date', 0)} 个，"
+                        f"失败 {summary.get('failed', 0)} 个，"
+                        f"未获取到数据 {summary.get('no_data', 0)} 个，"
+                        f"新增 {int(summary.get('added_rows', 0)):,} 行。"
+                    )
+                final_status = self._copy_status()
+            updated_symbols = [
+                str((r.get("result") or {}).get("symbol") or "").strip().upper()
+                for r in (self._status.get("results") or [])
+                if r.get("ok") and str((r.get("result") or {}).get("status") or "") == "updated"
+            ]
+            if updated_symbols and not all_failed:
+                rebuild_after_backfill(updated_symbols)
+            record_job_run_safely(
+                "instrument_bulk_backfill", final_status, status=str(final_status.get("status") or "")
+            )
+        except Exception as exc:
+            logger.exception("Instrument bulk backfill job_id=%s failed", job_id)
+            with self._lock:
+                if self._status.get("job_id") == job_id:
+                    self._status["status"] = "failed"
+                    self._status["finished_at"] = datetime.now().isoformat()
+                    self._status["error"] = str(exc)
+                    self._status["message"] = f"后台补齐任务失败：{exc}"
+        finally:
+            close = getattr(data_service, "close", None)
+            if callable(close):
+                close()
+
+
+bulk_backfill_manager = BulkBackfillJobManager()
+
+def _empty_add_status() -> dict:
+    return {
+        "job_id": None,
+        "status": "idle",
+        "started_at": None,
+        "finished_at": None,
+        "progress_current": 0,
+        "progress_total": 0,
+        "current_symbol": None,
+        "message": "空闲。",
+        "error": None,
+        "summary": {
+            "symbol": None,
+            "name": None,
+            "metadata_saved": 0,
+            "config_saved": 0,
+            "added_rows": 0,
+            "backfill_status": None,
+        },
+    }
+
+
+class InstrumentAddJobManager:
+    def __init__(
+        self,
+        data_service_factory: Callable[[list[str] | None], DataService] | None = None,
+    ) -> None:
+        self._lock = threading.Lock()
+        self._status = _empty_add_status()
+        self._pending_symbols: set[str] = set()
+        self._data_service_factory = data_service_factory or (
+            lambda provider_priority: DataService(provider_priority=provider_priority)
+        )
+
+    def snapshot(self) -> dict:
+        with self._lock:
+            return self._copy_status()
+
+    def is_running(self) -> bool:
+        with self._lock:
+            return self._status.get("status") == "running"
+
+    def is_symbol_pending(self, symbol: str) -> bool:
+        normalized = _normalize_symbol(symbol)
+        with self._lock:
+            return normalized in self._pending_symbols
+
+    def start(
+        self,
+        *,
+        item: dict,
+        end_date: date,
+        adjust: str,
+        provider_priority: list[str] | None,
+    ) -> tuple[bool, dict]:
+        symbol = _normalize_symbol(item.get("symbol", ""))
+        if not symbol:
+            raise HTTPException(status_code=400, detail="标的无效")
+
+        now = datetime.now()
+        job_id = now.strftime("%Y%m%d%H%M%S%f")
+        with self._lock:
+            if self._status.get("status") == "running":
+                return False, self._copy_status()
+            if symbol in self._pending_symbols:
+                return False, self._copy_status()
+
+            self._pending_symbols.add(symbol)
+            self._status = {
+                "job_id": job_id,
+                "status": "running",
+                "started_at": now.isoformat(),
+                "finished_at": None,
+                "progress_current": 0,
+                "progress_total": 3,
+                "current_symbol": symbol,
+                "message": f"新增标的任务已启动：{symbol}。",
+                "error": None,
+                "summary": {
+                    "symbol": symbol,
+                    "name": str(item.get("name") or "").strip(),
+                    "metadata_saved": 0,
+                    "config_saved": 0,
+                    "added_rows": 0,
+                    "backfill_status": None,
+                },
+                "result": None,
+                "adjust": adjust,
+                "requested_end": end_date.isoformat(),
+            }
+            snapshot = self._copy_status()
+
+        thread = threading.Thread(
+            target=self._run,
+            kwargs={
+                "job_id": job_id,
+                "item": {**item, "symbol": symbol},
+                "end_date": end_date,
+                "adjust": adjust,
+                "provider_priority": provider_priority,
+            },
+            daemon=True,
+        )
+        thread.start()
+        return True, snapshot
+
+    def _copy_status(self) -> dict:
+        status = dict(self._status)
+        status["summary"] = dict(self._status.get("summary") or {})
+        status["result"] = dict(self._status.get("result") or {}) if self._status.get("result") else None
+        return status
+
+    def _set_progress(self, job_id: str, current: int, message: str) -> None:
+        with self._lock:
+            if self._status.get("job_id") != job_id:
+                return
+            self._status["progress_current"] = current
+            self._status["message"] = message
+
+    def _run(
+        self,
+        *,
+        job_id: str,
+        item: dict,
+        end_date: date,
+        adjust: str,
+        provider_priority: list[str] | None,
+    ) -> None:
+        symbol = str(item.get("symbol") or "").strip().upper()
+        data_service = self._data_service_factory(provider_priority)
+        try:
+            self._set_progress(job_id, 0, f"正在写入 {symbol} 的配置与分类信息。")
+            record = _build_new_instrument_record(item)
+            saved = _append_instrument_config(record)
+            with self._lock:
+                if self._status.get("job_id") == job_id:
+                    summary = self._status["summary"]
+                    summary["name"] = record.get("name")
+                    summary["metadata_saved"] = saved
+                    summary["config_saved"] = saved
+                    self._status["progress_current"] = 1
+                    self._status["message"] = f"{symbol} 已写入配置，正在补齐历史行情。"
+
+            result = data_service.backfill_daily_history(
+                symbol=symbol,
+                start_date=date(2020, 1, 1),
+                end_date=end_date,
+                adjust=adjust,
+            )
+            result["adjust"] = adjust
+            result["symbol"] = symbol
+            result["request_adjusted_to_earliest_available"] = bool(
+                result.get("fetched_start")
+                and result.get("requested_start")
+                and str(result.get("fetched_start")) > str(result.get("requested_start"))
+            )
+
+            with self._lock:
+                if self._status.get("job_id") != job_id:
+                    return
+                summary = self._status["summary"]
+                summary["added_rows"] = int(result.get("added_rows") or 0)
+                summary["backfill_status"] = str(result.get("status") or "")
+                self._status["status"] = "completed"
+                self._status["finished_at"] = datetime.now().isoformat()
+                self._status["progress_current"] = 3
+                self._status["current_symbol"] = None
+                self._status["message"] = (
+                    f"新增标的完成：{symbol}，新增 "
+                    f"{int(result.get('added_rows') or 0):,} 行历史行情。"
+                )
+                self._status["result"] = result
+                final_status = self._copy_status()
+            if str(result.get("status") or "") not in ("error", "no_data"):
+                rebuild_after_backfill([symbol])
+            record_job_run_safely("instrument_add", final_status, status=str(final_status.get("status") or ""))
+        except Exception as exc:
+            logger.exception("Instrument add job_id=%s failed for %s", job_id, symbol)
+            with self._lock:
+                if self._status.get("job_id") == job_id:
+                    self._status["status"] = "failed"
+                    self._status["finished_at"] = datetime.now().isoformat()
+                    self._status["error"] = str(exc)
+                    self._status["message"] = f"新增标的任务失败：{exc}"
+        finally:
+            close = getattr(data_service, "close", None)
+            if callable(close):
+                close()
+            with self._lock:
+                self._pending_symbols.discard(symbol)
+
+
+add_instrument_manager = InstrumentAddJobManager()

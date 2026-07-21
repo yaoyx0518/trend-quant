@@ -3,6 +3,7 @@
 from contextlib import asynccontextmanager
 import os
 from pathlib import Path
+import threading
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -31,6 +32,19 @@ async def lifespan(app: FastAPI):
     Path("data").mkdir(exist_ok=True)
     init_db()
 
+    # Startup cache check: full rebuild in background when trend params or
+    # formula versions drifted (also covers first-ever bootstrap).
+    def _rebuild_check() -> None:
+        try:
+            from services.indicator_builder import rebuild_if_needed
+
+            result = rebuild_if_needed()
+            logger.info("Indicator cache startup check: %s", result.get("status"))
+        except Exception:
+            logger.exception("Indicator cache startup check failed")
+
+    threading.Thread(target=_rebuild_check, daemon=True).start()
+
     scheduler_manager = SchedulerManager(settings=settings)
 
     def update_job() -> None:
@@ -40,6 +54,30 @@ async def lifespan(app: FastAPI):
             payload.get("success", 0),
             payload.get("failed", 0),
             payload.get("total", 0),
+        )
+        if payload.get("status") == "skipped_non_trading_day":
+            return
+        # Post-update orchestration (dividend detection + indicator rebuild)
+        # lives here so that core/jobs stays free of services-layer imports.
+        from datetime import date as _date
+
+        from data.service import DataService
+        from data.storage.db import record_job_run_safely
+        from services.indicator_builder import run_post_update_pipeline
+
+        service = DataService(provider_priority=settings.app.data_provider_priority)
+        try:
+            pipeline = run_post_update_pipeline(
+                settings, service, payload, payload.get("symbols", []), _date.today()
+            )
+        finally:
+            service.close()
+        payload["indicator_rebuild"] = pipeline
+        record_job_run_safely(
+            "indicator_rebuild",
+            pipeline,
+            run_date=_date.today().isoformat(),
+            status=str(pipeline.get("status", "")),
         )
 
     disable_scheduler = str(os.getenv("TREND_QUANT_DISABLE_SCHEDULER", "")).strip().lower() in {

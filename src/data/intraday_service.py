@@ -18,8 +18,9 @@ import pandas as pd
 
 from data.storage.db import Database
 from data.service import DataService
-from strategy.indicators import atr as _compute_atr
-from strategy.trend_score_core import calculate_trend_score_snapshot, safe_float
+from core.indicators import atr as _compute_atr
+from core.trend import _detect_trend_phase
+from core.trend import calculate_trend_score_snapshot, safe_float
 
 # ---------------------------------------------------------------------------
 # synthetic bar construction
@@ -32,99 +33,6 @@ def _number(value: object) -> float | None:
     except (TypeError, ValueError):
         return None
     return result if isfinite(result) else None
-
-
-def _detect_trend_phase(
-    trend_scores: list[float | None],
-    trend_ma5: list[float | None],
-    closes: list[float | None],
-    dates: list[str],
-) -> dict:
-    """Detect the current trend phase and its start date.
-
-    Uses the last bar's trend_score and MA5 to determine the current
-    phase ("start" / "end"), then walks backwards to find the transition
-    bar where this phase began.  Returns None if the current bar is in
-    neither state.
-
-    - 趋势启动 (start): trend_score >= 5  AND  trend_ma5 >= 0
-    - 趋势结束 (end):   trend_score <= -5 AND  trend_ma5 <= 0
-
-    Returns a dict with keys:
-      phase: "start" | "end" | None
-      days:  int (the transition bar is day 1)
-      change_pct: float (transition close → latest close % change)
-      signal_date: str (ISO date of the transition bar)
-    """
-    default: dict = {
-        "phase": None,
-        "days": None,
-        "change_pct": None,
-        "signal_date": None,
-    }
-    n = len(trend_scores)
-    if n < 5:
-        return default
-
-    # Scan backwards from the latest bar to find the most recent signal.
-    # Skip bars that are NEITHER (don't satisfy either condition).
-    latest_idx = n - 1
-    phase = None
-    scan_idx = -1
-    for i in range(n - 1, 3, -1):
-        ts = trend_scores[i]
-        ma5 = trend_ma5[i]
-        if ts is None or ma5 is None:
-            continue
-        if ts >= 5 and ma5 >= 0:
-            phase = "start"
-            scan_idx = i
-            break
-        if ts <= -5 and ma5 <= 0:
-            phase = "end"
-            scan_idx = i
-            break
-    if phase is None:
-        return default  # no signal found at all
-
-    latest_close = closes[latest_idx] if latest_idx < len(closes) else None
-    if latest_close is None or latest_close <= 0:
-        return default
-
-    # Walk backwards from scan_idx to find where this phase started
-    # (the transition point — first bar where the condition became true).
-    signal_idx = scan_idx
-    for j in range(scan_idx - 1, 3, -1):
-        prev_ts = trend_scores[j]
-        prev_ma5 = trend_ma5[j]
-        if prev_ts is None or prev_ma5 is None:
-            break
-        if phase == "start":
-            if prev_ts >= 5 and prev_ma5 >= 0:
-                signal_idx = j  # still in same phase — move start earlier
-            else:
-                break  # phase started at signal_idx
-        else:  # phase == "end"
-            if prev_ts <= -5 and prev_ma5 <= 0:
-                signal_idx = j
-            else:
-                break
-
-    signal_close = closes[signal_idx] if signal_idx < len(closes) else None
-    if signal_close is None or signal_close <= 0:
-        return default
-
-    # Days: transition bar is day 1, counted to the latest bar.
-    days = latest_idx - signal_idx + 1
-    change_pct = round((latest_close / signal_close - 1.0) * 100.0, 2)
-    signal_date = dates[signal_idx] if signal_idx < len(dates) else None
-
-    return {
-        "phase": phase,
-        "days": days,
-        "change_pct": change_pct,
-        "signal_date": signal_date,
-    }
 
 
 def build_synthetic_bar(quote: dict, prev_volume: float) -> dict:
@@ -161,6 +69,131 @@ def build_synthetic_bar(quote: dict, prev_volume: float) -> dict:
 # ---------------------------------------------------------------------------
 # intraday trend score
 # ---------------------------------------------------------------------------
+
+
+def compute_intraday_trend_cached(
+    symbol: str,
+    quote: dict,
+    tail_bars: pd.DataFrame,
+    cache_row: dict | None,
+    trend_config: dict,
+) -> dict:
+    """Compute today's trend score from cached EOD state + realtime quote.
+
+    Exact-equivalent to ``compute_intraday_trend_score`` on full history, but
+    O(1): bias uses tail closes, slope recurses EMA from the cached
+    ``ema5/10/20`` state columns, ATR/ER/vol_ma use short tails, and the
+    ATR anchor is the cached yesterday value (fixed_atr semantics).
+
+    Returns the same dict shape as ``compute_intraday_trend_score``.
+    ``cache_row`` must contain atr/ema5/ema10/ema20; when None the caller
+    should fall back to the full-history path.
+    """
+    if tail_bars.empty or cache_row is None:
+        return {"ok": False, "reason": "missing_cache", "is_intraday": True}
+
+    close = pd.to_numeric(tail_bars["close"], errors="coerce").dropna()
+    volume = pd.to_numeric(tail_bars["volume"], errors="coerce").fillna(0.0)
+    if close.empty:
+        return {"ok": False, "reason": "insufficient_tail", "is_intraday": True}
+
+    prev_close = safe_float(close.iloc[-1], 0.0)
+    prev_volume = safe_float(volume.iloc[-1], 0.0)
+    synth = build_synthetic_bar(quote, prev_volume)
+    synth_close = float(synth["close"])
+
+    fixed_atr = safe_float(cache_row.get("atr"), 0.0)
+    if fixed_atr <= 0:
+        return {"ok": False, "reason": "invalid_atr", "is_intraday": True}
+
+    n_short = int(trend_config.get("n_short", 5))
+    n_mid = int(trend_config.get("n_mid", 10))
+    n_long = int(trend_config.get("n_long", 20))
+    vol_ma_period = int(trend_config.get("vol_ma_period", 20))
+    er_period = int(trend_config.get("er_period", 10))
+
+    closes = list(close.tail(n_long)) + [synth_close]
+    # vol_ma window = last (vol_ma_period-1) historical volumes + today's
+    # (fixed) volume — mirrors the full-history path's rolling(20) over the
+    # combined series exactly.
+    volumes = list(volume.tail(vol_ma_period - 1)) + [prev_volume]
+
+    bias_parts: list[float] = []
+    slope_parts: list[float] = []
+    for n, ema_col in ((n_short, "ema5"), (n_mid, "ema10"), (n_long, "ema20")):
+        ma_n = float(pd.Series(closes[-n:]).mean())
+        bias_parts.append(safe_float((synth_close - ma_n) / fixed_atr))
+
+        ema_prev = safe_float(cache_row.get(ema_col))
+        alpha = 2.0 / (n + 1.0)
+        ema_today = alpha * synth_close + (1 - alpha) * ema_prev
+        slope_parts.append(safe_float((ema_today - ema_prev) / (fixed_atr * n)))
+
+    w_bias = [
+        safe_float(trend_config.get("w_bias_short", 0.4), 0.4),
+        safe_float(trend_config.get("w_bias_mid", 0.4), 0.4),
+        safe_float(trend_config.get("w_bias_long", 0.2), 0.2),
+    ]
+    w_slope = [
+        safe_float(trend_config.get("w_slope_short", 0.4), 0.4),
+        safe_float(trend_config.get("w_slope_mid", 0.4), 0.4),
+        safe_float(trend_config.get("w_slope_long", 0.2), 0.2),
+    ]
+    bias_mix = float(np.dot(w_bias, bias_parts))
+    slope_mix = float(np.dot(w_slope, slope_parts))
+    norm_bias = float(np.tanh(bias_mix / 2.0) * 100.0)
+    norm_slope = float(np.tanh(slope_mix) * 100.0)
+    price_direction = (
+        safe_float(trend_config.get("w_bias_norm", 0.5), 0.5) * norm_bias
+        + safe_float(trend_config.get("w_slope_norm", 0.5), 0.5) * norm_slope
+    )
+
+    vol_ma = float(pd.Series(volumes).mean()) if volumes else 0.0
+    vol_ratio = (prev_volume / vol_ma) if vol_ma > 0 else 0.0
+    volume_factor = 1.0 if vol_ratio >= 3.0 else max(vol_ratio / 3.0, 0.0)
+
+    er_closes = list(close.tail(er_period)) + [synth_close]
+    er_num = abs(er_closes[-1] - er_closes[0])
+    er_den = sum(abs(er_closes[i] - er_closes[i - 1]) for i in range(1, len(er_closes)))
+    er_now = float(np.clip(er_num / er_den, 0.0, 1.0)) if er_den > 0 else 0.0
+
+    confidence = float(
+        (volume_factor ** safe_float(trend_config.get("w_vol", 0.3), 0.3))
+        * (er_now ** safe_float(trend_config.get("w_er", 0.7), 0.7))
+    )
+    trend_score = float(np.clip(price_direction * confidence, -100.0, 100.0))
+
+    return {
+        "ok": True,
+        "reason": "ok",
+        "trend_score": trend_score,
+        "price_direction": price_direction,
+        "confidence": confidence,
+        "atr": fixed_atr,
+        "price": synth_close,
+        "ma_mid": float(pd.Series(closes[-n_mid:]).mean()),
+        "is_intraday": True,
+        "calc_details": {
+            "price": synth_close,
+            "ma_mid": float(pd.Series(closes[-n_mid:]).mean()),
+            "atr": fixed_atr,
+            "bias_short": bias_parts[0],
+            "bias_mid": bias_parts[1],
+            "bias_long": bias_parts[2],
+            "slope_short": slope_parts[0],
+            "slope_mid": slope_parts[1],
+            "slope_long": slope_parts[2],
+            "bias_mix": bias_mix,
+            "slope_mix": slope_mix,
+            "norm_bias": norm_bias,
+            "norm_slope": norm_slope,
+            "vol_ma": vol_ma,
+            "current_volume": prev_volume,
+            "vol_ratio": vol_ratio,
+            "volume_factor": volume_factor,
+            "er": er_now,
+        },
+    }
 
 
 def compute_intraday_trend_score(
@@ -303,13 +336,39 @@ def build_intraday_dashboard(
     quote_ok = sum(1 for q in quotes.values() if "error" not in q and q.get("price") is not None)
     _progress("quotes", 0.15, f"实时报价: {quote_ok}/{total} 成功")
 
-    # --- 2. Load metadata --------------------------------------------------
+    # --- 2. Load metadata + bulk cached data -------------------------------
     metadata_map = db.get_instrument_metadata_map()
     name_map: dict[str, str] = {}
     for sym, meta in metadata_map.items():
         name = str(meta.get("name", "")).strip()
         if name:
             name_map[sym] = name
+
+    # Bulk loads (each is ONE query, replacing per-symbol full-history reads):
+    # - 1y K-line tail: closes/volumes aligned with the 1y trend history
+    #   (also provides the short tails for today's indicator components)
+    # - latest cached indicator row per symbol: EMA/ATR recursion anchors
+    # - 1y cached trend series: MA5 + phase-detection history
+    from core.indicators import INDICATOR_FORMULA_VERSION
+    from core.trend import TREND_FORMULA_VERSION
+
+    tail_rows = db.load_market_tail(days=365)
+    tail_frame = pd.DataFrame(tail_rows) if tail_rows else pd.DataFrame()
+    if not tail_frame.empty:
+        tail_frame["time"] = pd.to_datetime(tail_frame["time"], errors="coerce")
+    tail_by_symbol = {
+        str(sym): frame.sort_values("time").reset_index(drop=True)
+        for sym, frame in tail_frame.groupby("symbol", sort=False)
+    } if not tail_frame.empty else {}
+
+    indicator_latest = db.load_indicator_latest(formula_version=INDICATOR_FORMULA_VERSION)
+
+    trend_since = (datetime.now() - pd.Timedelta(days=365)).date().isoformat()
+    trend_by_symbol: dict[str, tuple[list, list]] = {}
+    for row in db.load_trend_daily_bulk(trend_since, formula_version=TREND_FORMULA_VERSION):
+        entry = trend_by_symbol.setdefault(str(row["symbol"]), ([], []))
+        entry[0].append(str(row["time"])[:10])
+        entry[1].append(row["trend_score"])
 
     # --- 3. Per-symbol computation -----------------------------------------
     instrument_rows: list[dict] = []
@@ -325,42 +384,68 @@ def build_intraday_dashboard(
             continue
 
         meta = metadata_map.get(symbol, {})
-        hist = db.load_market_data(symbol, price_mode="qfq")
-        if hist.empty:
-            failed.append(symbol)
-            continue
+        symbol = str(symbol)
 
-        # Ensure correct types and sorting.
-        hist["time"] = pd.to_datetime(hist["time"], errors="coerce")
-        hist = hist.dropna(subset=["time", "open", "high", "low", "close"]).sort_values("time").reset_index(drop=True)
-        for col in ("open", "high", "low", "close", "volume", "amount"):
-            if col in hist.columns:
-                hist[col] = pd.to_numeric(hist[col], errors="coerce")
+        # Cache-first path: O(1) incremental trend from cached state.
+        tail = tail_by_symbol.get(symbol)
+        cache_row = indicator_latest.get(symbol)
+        result = compute_intraday_trend_cached(symbol, quote, tail, cache_row, trend_config) if (
+            tail is not None and cache_row is not None
+        ) else {"ok": False, "reason": "missing_cache", "is_intraday": True}
 
-        if len(hist) < 20:
-            failed.append(symbol)
-            continue
-
-        result = compute_intraday_trend_score(hist, quote, trend_config)
+        hist = None
         if not result.get("ok"):
-            failed.append(symbol)
-            continue
+            # Fallback: full-history path (correct for uncached symbols).
+            hist = db.load_market_data(symbol, price_mode="qfq")
+            if hist.empty:
+                failed.append(symbol)
+                continue
+            hist["time"] = pd.to_datetime(hist["time"], errors="coerce")
+            hist = hist.dropna(subset=["time", "open", "high", "low", "close"]).sort_values("time").reset_index(drop=True)
+            for col in ("open", "high", "low", "close", "volume", "amount"):
+                if col in hist.columns:
+                    hist[col] = pd.to_numeric(hist[col], errors="coerce")
+            if len(hist) < 20:
+                failed.append(symbol)
+                continue
+            result = compute_intraday_trend_score(hist, quote, trend_config)
+            if not result.get("ok"):
+                failed.append(symbol)
+                continue
 
-        # --- Compute trend history for phase detection -----------------
-        # Late import to avoid circular dependency (market_view → intraday_service).
-        from app.routers.market_view import compute_trend_indicator  # noqa: PLC0415
+        # --- Trend history for MA5 + phase detection ----------------------
+        # Cached trend series (1y window); the intraday snapshot is appended
+        # so the current phase is determined by the live score.
+        hist_dates: list[str] = []
+        hist_scores: list[float | None] = []
+        if symbol in trend_by_symbol:
+            hist_dates, hist_scores = trend_by_symbol[symbol]
+        if not hist_dates:
+            # Fallback: compute trend over the available history.
+            if hist is None:
+                hist = db.load_market_data(symbol, price_mode="qfq")
+                hist["time"] = pd.to_datetime(hist["time"], errors="coerce")
+                hist = hist.dropna(subset=["time", "close"]).sort_values("time").reset_index(drop=True)
+            from services.market_indicators import compute_trend_indicator  # noqa: PLC0415
 
-        trend_result = compute_trend_indicator(hist, trend_config)
-        hist_trend_scores = trend_result.get("score", [])
-        hist_closes = [_number(v) for v in hist["close"]]
-        hist_dates = [pd.Timestamp(v).date().isoformat() for v in hist["time"]]
+            trend_result = compute_trend_indicator(hist, trend_config)
+            hist_scores = trend_result.get("score", [])
+            hist_dates = [pd.Timestamp(v).date().isoformat() for v in hist["time"]]
 
-        # For intraday, extend the historical series with the intraday
-        # snapshot so the current phase is determined by the live trend
-        # score, not yesterday's.
+        hist_closes: list[float | None] = []
+        if hist is not None and not hist.empty:
+            hist_closes = [_number(v) for v in hist["close"]]
+        elif symbol in tail_by_symbol and hist_dates:
+            # Closes aligned to the cached trend series by date.
+            close_map = {
+                str(t)[:10]: _number(c)
+                for t, c in zip(tail_by_symbol[symbol]["time"], tail_by_symbol[symbol]["close"])
+            }
+            hist_closes = [close_map.get(d) for d in hist_dates]
+
         intraday_ts = result["trend_score"]
         intraday_price = _number(quote.get("price")) or 0.0
-        extended_scores = list(hist_trend_scores) + [intraday_ts]
+        extended_scores = list(hist_scores) + [intraday_ts]
         extended_ma5 = _ma5(extended_scores)
         extended_closes = list(hist_closes) + [intraday_price]
         extended_dates = list(hist_dates) + [datetime.now().date().isoformat()]
@@ -384,6 +469,12 @@ def build_intraday_dashboard(
                     phase_info["change_pct"] = round((intraday_price / sig_close - 1.0) * 100.0, 2)
 
         name = str(meta.get("name") or name_map.get(symbol, "")).strip()
+        if hist is not None and not hist.empty:
+            last_volume = safe_float(hist["volume"].iloc[-1], 0.0)
+        elif tail is not None and not tail.empty:
+            last_volume = safe_float(tail["volume"].iloc[-1], 0.0)
+        else:
+            last_volume = 0.0
         instrument_rows.append(
             {
                 "symbol": symbol,
@@ -398,7 +489,7 @@ def build_intraday_dashboard(
                 "high": _number(quote.get("high")) or 0.0,
                 "low": _number(quote.get("low")) or 0.0,
                 "close": _number(quote.get("price")) or 0.0,
-                "volume": safe_float(hist["volume"].iloc[-1], 0.0),
+                "volume": last_volume,
                 "amount": _number(quote.get("amount")) or 0.0,
                 "category_l1": str(meta.get("category_l1") or ""),
                 "category_l2": str(meta.get("category_l2") or ""),
@@ -417,27 +508,25 @@ def build_intraday_dashboard(
 
     _progress("aggregate", 0.90, f"正在聚合 {len(instrument_rows)} 个标的…")
 
-    # --- 4. Compute multi-period returns -----------------------------------
+    # --- 4. Compute multi-period returns (from the bulk 1y tail) ------------
     for row in instrument_rows:
-        hist = db.load_market_data(row["symbol"], price_mode="qfq")
-        if hist.empty:
+        frame = tail_by_symbol.get(row["symbol"])
+        if frame is None or frame.empty:
             continue
-        hist["time"] = pd.to_datetime(hist["time"], errors="coerce")
-        hist = hist.dropna(subset=["close"]).sort_values("time")
-        hist["close"] = pd.to_numeric(hist["close"], errors="coerce")
-        if len(hist) < 2:
+        closes = pd.to_numeric(frame["close"], errors="coerce").dropna()
+        if len(closes) < 2:
             continue
         synth_close = row["close"]
-        prev_close = safe_float(hist["close"].iloc[-1], synth_close)
+        prev_close = safe_float(closes.iloc[-1], synth_close)
         if prev_close and prev_close != 0:
             row["return_1d"] = (synth_close / prev_close - 1.0) * 100.0
         for period in (5, 20, 60):
-            if len(hist) > period:
-                base = safe_float(hist["close"].iloc[-(period)], prev_close)
+            if len(closes) > period:
+                base = safe_float(closes.iloc[-(period)], prev_close)
                 if base and base != 0:
                     row[f"return_{period}d"] = (synth_close / base - 1.0) * 100.0
 
-    # --- 5. Multi-level aggregation (mirrors subject_market.py) ------------
+    # --- 5. Multi-level aggregation (same structure as the EOD dashboard) ----
     source = pd.DataFrame(instrument_rows)
     if source.empty:
         _progress("done", 1.0, "无可用盘中数据")

@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 from core.calendar import previous_trading_day
+from rule_backtest.models import DEFAULT_FEE_RATE
 from rule_backtest.service import RuleBacktestService
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class RuleBacktestRunRequest(BaseModel):
     end_date: str = Field(default="")
     initial_capital: float = Field(default=1_000_000)
     slippage: float = Field(default=0.002)
-    fee_rate: float = Field(default=0.0000854)
+    fee_rate: float = Field(default=DEFAULT_FEE_RATE)
     fee_min: float = Field(default=5.0)
     lot_size: int = Field(default=100)
     instrument_type: str = Field(default="")
@@ -77,6 +78,12 @@ async def get_rule_backtest_meta() -> dict:
         "strategies": service.list_strategies(),
         "instruments": service.list_instruments(),
         "indicators": service.list_indicators(),
+        # Frontend form defaults (single source — JS must not hardcode these).
+        "state_values": ["entry_price", "hard_stop", "highest_high_since_entry", "chandelier_stop"],
+        "stop_defaults": {
+            "hard_stop": {"atr_period": 20, "atr_mul": 1.5},
+            "chandelier_stop": {"atr_period": 20, "atr_mul": 2.5},
+        },
     }
 
 

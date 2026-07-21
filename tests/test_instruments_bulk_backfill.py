@@ -7,7 +7,7 @@ import unittest
 from datetime import date
 from pathlib import Path
 
-from app.routers.instruments import BulkBackfillJobManager, InstrumentAddJobManager
+from services.instrument_jobs import BulkBackfillJobManager, InstrumentAddJobManager
 from data.storage.db import get_db, init_db
 
 
@@ -134,6 +134,9 @@ class BulkBackfillJobManagerTest(unittest.TestCase):
         init_db(self.tmp_path / "test.db")
 
     def tearDown(self) -> None:
+        # Worker threads may still be flushing the final job_runs write
+        # (WAL files) right after the terminal status is published.
+        time.sleep(0.3)
         self.tmp.cleanup()
 
     def test_runs_in_background_and_summarizes_results(self) -> None:

@@ -30,7 +30,7 @@ def _pool_symbols() -> list[str]:
         instruments = [
             item
             for item in get_db().list_instrument_metadata()
-            if item.get("enabled", 1) in (1, True)
+            if bool(item.get("enabled", True))
         ]
     except (RuntimeError, sqlite3.Error) as exc:
         logger.warning("Instrument metadata unavailable (%s); daily update will cover benchmarks only", exc)
@@ -88,6 +88,10 @@ def daily_market_update_job(settings: Settings, data_service: DataService | None
                 max_retries=max(int(app_cfg.daily_update_max_retries), 1),
                 retry_interval_seconds=max(float(app_cfg.daily_update_retry_interval_seconds), 1.0),
             )
+            # Post-update orchestration (dividend detection + indicator
+            # rebuild) lives in app.main's update_job — core must not
+            # depend on the services layer.
+            payload["symbols"] = symbols
         finally:
             if owns_service:
                 service.close()

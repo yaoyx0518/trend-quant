@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from strategy.trend_score_core import safe_float, calculate_trend_score_snapshot
-from strategy.indicators import atr, efficiency_ratio
+from core.trend import calculate_trend_score_snapshot, safe_float
+from core.indicators import atr, efficiency_ratio
 
 
 class TestSafeFloat:

@@ -37,6 +37,9 @@ class SingleSymbolAllInBacktestEngine:
         progress_callback = request.progress_callback
 
         resolver = ValueResolver(strategy_cfg=strategy.get("indicator_config", {}) if isinstance(strategy, dict) else {})
+        # Hot-path memoization: full indicator series are computed once over
+        # the complete history; per-day resolution is an indexed lookup.
+        resolver.set_context_bars(all_bars)
         condition_engine = ConditionEngine(resolver)
 
         cash = float(execution.initial_capital)
@@ -50,7 +53,9 @@ class SingleSymbolAllInBacktestEngine:
         for day_no, (idx, row) in enumerate(bars.iterrows(), 1):
             day = row["date"]
             day_str = day.isoformat()
-            day_bars = all_bars.iloc[: idx + 1].copy()
+            # Slice view only — nothing downstream mutates it; the previous
+            # per-day .copy() was O(n^2) memory churn.
+            day_bars = all_bars.iloc[: idx + 1]
             close_price = float(row["close"])
             debug_day: dict = {
                 "date": day_str,
@@ -63,7 +68,9 @@ class SingleSymbolAllInBacktestEngine:
             } if debug_enabled else {}
 
             state_before = self._position_snapshot(position)
-            state_trace = update_position_state_for_day(position=position, bars=day_bars, strategy=strategy)
+            state_trace = update_position_state_for_day(
+                position=position, bars=day_bars, strategy=strategy, atr_at=resolver.atr_value_at
+            )
             sold_today = False
             if debug_enabled:
                 debug_day["state_before"] = state_before
@@ -150,6 +157,7 @@ class SingleSymbolAllInBacktestEngine:
                         strategy=strategy,
                         entry_price=float(trade["exec_price"]),
                         entry_date=day_str,
+                        atr_at=resolver.atr_value_at,
                     )
                     if debug_enabled:
                         debug_day["decision"] = {"side": "BUY", "reason": "entry_conditions_passed"}

@@ -11,7 +11,7 @@ import pandas as pd
 from data.storage.market_store import MarketStore
 from rule_backtest.engine import SingleSymbolAllInBacktestEngine
 from rule_backtest.loader import StrategyLoader
-from rule_backtest.models import BacktestExecutionConfig, RuleBacktestRequest
+from rule_backtest.models import DEFAULT_FEE_RATE, BacktestExecutionConfig, RuleBacktestRequest
 from rule_backtest.registry import registry_payload
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class RuleBacktestService:
 
         execution = BacktestExecutionConfig(
             initial_capital=float(payload.get("initial_capital", 1_000_000.0) or 1_000_000.0),
-            fee_rate=float(payload.get("fee_rate", 0.0000854) or 0.0000854),
+            fee_rate=float(payload.get("fee_rate", DEFAULT_FEE_RATE) or DEFAULT_FEE_RATE),
             fee_min=float(payload.get("fee_min", 5.0) or 5.0),
             slippage=float(payload.get("slippage", 0.002) or 0.002),
             lot_size=int(payload.get("lot_size", 100) or 100),

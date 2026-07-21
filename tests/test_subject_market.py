@@ -37,16 +37,40 @@ def _rows(symbol: str, l3: str, amount: float, step: float) -> list[dict]:
 
 class SubjectMarketApiTest(unittest.TestCase):
     def test_dashboard_aggregates_instruments_by_turnover_at_l3(self) -> None:
+        history_rows = [
+            *_rows("AAA", "医疗服务", 100.0, 0.5),
+            *_rows("BBB", "医疗服务", 300.0, 0.2),
+            *_rows("CCC", "化学制药", 200.0, -0.15),
+        ]
+
         class FakeDb:
             def load_market_dashboard_history(self, days: int) -> list[dict]:
                 self.days = days
-                return [
-                    *_rows("AAA", "医疗服务", 100.0, 0.5),
-                    *_rows("BBB", "医疗服务", 300.0, 0.2),
-                    *_rows("CCC", "化学制药", 200.0, -0.15),
-                ]
+                return history_rows
 
-        with patch("app.routers.subject_market.get_db", return_value=FakeDb()):
+            def indicator_cache_info(self, symbol: str) -> dict:
+                # Cold cache → indicator_store falls back to live compute.
+                return {
+                    "indicator_rows": 0,
+                    "indicator_last": None,
+                    "indicator_version": None,
+                    "trend_rows": 0,
+                    "trend_last": None,
+                    "trend_version": None,
+                }
+
+            def get_param_set(self, param_set: str):
+                # No default param set → dashboard uses per-symbol fallback.
+                return None
+
+            def get_market_data_summary(self, symbol: str) -> dict:
+                return {"rows": 0, "start": None, "end": None}
+
+            def load_market_data(self, symbol: str):
+                rows = [r for r in history_rows if r["symbol"] == symbol]
+                return pd.DataFrame(rows) if rows else pd.DataFrame()
+
+        with patch("services.dashboard.get_db", return_value=FakeDb()):
             payload = build_subject_dashboard_payload()
 
         self.assertEqual(payload["secondary_count"], 1)

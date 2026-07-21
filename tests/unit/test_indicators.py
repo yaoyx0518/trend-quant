@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from strategy.indicators import atr, efficiency_ratio
+from core.indicators import atr, efficiency_ratio
 
 
 class TestATR:

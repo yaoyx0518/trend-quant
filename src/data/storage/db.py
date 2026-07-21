@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 _db_instance: Database | None = None
 
@@ -20,11 +23,29 @@ class Database:
     def _connect(self):
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
+        # WAL: readers are not blocked during indicator cache rebuilds.
+        conn.execute("PRAGMA journal_mode=WAL")
         try:
             yield conn
             conn.commit()
         finally:
             conn.close()
+
+    def backup_to(self, backup_dir: str | Path = "data/backups", keep: int = 3) -> Path:
+        """Online backup via VACUUM INTO (WAL-safe), keeping the newest ``keep`` files."""
+        target_dir = Path(backup_dir)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
+        dest = target_dir / f"trend_quant-{stamp}.db"
+        conn = sqlite3.connect(self.db_path)
+        try:
+            conn.execute(f"VACUUM INTO '{dest}'")
+        finally:
+            conn.close()
+        backups = sorted(target_dir.glob("trend_quant-*.db"))
+        for old in backups[:-keep]:
+            old.unlink(missing_ok=True)
+        return dest
 
     def _init_tables(self) -> None:
         with self._connect() as conn:
@@ -127,6 +148,48 @@ class Database:
                     key TEXT PRIMARY KEY,
                     value TEXT,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+                );
+
+                CREATE TABLE IF NOT EXISTS trend_param_sets (
+                    param_set TEXT PRIMARY KEY,
+                    params_json TEXT NOT NULL,
+                    is_default INTEGER NOT NULL DEFAULT 0,
+                    formula_version INTEGER NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS indicator_daily (
+                    symbol TEXT NOT NULL,
+                    time TEXT NOT NULL,
+                    atr REAL,
+                    vol_ma20 REAL,
+                    er10 REAL,
+                    sma5 REAL, sma10 REAL, sma20 REAL, sma60 REAL, sma120 REAL, sma200 REAL,
+                    ema5 REAL, ema10 REAL, ema20 REAL,
+                    rsi14 REAL,
+                    macd_dif REAL, macd_dea REAL, macd_hist REAL,
+                    boll_mid REAL, boll_up REAL, boll_dn REAL,
+                    rsi_avg_gain REAL, rsi_avg_loss REAL,
+                    macd_ema12 REAL, macd_ema26 REAL,
+                    price_mode TEXT NOT NULL DEFAULT 'qfq',
+                    formula_version INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (symbol, time)
+                );
+
+                CREATE TABLE IF NOT EXISTS trend_daily (
+                    symbol TEXT NOT NULL,
+                    time TEXT NOT NULL,
+                    param_set TEXT NOT NULL DEFAULT 'default',
+                    trend_score REAL,
+                    trend_ma5 REAL,
+                    trend_ma10 REAL,
+                    price_direction REAL,
+                    confidence REAL,
+                    price_mode TEXT NOT NULL DEFAULT 'qfq',
+                    formula_version INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (symbol, time, param_set)
                 );
 
                 """
@@ -367,6 +430,18 @@ class Database:
 
     def get_instrument_metadata_map(self) -> dict[str, dict]:
         return {item["symbol"]: item for item in self.list_instrument_metadata()}
+
+    def load_market_tail(self, days: int, price_mode: str = "qfq") -> list[dict]:
+        """Lean K-line tail for all symbols (no metadata join) — bulk overlay reads."""
+        table = self._market_table(price_mode)
+        cutoff = (datetime.now().date() - timedelta(days=days)).isoformat()
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""SELECT symbol, time, open, high, low, close, volume
+                    FROM {table} WHERE time >= ? ORDER BY symbol, time""",
+                (cutoff,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def load_market_dashboard_history(self, days: int = 90) -> list[dict]:
         """Return recent adjusted daily bars for fully classified managed instruments."""
@@ -626,6 +701,186 @@ class Database:
             except (TypeError, json.JSONDecodeError):
                 out[row["key"]] = row["value"]
         return out
+
+    # ------------------------------------------------------------------
+    # trend_param_sets / indicator_daily / trend_daily (precomputed caches)
+    # ------------------------------------------------------------------
+    def get_param_set(self, param_set: str) -> dict | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM trend_param_sets WHERE param_set = ?", (param_set,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def save_param_set(self, param_set: str, params_json: str, is_default: bool, formula_version: int) -> None:
+        with self._connect() as conn:
+            if is_default:
+                conn.execute("UPDATE trend_param_sets SET is_default = 0")
+            conn.execute(
+                """INSERT INTO trend_param_sets (param_set, params_json, is_default, formula_version, created_at)
+                   VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(param_set) DO UPDATE SET
+                       params_json = excluded.params_json,
+                       is_default = excluded.is_default,
+                       formula_version = excluded.formula_version""",
+                (param_set, params_json, 1 if is_default else 0, int(formula_version)),
+            )
+
+    def save_indicator_daily(self, symbol: str, df, formula_version: int, price_mode: str = "qfq") -> int:
+        """Replace one symbol's cached indicator rows (full-symbol rebuild)."""
+        if df.empty:
+            return 0
+
+        def col(name: str) -> list:
+            return [None if pd.isna(v) else float(v) for v in df[name].tolist()] if name in df.columns else [None] * len(df)
+
+        times = [str(t) for t in df["time"].tolist()]
+        columns = (
+            "atr", "vol_ma20", "er10",
+            "sma5", "sma10", "sma20", "sma60", "sma120", "sma200",
+            "ema5", "ema10", "ema20", "rsi14",
+            "macd_dif", "macd_dea", "macd_hist",
+            "boll_mid", "boll_up", "boll_dn",
+            "rsi_avg_gain", "rsi_avg_loss", "macd_ema12", "macd_ema26",
+        )
+        values = [col(name) for name in columns]
+        records = [
+            (symbol, times[i], *row_vals, price_mode, int(formula_version))
+            for i, row_vals in enumerate(zip(*values))
+        ]
+        with self._connect() as conn:
+            conn.execute("DELETE FROM indicator_daily WHERE symbol = ?", (symbol,))
+            conn.executemany(
+                """INSERT INTO indicator_daily
+                   (symbol, time, atr, vol_ma20, er10,
+                    sma5, sma10, sma20, sma60, sma120, sma200,
+                    ema5, ema10, ema20, rsi14,
+                    macd_dif, macd_dea, macd_hist,
+                    boll_mid, boll_up, boll_dn,
+                    rsi_avg_gain, rsi_avg_loss, macd_ema12, macd_ema26,
+                    price_mode, formula_version, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                records,
+            )
+        return len(records)
+
+    def load_indicator_daily(self, symbol: str):
+        import pandas as pd
+
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM indicator_daily WHERE symbol = ? ORDER BY time", (symbol,)
+            ).fetchall()
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame([dict(r) for r in rows])
+
+    def save_trend_daily(self, symbol: str, df, formula_version: int, param_set: str = "default", price_mode: str = "qfq") -> int:
+        if df.empty:
+            return 0
+
+        def col(name: str) -> list:
+            return [None if pd.isna(v) else float(v) for v in df[name].tolist()] if name in df.columns else [None] * len(df)
+
+        times = [str(t) for t in df["time"].tolist()]
+        columns = ("trend_score", "trend_ma5", "trend_ma10", "price_direction", "confidence")
+        values = [col(name) for name in columns]
+        records = [
+            (symbol, times[i], param_set, *row_vals, price_mode, int(formula_version))
+            for i, row_vals in enumerate(zip(*values))
+        ]
+        with self._connect() as conn:
+            conn.execute(
+                "DELETE FROM trend_daily WHERE symbol = ? AND param_set = ?", (symbol, param_set)
+            )
+            conn.executemany(
+                """INSERT INTO trend_daily
+                   (symbol, time, param_set, trend_score, trend_ma5, trend_ma10,
+                    price_direction, confidence, price_mode, formula_version, updated_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)""",
+                records,
+            )
+        return len(records)
+
+    def load_indicator_latest(self, formula_version: int | None = None) -> dict[str, dict]:
+        """Latest indicator_daily row per symbol — one query for intraday overlays."""
+        query = """
+            SELECT t.* FROM indicator_daily t
+            JOIN (SELECT symbol, MAX(time) AS mt FROM indicator_daily GROUP BY symbol) m
+              ON t.symbol = m.symbol AND t.time = m.mt
+        """
+        params: list = []
+        if formula_version is not None:
+            query += " WHERE t.formula_version = ?"
+            params.append(int(formula_version))
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return {r["symbol"]: dict(r) for r in rows}
+
+    def load_trend_daily_bulk(self, since: str, param_set: str = "default", formula_version: int | None = None) -> list[dict]:
+        """All symbols' trend rows since a date — one bulk query for dashboards."""
+        query = """SELECT symbol, time, trend_score, trend_ma5, trend_ma10,
+                          price_direction, confidence
+                   FROM trend_daily WHERE param_set = ? AND time >= ?"""
+        params: list = [param_set, str(since)]
+        if formula_version is not None:
+            query += " AND formula_version = ?"
+            params.append(int(formula_version))
+        query += " ORDER BY symbol, time"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def load_trend_daily(self, symbol: str, param_set: str = "default", since: str | None = None):
+        import pandas as pd
+
+        query = "SELECT * FROM trend_daily WHERE symbol = ? AND param_set = ?"
+        params: list = [symbol, param_set]
+        if since is not None:
+            query += " AND time >= ?"
+            params.append(str(since))
+        query += " ORDER BY time"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        if not rows:
+            return pd.DataFrame()
+        return pd.DataFrame([dict(r) for r in rows])
+
+    def indicator_cache_info(self, symbol: str) -> dict:
+        """Coverage/version info used for staleness checks."""
+        with self._connect() as conn:
+            ind = conn.execute(
+                "SELECT COUNT(*) AS n, MAX(time) AS last, MAX(formula_version) AS ver FROM indicator_daily WHERE symbol = ?",
+                (symbol,),
+            ).fetchone()
+            trend = conn.execute(
+                "SELECT COUNT(*) AS n, MAX(time) AS last, MAX(formula_version) AS ver FROM trend_daily WHERE symbol = ? AND param_set = 'default'",
+                (symbol,),
+            ).fetchone()
+        return {
+            "indicator_rows": int(ind["n"] or 0),
+            "indicator_last": ind["last"],
+            "indicator_version": ind["ver"],
+            "trend_rows": int(trend["n"] or 0),
+            "trend_last": trend["last"],
+            "trend_version": trend["ver"],
+        }
+
+    def indicator_cache_symbols(self) -> set[str]:
+        with self._connect() as conn:
+            rows = conn.execute("SELECT DISTINCT symbol FROM indicator_daily").fetchall()
+        return {r["symbol"] for r in rows}
+
+    def indicator_global_version(self) -> int | None:
+        """MAX(formula_version) across indicator_daily; None when empty."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(formula_version) AS v FROM indicator_daily").fetchone()
+        return int(row["v"]) if row and row["v"] is not None else None
+
+    def clear_indicator_caches(self) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM indicator_daily")
+            conn.execute("DELETE FROM trend_daily")
 
 
 def init_db(db_path: str | Path = "data/trend_quant.db") -> Database:
