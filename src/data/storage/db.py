@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -431,6 +431,18 @@ class Database:
     def get_instrument_metadata_map(self) -> dict[str, dict]:
         return {item["symbol"]: item for item in self.list_instrument_metadata()}
 
+    def load_market_tail(self, days: int, price_mode: str = "qfq") -> list[dict]:
+        """Lean K-line tail for all symbols (no metadata join) — bulk overlay reads."""
+        table = self._market_table(price_mode)
+        cutoff = (datetime.now().date() - timedelta(days=days)).isoformat()
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"""SELECT symbol, time, open, high, low, close, volume
+                    FROM {table} WHERE time >= ? ORDER BY symbol, time""",
+                (cutoff,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def load_market_dashboard_history(self, days: int = 90) -> list[dict]:
         """Return recent adjusted daily bars for fully classified managed instruments."""
         with self._connect() as conn:
@@ -789,6 +801,21 @@ class Database:
                 records,
             )
         return len(records)
+
+    def load_indicator_latest(self, formula_version: int | None = None) -> dict[str, dict]:
+        """Latest indicator_daily row per symbol — one query for intraday overlays."""
+        query = """
+            SELECT t.* FROM indicator_daily t
+            JOIN (SELECT symbol, MAX(time) AS mt FROM indicator_daily GROUP BY symbol) m
+              ON t.symbol = m.symbol AND t.time = m.mt
+        """
+        params: list = []
+        if formula_version is not None:
+            query += " WHERE t.formula_version = ?"
+            params.append(int(formula_version))
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
+        return {r["symbol"]: dict(r) for r in rows}
 
     def load_trend_daily_bulk(self, since: str, param_set: str = "default", formula_version: int | None = None) -> list[dict]:
         """All symbols' trend rows since a date — one bulk query for dashboards."""
