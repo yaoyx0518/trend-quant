@@ -88,19 +88,10 @@ def daily_market_update_job(settings: Settings, data_service: DataService | None
                 max_retries=max(int(app_cfg.daily_update_max_retries), 1),
                 retry_interval_seconds=max(float(app_cfg.daily_update_retry_interval_seconds), 1.0),
             )
-            # Post-update: dividend detection, broken-history re-pull, and
-            # indicator cache rebuild for changed symbols.
-            from services.indicator_builder import run_post_update_pipeline
-
-            payload["indicator_rebuild"] = run_post_update_pipeline(
-                settings, service, payload, symbols, today
-            )
-            record_job_run_safely(
-                "indicator_rebuild",
-                payload["indicator_rebuild"],
-                run_date=today.isoformat(),
-                status=str(payload["indicator_rebuild"].get("status", "")),
-            )
+            # Post-update orchestration (dividend detection + indicator
+            # rebuild) lives in app.main's update_job — core must not
+            # depend on the services layer.
+            payload["symbols"] = symbols
         finally:
             if owns_service:
                 service.close()

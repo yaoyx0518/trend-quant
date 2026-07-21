@@ -55,6 +55,30 @@ async def lifespan(app: FastAPI):
             payload.get("failed", 0),
             payload.get("total", 0),
         )
+        if payload.get("status") == "skipped_non_trading_day":
+            return
+        # Post-update orchestration (dividend detection + indicator rebuild)
+        # lives here so that core/jobs stays free of services-layer imports.
+        from datetime import date as _date
+
+        from data.service import DataService
+        from data.storage.db import record_job_run_safely
+        from services.indicator_builder import run_post_update_pipeline
+
+        service = DataService(provider_priority=settings.app.data_provider_priority)
+        try:
+            pipeline = run_post_update_pipeline(
+                settings, service, payload, payload.get("symbols", []), _date.today()
+            )
+        finally:
+            service.close()
+        payload["indicator_rebuild"] = pipeline
+        record_job_run_safely(
+            "indicator_rebuild",
+            pipeline,
+            run_date=_date.today().isoformat(),
+            status=str(pipeline.get("status", "")),
+        )
 
     disable_scheduler = str(os.getenv("TREND_QUANT_DISABLE_SCHEDULER", "")).strip().lower() in {
         "1",

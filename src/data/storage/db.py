@@ -790,16 +790,18 @@ class Database:
             )
         return len(records)
 
-    def load_trend_daily_bulk(self, since: str, param_set: str = "default") -> list[dict]:
+    def load_trend_daily_bulk(self, since: str, param_set: str = "default", formula_version: int | None = None) -> list[dict]:
         """All symbols' trend rows since a date — one bulk query for dashboards."""
-        with self._connect() as conn:
-            rows = conn.execute(
-                """SELECT symbol, time, trend_score, trend_ma5, trend_ma10,
+        query = """SELECT symbol, time, trend_score, trend_ma5, trend_ma10,
                           price_direction, confidence
-                   FROM trend_daily WHERE param_set = ? AND time >= ?
-                   ORDER BY symbol, time""",
-                (param_set, str(since)),
-            ).fetchall()
+                   FROM trend_daily WHERE param_set = ? AND time >= ?"""
+        params: list = [param_set, str(since)]
+        if formula_version is not None:
+            query += " AND formula_version = ?"
+            params.append(int(formula_version))
+        query += " ORDER BY symbol, time"
+        with self._connect() as conn:
+            rows = conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
     def load_trend_daily(self, symbol: str, param_set: str = "default", since: str | None = None):
@@ -841,6 +843,12 @@ class Database:
         with self._connect() as conn:
             rows = conn.execute("SELECT DISTINCT symbol FROM indicator_daily").fetchall()
         return {r["symbol"] for r in rows}
+
+    def indicator_global_version(self) -> int | None:
+        """MAX(formula_version) across indicator_daily; None when empty."""
+        with self._connect() as conn:
+            row = conn.execute("SELECT MAX(formula_version) AS v FROM indicator_daily").fetchone()
+        return int(row["v"]) if row and row["v"] is not None else None
 
     def clear_indicator_caches(self) -> None:
         with self._connect() as conn:

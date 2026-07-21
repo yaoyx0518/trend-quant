@@ -23,10 +23,10 @@ from datetime import datetime
 import pandas as pd
 from mcp.server.fastmcp import FastMCP
 
-from app.instrument_display import format_symbol_display
-from services.instrument_admin import _config_name_map
+from core.display import format_symbol_display
+from core.display import load_instrument_name_map as _config_name_map
 from services.market_indicators import compute_market_indicators, trend_config as _trend_config
-from services.dashboard import build_subject_dashboard_payload
+from services.dashboard import RevisionCache, build_subject_dashboard_payload
 from core.calendar import is_realtime_available, is_trading_day
 from core.symbols import normalize_symbol as _normalize_symbol
 from core.strategy_config import get_strategy_config
@@ -91,10 +91,10 @@ def _category_path(meta: dict | None) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Dashboard cache (same strategy as subject_market.py)
+# Dashboard cache — shared RevisionCache from services.dashboard
 # ---------------------------------------------------------------------------
 
-_dashboard_cache: tuple[tuple[str, int, str], dict] | None = None
+_dashboard_cache = RevisionCache()
 
 
 # ---------------------------------------------------------------------------
@@ -117,14 +117,9 @@ def trend_dashboard() -> dict:
     数据来自本地日K库，最新一根K线通常是上一个交易日。
     如需当天实时数据请使用 intraday_dashboard。
     """
-    global _dashboard_cache
     db = get_db()
     revision = db.get_market_dashboard_revision()
-    if _dashboard_cache is not None and _dashboard_cache[0] == revision:
-        return _dashboard_cache[1]
-    payload = build_subject_dashboard_payload(db)
-    _dashboard_cache = (revision, payload)
-    return payload
+    return _dashboard_cache.get_or_compute(revision, lambda: build_subject_dashboard_payload(db))
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +161,7 @@ def intraday_dashboard(category: str = "") -> dict:
     if not symbols:
         return {"ok": False, "error": "本地无日K数据"}
 
-    # Filter to fully classified instruments (mirrors the web intraday job).
+    # Filter to fully classified instruments (same rule as the web intraday job).
     metadata_map = db.get_instrument_metadata_map()
     classified = [
         s for s in symbols
@@ -253,6 +248,7 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: b
         return [round(float(v), 4) if pd.notna(v) else None for v in series_like]
 
     n = min(requested, len(df))
+    full_df = df  # keep full history for the intraday trend computation
     df = df.tail(n).copy()
     dates_out = [str(d.date()) for d in df["time"]]
 
@@ -280,14 +276,16 @@ def symbol_detail(symbol: str, days: int = 60, rsi_period: int = 14, intraday: b
     }
     payload["meta"]["is_intraday"] = False
 
-    # --- Intraday overlay (mirrors market_view.get_market_daily) ----------
+    # --- Intraday overlay (synthetic bar from live quotes) ----------------
     # Gate on is_realtime_available (not is_trading_time) so the midday
     # lunch break still serves an intraday snapshot from live quotes.
     if intraday and is_realtime_available():
         try:
             quote = DataService().fetch_latest_quote(symbol)
             if quote and quote.get("price") is not None:
-                hist = df.copy()
+                # Intraday trend uses FULL history (same ruler as EOD), not
+                # the display-truncated window (kimi review §3.3).
+                hist = full_df.copy()
                 hist["time"] = pd.to_datetime(hist["time"], errors="coerce")
                 hist = (
                     hist.dropna(subset=["time", "open", "high", "low", "close"])

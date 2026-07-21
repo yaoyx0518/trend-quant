@@ -6,12 +6,16 @@ from __future__ import annotations
 
 from datetime import date, datetime
 
+import logging
+
 import pandas as pd
 
-from app.instrument_display import load_instrument_name_map
+from core.display import load_instrument_name_map
 from core.benchmarks import benchmark_instruments
 from core.symbols import normalize_symbol, symbol_suffix, symbol_to_code
 from data.storage.db import get_db
+
+logger = logging.getLogger(__name__)
 
 def _to_date(text: str, fallback: date) -> date:
     raw = str(text or "").strip()

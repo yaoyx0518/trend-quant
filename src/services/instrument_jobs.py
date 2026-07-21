@@ -16,6 +16,7 @@ from fastapi import HTTPException
 
 from data.service import DataService
 from data.storage.db import get_db, record_job_run_safely
+from services.indicator_builder import rebuild_after_backfill
 from services.instrument_admin import (
     _append_instrument_config,
     _build_new_instrument_record,
@@ -254,6 +255,13 @@ class BulkBackfillJobManager:
                         f"新增 {int(summary.get('added_rows', 0)):,} 行。"
                     )
                 final_status = self._copy_status()
+            updated_symbols = [
+                str((r.get("result") or {}).get("symbol") or "").strip().upper()
+                for r in (self._status.get("results") or [])
+                if r.get("ok") and str((r.get("result") or {}).get("status") or "") == "updated"
+            ]
+            if updated_symbols and not all_failed:
+                rebuild_after_backfill(updated_symbols)
             record_job_run_safely(
                 "instrument_bulk_backfill", final_status, status=str(final_status.get("status") or "")
             )
@@ -446,6 +454,8 @@ class InstrumentAddJobManager:
                 )
                 self._status["result"] = result
                 final_status = self._copy_status()
+            if str(result.get("status") or "") not in ("error", "no_data"):
+                rebuild_after_backfill([symbol])
             record_job_run_safely("instrument_add", final_status, status=str(final_status.get("status") or ""))
         except Exception as exc:
             logger.exception("Instrument add job_id=%s failed for %s", job_id, symbol)

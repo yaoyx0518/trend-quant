@@ -1,24 +1,11 @@
-"""Unit tests for data.provider_utils — symbol normalization and OHLCV standardisation."""
+"""Unit tests for data.provider_utils — OHLCV standardisation helpers."""
 
 from __future__ import annotations
 
 import pandas as pd
 import pytest
 
-from data.provider_utils import normalize_symbol, safe_float, standardize_ohlcv, parse_minute_period
-
-
-class TestNormalizeSymbol:
-    def test_strips_exchange_suffix(self) -> None:
-        assert normalize_symbol("510300.SS") == "510300"
-        assert normalize_symbol("300760.SZ") == "300760"
-        assert normalize_symbol("600276.SH") == "600276"
-
-    def test_no_suffix_passes_through(self) -> None:
-        assert normalize_symbol("510300") == "510300"
-
-    def test_empty_string(self) -> None:
-        assert normalize_symbol("") == ""
+from data.provider_utils import safe_float, standardize_ohlcv, parse_minute_period
 
 
 class TestSafeFloat:

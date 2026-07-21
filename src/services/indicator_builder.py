@@ -21,6 +21,8 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
+import pandas as pd
+
 from audit.app_logger import get_logger
 from core.indicators import INDICATOR_FORMULA_VERSION
 from core.strategy_config import get_strategy_config
@@ -103,12 +105,24 @@ def rebuild_all(symbols: list[str] | None = None, trend_cfg: dict | None = None,
 
 
 def rebuild_if_needed(db=None) -> dict:
-    """Startup check: rebuild everything when params/formula drifted."""
+    """Startup check: rebuild everything when params/formula drifted.
+
+    Both formula versions are checked independently (D5): the trend param-set
+    registry guards TREND_FORMULA_VERSION, and indicator_daily's own version
+    column guards INDICATOR_FORMULA_VERSION (kimi review §2.3).
+    """
     db = db or get_db()
     cfg = get_strategy_config()
-    if not default_param_set_needs_rebuild(cfg, db=db):
+    trend_stale = default_param_set_needs_rebuild(cfg, db=db)
+    indicator_version = db.indicator_global_version()
+    indicator_stale = indicator_version is None or int(indicator_version) != INDICATOR_FORMULA_VERSION
+    if not trend_stale and not indicator_stale:
         return {"status": "up_to_date"}
-    logger.info("Trend params or formula version changed — full indicator rebuild scheduled")
+    logger.info(
+        "Formula/params changed (trend_stale=%s, indicator_stale=%s) — full indicator rebuild scheduled",
+        trend_stale,
+        indicator_stale,
+    )
     db.backup_to()
     result = rebuild_all(trend_cfg=cfg, db=db)
     result["status"] = "rebuilt"
@@ -153,18 +167,46 @@ def detect_adjustment_breaks(symbols: list[str], data_service, end_date: date, l
 
 
 def repair_broken_symbols(symbols: list[str], data_service, start_date: date, end_date: date) -> list[dict]:
-    """Full history re-pull for symbols with detected adjustment breaks."""
+    """Full history re-pull for symbols with detected adjustment breaks.
+
+    The re-pull must start at the symbol's earliest stored date: qfq
+    adjustment retroactively rewrites ALL history, and upsert alone cannot
+    repair a broken prefix older than the fetch start (kimi review §2.2).
+    """
     results = []
     for symbol in symbols:
         try:
+            stored = data_service.market_store.load_history(symbol)
+            symbol_start = start_date
+            if not stored.empty and "time" in stored.columns:
+                times = pd.to_datetime(stored["time"], errors="coerce").dropna()
+                if not times.empty:
+                    symbol_start = min(start_date, times.min().date())
             result = data_service.backfill_daily_history(
-                symbol=symbol, start_date=start_date, end_date=end_date, adjust="qfq"
+                symbol=symbol, start_date=symbol_start, end_date=end_date, adjust="qfq"
             )
             results.append(result)
             logger.info("Re-pulled full history for %s after adjustment break: %s", symbol, result.get("status"))
         except Exception:
             logger.exception("Failed to re-pull history for %s", symbol)
     return results
+
+
+def rebuild_after_backfill(symbols: list[str], db=None) -> dict:
+    """Best-effort cache rebuild after instrument add/backfill jobs.
+
+    Keeps caches fresh outside the daily 16:30 pipeline so dashboards never
+    fall into the stale-cache fallback path after manual backfills.
+    """
+    db = db or get_db()
+    try:
+        trend_cfg = get_strategy_config()
+        result = rebuild_all(symbols=symbols, trend_cfg=trend_cfg, db=db)
+        logger.info("Post-backfill indicator rebuild for %s: %s", symbols, result)
+        return result
+    except Exception:
+        logger.exception("Post-backfill indicator rebuild failed for %s", symbols)
+        return {"status": "failed", "symbols": symbols}
 
 
 def run_post_update_pipeline(settings, data_service, update_payload: dict, symbols: list[str], end_date: date, db=None) -> dict:

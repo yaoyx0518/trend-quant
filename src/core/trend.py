@@ -287,3 +287,97 @@ def calculate_trend_score_snapshot(
         "ma_mid": safe_float(last["ma_mid"]),
         "calc_details": calc_details,
     }
+
+
+def _detect_trend_phase(
+    trend_scores: list[float | None],
+    trend_ma5: list[float | None],
+    closes: list[float | None],
+    dates: list[str],
+) -> dict:
+    """Detect the current trend phase and its start date.
+
+    Uses the last bar's trend_score and MA5 to determine the current
+    phase ("start" / "end"), then walks backwards to find the transition
+    bar where this phase began.  Returns None if the current bar is in
+    neither state.
+
+    - 趋势启动 (start): trend_score >= 5  AND  trend_ma5 >= 0
+    - 趋势结束 (end):   trend_score <= -5 AND  trend_ma5 <= 0
+
+    Returns a dict with keys:
+      phase: "start" | "end" | None
+      days:  int (the transition bar is day 1)
+      change_pct: float (transition close → latest close % change)
+      signal_date: str (ISO date of the transition bar)
+    """
+    default: dict = {
+        "phase": None,
+        "days": None,
+        "change_pct": None,
+        "signal_date": None,
+    }
+    n = len(trend_scores)
+    if n < 5:
+        return default
+
+    # Scan backwards from the latest bar to find the most recent signal.
+    # Skip bars that are NEITHER (don't satisfy either condition).
+    latest_idx = n - 1
+    phase = None
+    scan_idx = -1
+    for i in range(n - 1, 3, -1):
+        ts = trend_scores[i]
+        ma5 = trend_ma5[i]
+        if ts is None or ma5 is None:
+            continue
+        if ts >= 5 and ma5 >= 0:
+            phase = "start"
+            scan_idx = i
+            break
+        if ts <= -5 and ma5 <= 0:
+            phase = "end"
+            scan_idx = i
+            break
+    if phase is None:
+        return default  # no signal found at all
+
+    latest_close = closes[latest_idx] if latest_idx < len(closes) else None
+    if latest_close is None or latest_close <= 0:
+        return default
+
+    # Walk backwards from scan_idx to find where this phase started
+    # (the transition point — first bar where the condition became true).
+    signal_idx = scan_idx
+    for j in range(scan_idx - 1, 3, -1):
+        prev_ts = trend_scores[j]
+        prev_ma5 = trend_ma5[j]
+        if prev_ts is None or prev_ma5 is None:
+            break
+        if phase == "start":
+            if prev_ts >= 5 and prev_ma5 >= 0:
+                signal_idx = j  # still in same phase — move start earlier
+            else:
+                break  # phase started at signal_idx
+        else:  # phase == "end"
+            if prev_ts <= -5 and prev_ma5 <= 0:
+                signal_idx = j
+            else:
+                break
+
+    signal_close = closes[signal_idx] if signal_idx < len(closes) else None
+    if signal_close is None or signal_close <= 0:
+        return default
+
+    # Days: transition bar is day 1, counted to the latest bar.
+    days = latest_idx - signal_idx + 1
+    change_pct = round((latest_close / signal_close - 1.0) * 100.0, 2)
+    signal_date = dates[signal_idx] if signal_idx < len(dates) else None
+
+    return {
+        "phase": phase,
+        "days": days,
+        "change_pct": change_pct,
+        "signal_date": signal_date,
+    }
+

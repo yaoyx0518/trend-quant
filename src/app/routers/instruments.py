@@ -28,6 +28,7 @@ from services.instrument_admin import (
     _symbol_to_code,
     _to_date,
 )
+from services.indicator_builder import rebuild_after_backfill
 from services.instrument_jobs import add_instrument_manager, bulk_backfill_manager
 
 router = APIRouter(prefix="/instruments", tags=["instruments"])
@@ -428,6 +429,8 @@ async def backfill_instrument(symbol: str, payload: InstrumentBackfillRequest, r
 
     stamp = datetime.now().strftime("%Y%m%d%H%M%S")
     result["job_stamp"] = stamp
+    if str(result.get("status") or "") == "updated":
+        rebuild_after_backfill([normalized_symbol])
     record_job_run_safely("instrument_backfill", result, status=str(result.get("status") or ""))
     return {"ok": True, "result": result}
 
