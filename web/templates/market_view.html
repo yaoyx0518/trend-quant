@@ -789,7 +789,7 @@
 
   function macdCrossSignals(dates, dif, dea) {
     // Detect DIF/DEA crosses; golden (金叉) = DIF crosses up through DEA,
-    // death (死叉) = DIF crosses down. Arrows sit just off the cross point.
+    // death (死叉) = DIF crosses down. Arrows sit close to the cross point.
     const d = dif || [];
     const e = dea || [];
     const fin = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
@@ -799,7 +799,7 @@
     }
     if (!vals.length) return { golden: [], death: [] };
     const span = Math.max(...vals) - Math.min(...vals);
-    const pad = span > 0 ? span * 0.12 : Math.max(Math.abs(vals[0]) * 0.1, 1e-4);
+    const pad = span > 0 ? span * 0.04 : Math.max(Math.abs(vals[0]) * 0.04, 1e-4);
 
     const golden = [];
     const death = [];
@@ -810,10 +810,11 @@
       const dCur = Number(d[i]);
       const eCur = Number(e[i]);
       const date = dates[i];
+      const cross = (dCur + eCur) / 2;  // 交叉点近似取两线中点
       if (dPrev <= ePrev && dCur > eCur) {
-        golden.push([date, Math.min(dCur, eCur) - pad]);
+        golden.push([date, cross - pad]);
       } else if (dPrev >= ePrev && dCur < eCur) {
-        death.push([date, Math.max(dCur, eCur) + pad]);
+        death.push([date, cross + pad]);
       }
     }
     return { golden, death };
@@ -826,13 +827,11 @@
       data,
       symbol: 'triangle',
       symbolRotate: rotate,
-      symbolSize: 11,
+      symbolSize: 10,
       itemStyle: {
         color,
-        borderColor: '#ffffff',
-        borderWidth: 1.2,
-        shadowBlur: 4,
-        shadowColor: 'rgba(17, 35, 42, 0.25)',
+        borderColor: 'rgba(255, 255, 255, 0.9)',
+        borderWidth: 0.8,
       },
       emphasis: { scale: 1.4 },
       z: 8,
@@ -878,8 +877,9 @@
         { name: 'MACD', type: 'bar', data: bars, barMaxWidth: 8 },
         { name: 'DIF', type: 'line', data: macd.dif || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#2563eb' }, itemStyle: { color: '#2563eb' } },
         { name: 'DEA', type: 'line', data: macd.dea || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#c7834c' }, itemStyle: { color: '#c7834c' } },
-        macdSignalSeries('金叉', signals.golden, '#d14343', 0),
-        macdSignalSeries('死叉', signals.death, '#00a76f', 180),
+        // 金叉暖橙红 / 死叉深青绿：与红绿柱 (#d14343 / #00a76f) 同族但可区分
+        macdSignalSeries('金叉', signals.golden, '#c2410c', 0),
+        macdSignalSeries('死叉', signals.death, '#0f766e', 180),
       ],
     }, true);
   }

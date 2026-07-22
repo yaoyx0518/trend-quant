@@ -37,8 +37,9 @@ def bull_db(test_db):
 def _buy_inputs(bars: pd.DataFrame, idx: int = -3) -> tuple[str, float]:
     row = bars.iloc[idx]
     buy_date = str(row["time"])[:10]
-    # 买入价刻意偏离当日收盘价 —— 手工买入通常不是收盘价成交
-    buy_price = round(float(row["close"]) * 0.97, 4)
+    # 买入价刻意偏离当日收盘价 —— 手工买入通常不是收盘价成交；
+    # 但必须落在当日 [low, high] 区间内（买入价合理性校验）。
+    buy_price = round((float(row["low"]) + float(row["close"])) / 2, 4)
     return buy_date, buy_price
 
 
@@ -113,6 +114,33 @@ class TestComputeStopLoss:
         buy_date, _ = _buy_inputs(bars)
         with pytest.raises(sl.StopLossError, match="大于 0"):
             sl.compute_stop_loss("510300.SS", buy_date, 0.0, db=db)
+
+    def test_price_below_day_low_raises(self, bull_db) -> None:
+        """买入价低于买入日最低价 → 拒绝。"""
+        db, bars = bull_db
+        row = bars.iloc[-3]
+        buy_date = str(row["time"])[:10]
+        too_low = round(float(row["low"]) - 0.01, 4)
+        with pytest.raises(sl.StopLossError, match="当日价格区间"):
+            sl.compute_stop_loss("510300.SS", buy_date, too_low, db=db)
+
+    def test_price_above_day_high_raises(self, bull_db) -> None:
+        """买入价高于买入日最高价 → 拒绝，报错信息含区间。"""
+        db, bars = bull_db
+        row = bars.iloc[-3]
+        buy_date = str(row["time"])[:10]
+        too_high = round(float(row["high"]) + 0.01, 4)
+        with pytest.raises(sl.StopLossError, match="当日价格区间"):
+            sl.compute_stop_loss("510300.SS", buy_date, too_high, db=db)
+
+    def test_price_at_day_bounds_accepted(self, bull_db) -> None:
+        """买入价恰为当日最高/最低价（边界）→ 接受。"""
+        db, bars = bull_db
+        row = bars.iloc[-3]
+        buy_date = str(row["time"])[:10]
+        for price in (float(row["low"]), float(row["high"])):
+            out = sl.compute_stop_loss("510300.SS", buy_date, round(price, 4), db=db)
+            assert out["buy_price"] == pytest.approx(round(price, 4))
 
 
 class TestComputeStopLossIntraday:

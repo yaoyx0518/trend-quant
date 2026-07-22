@@ -37,8 +37,9 @@ class TestComputeManualTrade:
         db, bars = bull_db
         row = bars.iloc[-3]
         buy_date = str(row["time"])[:10]
-        # 买入价刻意偏离当日收盘价 —— 手工买入通常不是收盘价成交
-        buy_price = round(float(row["close"]) * 0.97, 4)
+        # 买入价刻意偏离当日收盘价 —— 手工买入通常不是收盘价成交；
+        # 但须落在当日 [low, high] 区间内（买入价合理性校验）
+        buy_price = round((float(row["low"]) + float(row["close"])) / 2, 4)
 
         out = mt.compute_manual_trade("510300", buy_date, buy_price, db=db)
 
@@ -96,7 +97,7 @@ class TestComputeManualTrade:
         db, bars = bull_db
         row = bars.iloc[-3]
         buy_date = str(row["time"])[:10]
-        buy_price = round(float(row["close"]) * 0.97, 4)
+        buy_price = round((float(row["low"]) + float(row["close"])) / 2, 4)
         eod = mt.compute_manual_trade("510300.SS", buy_date, buy_price, db=db)
         assert eod["is_intraday"] is False
 

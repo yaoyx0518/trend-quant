@@ -14,25 +14,18 @@
     </label>
     <button id="mtEvaluateBtn" type="button">计算</button>
   </div>
+  <div id="mtPriceHint" class="mt-price-hint" hidden></div>
   <div id="mtMessage" class="instrument-form-message" hidden></div>
 
   <div id="mtResult" hidden>
     <div class="viz-panel">
       <h3 id="mtSummaryTitle">止损价</h3>
-      <div class="table-shell">
-        <table class="backtest-metrics-table">
-          <tbody id="mtStopRows"></tbody>
-        </table>
-      </div>
+      <div class="mt-stat-grid" id="mtStopStats"></div>
     </div>
 
     <div class="viz-panel">
       <h3>持仓指标</h3>
-      <div class="table-shell">
-        <table class="backtest-metrics-table">
-          <tbody id="mtHoldingRows"></tbody>
-        </table>
-      </div>
+      <div class="mt-stat-grid" id="mtHoldingStats"></div>
     </div>
   </div>
 </section>
@@ -44,11 +37,16 @@
   const buyDateEl = document.getElementById('mtBuyDate');
   const buyPriceEl = document.getElementById('mtBuyPrice');
   const evaluateBtn = document.getElementById('mtEvaluateBtn');
+  const priceHintEl = document.getElementById('mtPriceHint');
   const messageEl = document.getElementById('mtMessage');
   const resultEl = document.getElementById('mtResult');
   const summaryTitleEl = document.getElementById('mtSummaryTitle');
-  const stopRowsEl = document.getElementById('mtStopRows');
-  const holdingRowsEl = document.getElementById('mtHoldingRows');
+  const stopStatsEl = document.getElementById('mtStopStats');
+  const holdingStatsEl = document.getElementById('mtHoldingStats');
+
+  // 当日价格区间缓存：{date, low, high, close}，用于提示与前端即时校验
+  let dayRange = null;
+  let rangeRequestSeq = 0;
 
   function esc(text) {
     return String(text ?? '').replace(/[&<>"']/g, function(ch) {
@@ -75,13 +73,17 @@
     return Number(v) > 0 ? 'metric-positive' : (Number(v) < 0 ? 'metric-negative' : '');
   }
 
-  function renderRows(tbody, rows) {
-    tbody.innerHTML = rows.map(function(row) {
-      const value = row.cls
-        ? '<span class="' + row.cls + '">' + esc(row.value) + '</span>'
-        : esc(row.value);
-      const note = row.note ? ' <span class="manual-trade-note">' + esc(row.note) + '</span>' : '';
-      return '<tr><th>' + esc(row.label) + '</th><td>' + value + note + '</td></tr>';
+  function renderStats(container, stats) {
+    container.innerHTML = stats.map(function(stat) {
+      const cls = ['mt-stat'];
+      if (stat.primary) cls.push('mt-stat-primary');
+      const valueCls = 'mt-stat-value' + (stat.cls ? ' ' + stat.cls : '');
+      const note = stat.note ? '<span class="mt-stat-note">' + esc(stat.note) + '</span>' : '';
+      return '<div class="' + cls.join(' ') + '">' +
+        '<span class="mt-stat-label">' + esc(stat.label) + '</span>' +
+        '<span class="' + valueCls + '">' + esc(stat.value) + '</span>' +
+        note +
+        '</div>';
     }).join('');
   }
 
@@ -98,6 +100,47 @@
     }
   }
 
+  // 标的 + 买入日期填好后，拉取当日K线提示价格区间（后端仍会强制校验）
+  async function refreshDayRange() {
+    const symbol = symbolEl.value.trim();
+    const buyDate = buyDateEl.value;
+    dayRange = null;
+    priceHintEl.hidden = true;
+    if (!symbol || !buyDate) return;
+    const seq = ++rangeRequestSeq;
+    try {
+      const params = new URLSearchParams({
+        symbol: symbol, start_date: buyDate, end_date: buyDate, limit: '1', intraday: 'false',
+      });
+      const resp = await fetch('/market-view/api/daily?' + params.toString());
+      const data = await resp.json();
+      if (seq !== rangeRequestSeq) return;  // 输入已变化，丢弃过期响应
+      if (!resp.ok) {
+        priceHintEl.textContent = data.detail || '无法获取当日行情';
+        priceHintEl.hidden = false;
+        return;
+      }
+      const candle = (data.candles || [])[0];  // [open, close, low, high]
+      if (!candle) {
+        priceHintEl.textContent = buyDate + ' 无K线数据（非交易日或未入库），买入价将按下一交易日口径计算';
+        priceHintEl.hidden = false;
+        return;
+      }
+      dayRange = { date: buyDate, low: Number(candle[2]), high: Number(candle[3]), close: Number(candle[1]) };
+      priceHintEl.innerHTML = buyDate + ' 价格区间：<b>' + esc(fmtPrice(dayRange.low)) + ' ~ ' +
+        esc(fmtPrice(dayRange.high)) + '</b>（收盘 ' + esc(fmtPrice(dayRange.close)) + '），买入价需落在区间内';
+      priceHintEl.hidden = false;
+    } catch (err) {
+      // 提示获取失败不阻塞计算，后端会兜底校验
+    }
+  }
+
+  let rangeDebounce = null;
+  function scheduleRangeRefresh() {
+    clearTimeout(rangeDebounce);
+    rangeDebounce = setTimeout(refreshDayRange, 350);
+  }
+
   async function evaluate() {
     const symbol = symbolEl.value.trim();
     const buyDate = buyDateEl.value;
@@ -105,6 +148,12 @@
     if (!symbol) { showMessage('请输入标的代码', true); return; }
     if (!buyDate) { showMessage('请选择买入日期', true); return; }
     if (!(buyPrice > 0)) { showMessage('请输入大于 0 的买入价格', true); return; }
+    if (dayRange && dayRange.date === buyDate &&
+        (buyPrice < dayRange.low || buyPrice > dayRange.high)) {
+      showMessage('买入价格 ' + fmtPrice(buyPrice) + ' 超出 ' + buyDate + ' 当日价格区间 [' +
+        fmtPrice(dayRange.low) + ', ' + fmtPrice(dayRange.high) + ']', true);
+      return;
+    }
 
     evaluateBtn.disabled = true;
     showMessage('计算中…', false);
@@ -135,11 +184,12 @@
     summaryTitleEl.textContent = '止损价 — ' + title +
       (data.is_intraday ? '（含今日盘中实时数据 ' + intradayTime + '）' : '');
 
-    renderRows(stopRowsEl, [
+    renderStats(stopStatsEl, [
       {
         label: '硬止损价',
         value: fmtPrice(stops.hard_stop_price),
         cls: stops.hard_stop_triggered ? 'metric-positive' : '',
+        primary: true,
         note: '买入价 − ' + stops.hard_stop_atr_mul + '×ATR(买入日)，' + fmtPct(stops.hard_stop_pct) +
           (stops.hard_stop_triggered
             ? '；⚠️ 已于 ' + stops.hard_stop_trigger_date + ' 被击穿'
@@ -149,6 +199,7 @@
         label: '吊灯止损价',
         value: fmtPrice(stops.chandelier_stop_price),
         cls: stops.chandelier_stop_triggered ? 'metric-positive' : '',
+        primary: true,
         note: '买入以来最高价 − ' + stops.chandelier_stop_atr_mul + '×ATR(最新)，距最高价 ' +
           fmtPct(stops.chandelier_stop_pct_from_high) +
           (stops.chandelier_stop_triggered ? '；⚠️ 最新价已跌破' : '；未跌破'),
@@ -173,7 +224,7 @@
       },
     ]);
 
-    renderRows(holdingRowsEl, [
+    renderStats(holdingStatsEl, [
       {
         label: '持有交易日数',
         value: String(holding.hold_days),
@@ -203,9 +254,12 @@
       if (ev.key === 'Enter') evaluate();
     });
   });
+  symbolEl.addEventListener('change', scheduleRangeRefresh);
+  buyDateEl.addEventListener('change', scheduleRangeRefresh);
 
   buyDateEl.value = new Date().toISOString().slice(0, 10);
   loadSymbolOptions();
+  refreshDayRange();
 })();
 </script>
 {% endblock %}

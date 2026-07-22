@@ -135,6 +135,19 @@ def compute_stop_loss(
         df = df[df["time"] < today]  # 防御：剔除可能已存在的当日行
         df = pd.concat([df, pd.DataFrame([synth])], ignore_index=True)
 
+    # 买入价合理性校验：必须落在买入日当根K线的最高/最低价之间。
+    # 买入日为非交易日（无当根K线）时跳过 —— 历史行为允许非交易日买入。
+    day_bars = df[df["time"].dt.normalize() == buy_ts]
+    if not day_bars.empty:
+        day_low = safe_float(pd.to_numeric(day_bars["low"], errors="coerce").iloc[0], 0.0)
+        day_high = safe_float(pd.to_numeric(day_bars["high"], errors="coerce").iloc[0], 0.0)
+        eps = max(1e-4, abs(day_high) * 1e-6)
+        if day_low > 0 and day_high > 0 and not (day_low - eps <= buy_price <= day_high + eps):
+            raise StopLossError(
+                f"买入价格 {buy_price} 超出 {buy_date} 当日价格区间 "
+                f"[{round(day_low, 4)}, {round(day_high, 4)}]"
+            )
+
     # ATR at buy date (look back up to and including buy_date)
     atr_at_buy = current_atr
     subset = atr_series[atr_series.index <= buy_ts]

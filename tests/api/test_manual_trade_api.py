@@ -38,18 +38,20 @@ class TestManualTradePage:
 class TestManualTradeEvaluateApi:
     def test_evaluate_ok(self, client, populated_db) -> None:
         _, bars = populated_db
-        buy_date = str(bars.iloc[-3]["time"])[:10]
+        row = bars.iloc[-3]
+        buy_date = str(row["time"])[:10]
+        buy_price = round(float(row["close"]), 4)
 
         resp = client.post(
             "/manual-trade/api/evaluate",
-            json={"symbol": "510300", "buy_date": buy_date, "buy_price": 10.5},
+            json={"symbol": "510300", "buy_date": buy_date, "buy_price": buy_price},
         )
 
         assert resp.status_code == 200
         data = resp.json()
         assert data["symbol"] == "510300.SS"
         assert data["name"] == "沪深300"
-        assert data["stops"]["hard_stop_price"] < 10.5
+        assert data["stops"]["hard_stop_price"] < buy_price
         assert data["stops"]["chandelier_stop_price"] > 0
         assert data["holding"]["hold_days"] >= 1
         assert "max_drawdown" in data["holding"]
@@ -82,9 +84,25 @@ class TestManualTradeEvaluateApi:
         resp = client.post("/manual-trade/api/evaluate", json={"symbol": "510300"})
         assert resp.status_code == 422
 
+    def test_evaluate_price_out_of_day_range_400(self, client, populated_db) -> None:
+        """买入价超出买入日 [low, high] 区间 → 400，报错含区间。"""
+        _, bars = populated_db
+        row = bars.iloc[-3]
+        buy_date = str(row["time"])[:10]
+        too_high = round(float(row["high"]) + 0.5, 4)
+
+        resp = client.post(
+            "/manual-trade/api/evaluate",
+            json={"symbol": "510300", "buy_date": buy_date, "buy_price": too_high},
+        )
+        assert resp.status_code == 400
+        assert "当日价格区间" in resp.json()["detail"]
+
     def test_evaluate_intraday_overlay(self, client, populated_db, monkeypatch) -> None:
         _, bars = populated_db
-        buy_date = str(bars.iloc[-3]["time"])[:10]
+        row = bars.iloc[-3]
+        buy_date = str(row["time"])[:10]
+        buy_price = round(float(row["close"]), 4)
         last_close = float(bars.iloc[-1]["close"])
         monkeypatch.setattr(
             sl,
@@ -102,7 +120,7 @@ class TestManualTradeEvaluateApi:
 
         resp = client.post(
             "/manual-trade/api/evaluate",
-            json={"symbol": "510300", "buy_date": buy_date, "buy_price": 10.5},
+            json={"symbol": "510300", "buy_date": buy_date, "buy_price": buy_price},
         )
 
         assert resp.status_code == 200
