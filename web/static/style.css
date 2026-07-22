@@ -3388,3 +3388,14 @@ details > summary::marker {
     width: 90px;
   }
 }
+
+/* ── 手工交易页 ─────────────────────────────────────────────── */
+.manual-trade-page .viz-panel {
+  margin-top: 16px;
+}
+
+.manual-trade-note {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}

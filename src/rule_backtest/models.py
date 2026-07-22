@@ -7,7 +7,7 @@ from typing import Literal
 
 
 PriceField = Literal["open", "high", "low", "close", "volume", "amount"]
-Operator = Literal[">=", "<="]
+Operator = Literal[">=", "<=", "cross_above", "cross_below"]
 InstrumentType = Literal["etf", "stock"]
 
 

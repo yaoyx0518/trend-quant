@@ -506,6 +506,8 @@ function addCondition(side, condition = null) {
     <select class="rule-operator">
       <option value=">=">&gt;=</option>
       <option value="<=">&lt;=</option>
+      <option value="cross_above">上穿(金叉)</option>
+      <option value="cross_below">下穿(死叉)</option>
     </select>
     <div class="rule-value-editor" data-side="right">
       ${valueEditorHtml("right")}
@@ -602,7 +604,8 @@ function setValueEditor(editor, value = {}) {
 
 function setConditionRowValue(row, condition = {}) {
   const operatorEl = row.querySelector(".rule-operator");
-  operatorEl.value = condition.operator === "<=" ? "<=" : ">=";
+  const OPERATORS = [">=", "<=", "cross_above", "cross_below"];
+  operatorEl.value = OPERATORS.includes(condition.operator) ? condition.operator : ">=";
   setValueEditor(row.querySelector('.rule-value-editor[data-side="left"]'), condition.left || {});
   setValueEditor(row.querySelector('.rule-value-editor[data-side="right"]'), condition.right || {});
 }

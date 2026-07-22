@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-panel manual-trade-page">
+  <div class="bt-form-row manual-trade-form">
+    <label>标的代码
+      <input id="mtSymbol" type="text" list="mtSymbolOptions" placeholder="如 510300 或 510300.SS" autocomplete="off">
+      <datalist id="mtSymbolOptions"></datalist>
+    </label>
+    <label>买入日期
+      <input id="mtBuyDate" type="date">
+    </label>
+    <label>买入价格
+      <input id="mtBuyPrice" type="number" min="0" step="0.0001" placeholder="如 4.025">
+    </label>
+    <button id="mtEvaluateBtn" type="button">计算</button>
+  </div>
+  <div id="mtMessage" class="instrument-form-message" hidden></div>
+
+  <div id="mtResult" hidden>
+    <div class="viz-panel">
+      <h3 id="mtSummaryTitle">止损价</h3>
+      <div class="table-shell">
+        <table class="backtest-metrics-table">
+          <tbody id="mtStopRows"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="viz-panel">
+      <h3>持仓指标</h3>
+      <div class="table-shell">
+        <table class="backtest-metrics-table">
+          <tbody id="mtHoldingRows"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function() {
+  const symbolEl = document.getElementById('mtSymbol');
+  const symbolOptionsEl = document.getElementById('mtSymbolOptions');
+  const buyDateEl = document.getElementById('mtBuyDate');
+  const buyPriceEl = document.getElementById('mtBuyPrice');
+  const evaluateBtn = document.getElementById('mtEvaluateBtn');
+  const messageEl = document.getElementById('mtMessage');
+  const resultEl = document.getElementById('mtResult');
+  const summaryTitleEl = document.getElementById('mtSummaryTitle');
+  const stopRowsEl = document.getElementById('mtStopRows');
+  const holdingRowsEl = document.getElementById('mtHoldingRows');
+
+  function esc(text) {
+    return String(text ?? '').replace(/[&<>"']/g, function(ch) {
+      return {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[ch];
+    });
+  }
+
+  function showMessage(text, isError) {
+    messageEl.textContent = text;
+    messageEl.classList.toggle('is-error', !!isError);
+    messageEl.hidden = !text;
+  }
+
+  function fmtPrice(v) {
+    return Number(v).toFixed(4).replace(/0+$/, '').replace(/\.$/, '.0');
+  }
+
+  function fmtPct(v) {
+    const n = Number(v);
+    return (n > 0 ? '+' : '') + n.toFixed(2) + '%';
+  }
+
+  function pctClass(v) {
+    return Number(v) > 0 ? 'metric-positive' : (Number(v) < 0 ? 'metric-negative' : '');
+  }
+
+  function renderRows(tbody, rows) {
+    tbody.innerHTML = rows.map(function(row) {
+      const value = row.cls
+        ? '<span class="' + row.cls + '">' + esc(row.value) + '</span>'
+        : esc(row.value);
+      const note = row.note ? ' <span class="manual-trade-note">' + esc(row.note) + '</span>' : '';
+      return '<tr><th>' + esc(row.label) + '</th><td>' + value + note + '</td></tr>';
+    }).join('');
+  }
+
+  async function loadSymbolOptions() {
+    try {
+      const resp = await fetch('/market-view/api/symbols');
+      const data = await resp.json();
+      if (!resp.ok) return;
+      symbolOptionsEl.innerHTML = (data.items || []).map(function(item) {
+        return '<option value="' + esc(item.symbol) + '">' + esc(item.display_name || item.name || '') + '</option>';
+      }).join('');
+    } catch (err) {
+      // 代码提示加载失败不影响手动输入
+    }
+  }
+
+  async function evaluate() {
+    const symbol = symbolEl.value.trim();
+    const buyDate = buyDateEl.value;
+    const buyPrice = parseFloat(buyPriceEl.value);
+    if (!symbol) { showMessage('请输入标的代码', true); return; }
+    if (!buyDate) { showMessage('请选择买入日期', true); return; }
+    if (!(buyPrice > 0)) { showMessage('请输入大于 0 的买入价格', true); return; }
+
+    evaluateBtn.disabled = true;
+    showMessage('计算中…', false);
+    try {
+      const resp = await fetch('/manual-trade/api/evaluate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({symbol: symbol, buy_date: buyDate, buy_price: buyPrice}),
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data.detail || '计算失败');
+      renderResult(data);
+      showMessage('', false);
+    } catch (err) {
+      resultEl.hidden = true;
+      showMessage(err.message || '计算失败', true);
+    } finally {
+      evaluateBtn.disabled = false;
+    }
+  }
+
+  function renderResult(data) {
+    const stops = data.stops || {};
+    const holding = data.holding || {};
+    const title = (data.name ? data.name + ' ' : '') + data.symbol +
+      ' · ' + data.buy_date + ' 买入 @ ' + fmtPrice(data.buy_price);
+    const intradayTime = data.intraday_ts ? String(data.intraday_ts).slice(11, 16) : '';
+    summaryTitleEl.textContent = '止损价 — ' + title +
+      (data.is_intraday ? '（含今日盘中实时数据 ' + intradayTime + '）' : '');
+
+    renderRows(stopRowsEl, [
+      {
+        label: '硬止损价',
+        value: fmtPrice(stops.hard_stop_price),
+        cls: stops.hard_stop_triggered ? 'metric-positive' : '',
+        note: '买入价 − ' + stops.hard_stop_atr_mul + '×ATR(买入日)，' + fmtPct(stops.hard_stop_pct) +
+          (stops.hard_stop_triggered
+            ? '；⚠️ 已于 ' + stops.hard_stop_trigger_date + ' 被击穿'
+            : '；未被击穿'),
+      },
+      {
+        label: '吊灯止损价',
+        value: fmtPrice(stops.chandelier_stop_price),
+        cls: stops.chandelier_stop_triggered ? 'metric-positive' : '',
+        note: '买入以来最高价 − ' + stops.chandelier_stop_atr_mul + '×ATR(最新)，距最高价 ' +
+          fmtPct(stops.chandelier_stop_pct_from_high) +
+          (stops.chandelier_stop_triggered ? '；⚠️ 最新价已跌破' : '；未跌破'),
+      },
+      {label: 'ATR(买入日)', value: fmtPrice(stops.atr_at_buy), note: '硬止损基准'},
+      {label: 'ATR(最新)', value: fmtPrice(stops.current_atr), note: '吊灯止损基准'},
+      {label: '买入以来最高价', value: fmtPrice(stops.highest_since_buy)},
+      {
+        label: '最新价',
+        value: fmtPrice(stops.latest_price),
+        note: data.is_intraday ? '盘中实时 ' + intradayTime : data.latest_date + ' 收盘',
+      },
+      {
+        label: '现价距硬止损',
+        value: fmtPct(stops.hard_stop_distance_pct),
+        cls: pctClass(stops.hard_stop_distance_pct),
+      },
+      {
+        label: '现价距吊灯止损',
+        value: fmtPct(stops.chandelier_stop_distance_pct),
+        cls: pctClass(stops.chandelier_stop_distance_pct),
+      },
+    ]);
+
+    renderRows(holdingRowsEl, [
+      {
+        label: '持有交易日数',
+        value: String(holding.hold_days),
+        note: data.start_date + ' ~ ' + data.latest_date,
+      },
+      {
+        label: '持有点数',
+        value: (Number(holding.pnl_points) > 0 ? '+' : '') + fmtPrice(holding.pnl_points),
+        cls: pctClass(holding.pnl_points),
+        note: fmtPct(holding.pnl_pct),
+      },
+      {label: '最大浮盈', value: fmtPct(holding.max_gain_pct), cls: pctClass(holding.max_gain_pct)},
+      {label: '累计收益率', value: fmtPct(holding.total_return), cls: pctClass(holding.total_return)},
+      {label: '年化收益率', value: fmtPct(holding.annual_return), cls: pctClass(holding.annual_return)},
+      {label: '最大回撤', value: fmtPct(holding.max_drawdown), cls: pctClass(holding.max_drawdown)},
+      {label: '夏普比率', value: Number(holding.sharpe).toFixed(2)},
+      {label: '索提诺比率', value: Number(holding.sortino).toFixed(2)},
+      {label: '卡玛比率', value: Number(holding.calmar).toFixed(2)},
+    ]);
+
+    resultEl.hidden = false;
+  }
+
+  evaluateBtn.addEventListener('click', evaluate);
+  [symbolEl, buyDateEl, buyPriceEl].forEach(function(el) {
+    el.addEventListener('keydown', function(ev) {
+      if (ev.key === 'Enter') evaluate();
+    });
+  });
+
+  buyDateEl.value = new Date().toISOString().slice(0, 10);
+  loadSymbolOptions();
+})();
+</script>
+{% endblock %}

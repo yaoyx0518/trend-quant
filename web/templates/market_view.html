@@ -787,6 +787,58 @@
     }, true);
   }
 
+  function macdCrossSignals(dates, dif, dea) {
+    // Detect DIF/DEA crosses; golden (金叉) = DIF crosses up through DEA,
+    // death (死叉) = DIF crosses down. Arrows sit just off the cross point.
+    const d = dif || [];
+    const e = dea || [];
+    const fin = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+    const vals = [];
+    for (const v of [...d, ...e]) {
+      if (fin(v)) vals.push(Number(v));
+    }
+    if (!vals.length) return { golden: [], death: [] };
+    const span = Math.max(...vals) - Math.min(...vals);
+    const pad = span > 0 ? span * 0.12 : Math.max(Math.abs(vals[0]) * 0.1, 1e-4);
+
+    const golden = [];
+    const death = [];
+    for (let i = 1; i < d.length; i += 1) {
+      if (!fin(d[i - 1]) || !fin(e[i - 1]) || !fin(d[i]) || !fin(e[i])) continue;
+      const dPrev = Number(d[i - 1]);
+      const ePrev = Number(e[i - 1]);
+      const dCur = Number(d[i]);
+      const eCur = Number(e[i]);
+      const date = dates[i];
+      if (dPrev <= ePrev && dCur > eCur) {
+        golden.push([date, Math.min(dCur, eCur) - pad]);
+      } else if (dPrev >= ePrev && dCur < eCur) {
+        death.push([date, Math.max(dCur, eCur) + pad]);
+      }
+    }
+    return { golden, death };
+  }
+
+  function macdSignalSeries(name, data, color, rotate) {
+    return {
+      name,
+      type: 'scatter',
+      data,
+      symbol: 'triangle',
+      symbolRotate: rotate,
+      symbolSize: 11,
+      itemStyle: {
+        color,
+        borderColor: '#ffffff',
+        borderWidth: 1.2,
+        shadowBlur: 4,
+        shadowColor: 'rgba(17, 35, 42, 0.25)',
+      },
+      emphasis: { scale: 1.4 },
+      z: 8,
+    };
+  }
+
   function renderMacd(payload, zoom) {
     if (!macdChart) return;
     const dates = payload.dates || [];
@@ -795,10 +847,28 @@
       value: v,
       itemStyle: { color: Number(v) >= 0 ? '#d14343' : '#00a76f' },
     }));
+    const signals = macdCrossSignals(dates, macd.dif, macd.dea);
     macdChart.setOption({
       animation: false,
       axisPointer: { link: [{ xAxisIndex: 'all' }] },
-      tooltip: { trigger: 'axis', axisPointer: { type: 'cross' }, valueFormatter: (v) => num(v, 4) },
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'cross' },
+        formatter: (params) => {
+          if (!params || !params.length) return '-';
+          const lines = [String(params[0].axisValue || '')];
+          for (const p of params) {
+            if (p.seriesType === 'scatter') {
+              lines.push(p.seriesName);
+              continue;
+            }
+            const raw = Array.isArray(p.value) ? p.value[1] : p.value;
+            if (raw == null || raw === '-') continue;
+            lines.push(`${p.seriesName}：${num(raw, 4)}`);
+          }
+          return lines.join('<br/>');
+        },
+      },
       legend: { data: ['MACD', 'DIF', 'DEA'], top: 2 },
       grid: { left: 62, right: 28, top: 36, bottom: 42 },
       dataZoom: buildDataZoom(zoom.start, zoom.end),
@@ -808,6 +878,8 @@
         { name: 'MACD', type: 'bar', data: bars, barMaxWidth: 8 },
         { name: 'DIF', type: 'line', data: macd.dif || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#2563eb' }, itemStyle: { color: '#2563eb' } },
         { name: 'DEA', type: 'line', data: macd.dea || [], symbol: 'none', smooth: true, lineStyle: { width: 1.2, color: '#c7834c' }, itemStyle: { color: '#c7834c' } },
+        macdSignalSeries('金叉', signals.golden, '#d14343', 0),
+        macdSignalSeries('死叉', signals.death, '#00a76f', 180),
       ],
     }, true);
   }
@@ -1205,8 +1277,14 @@
     if (!backtestStartEl.value && payload.meta?.start) backtestStartEl.value = payload.meta.start;
     if (!backtestEndEl.value && payload.meta?.end) backtestEndEl.value = payload.meta.end;
     updateBacktestRangeLabel();
-    chartTitleEl.innerHTML = `${payload.display_label || payload.display_name || payload.symbol || ''} 日 K${payload.meta?.is_intraday ? ' <span class="intraday-badge"><span class="intraday-dot" style="animation:intraday-pulse 1.6s ease-in-out infinite"></span>盘中</span>' : ''}`;
-    rangeMetaEl.textContent = `${payload.meta?.start || '-'} ~ ${payload.meta?.end || '-'} | ${Number(payload.meta?.rows || 0).toLocaleString()} 根${payload.meta?.is_intraday ? ' · 含盘中实时估算' : ''}`;
+    // Intraday badge: "盘中实时" while the session is running, "收盘估算"
+    // after 15:00 when the bar is synthesized from the closing snapshot
+    // because the daily write job has not persisted today's bar yet.
+    const intradayTs = payload.meta?.intraday_ts ? new Date(payload.meta.intraday_ts) : null;
+    const afterClose = intradayTs && !Number.isNaN(intradayTs.getTime()) && intradayTs.getHours() >= 15;
+    const intradayLabel = afterClose ? '收盘估算' : '盘中实时';
+    chartTitleEl.innerHTML = `${payload.display_label || payload.display_name || payload.symbol || ''} 日 K${payload.meta?.is_intraday ? ` <span class="intraday-badge"><span class="intraday-dot" style="animation:intraday-pulse 1.6s ease-in-out infinite"></span>${intradayLabel}</span>` : ''}`;
+    rangeMetaEl.textContent = `${payload.meta?.start || '-'} ~ ${payload.meta?.end || '-'} | ${Number(payload.meta?.rows || 0).toLocaleString()} 根${payload.meta?.is_intraday ? ` · 含${intradayLabel}数据` : ''}`;
     renderPrice(payload, zoom);
     renderTrend(payload, zoom);
     renderVolume(payload, zoom);

@@ -381,18 +381,20 @@ class SingleSymbolAllInBacktestEngine:
     def _format_condition_trace(day: str, side: str, traces: list[dict]) -> list[dict]:
         out: list[dict] = []
         for trace in traces:
-            out.append(
-                {
-                    "date": day,
-                    "side": side,
-                    "condition_id": trace.get("condition_id"),
-                    "condition_index": trace.get("condition_index"),
-                    "left_value": trace.get("left_value"),
-                    "operator": trace.get("operator"),
-                    "right_value": trace.get("right_value"),
-                    "passed": bool(trace.get("passed", False)),
-                }
-            )
+            row = {
+                "date": day,
+                "side": side,
+                "condition_id": trace.get("condition_id"),
+                "condition_index": trace.get("condition_index"),
+                "left_value": trace.get("left_value"),
+                "operator": trace.get("operator"),
+                "right_value": trace.get("right_value"),
+                "passed": bool(trace.get("passed", False)),
+            }
+            if trace.get("operator") in {"cross_above", "cross_below"}:
+                row["left_prev_value"] = trace.get("left_prev_value")
+                row["right_prev_value"] = trace.get("right_prev_value")
+            out.append(row)
         return out
 
     @staticmethod
