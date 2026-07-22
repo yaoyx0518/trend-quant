@@ -1035,36 +1035,40 @@ button:disabled {
 }
 
 .market-trades-table .trade-col-date {
-  width: 12%;
+  width: 9%;
 }
 
 .market-trades-table .trade-col-side {
-  width: 7%;
+  width: 5%;
 }
 
 .market-trades-table .trade-col-qty {
-  width: 10%;
-}
-
-.market-trades-table .trade-col-price {
-  width: 11%;
-}
-
-.market-trades-table .trade-col-pnl {
-  width: 14%;
-}
-
-.market-trades-table .trade-col-hold {
   width: 8%;
 }
 
+.market-trades-table .trade-col-price {
+  width: 8.5%;
+}
+
+.market-trades-table .trade-col-pnl {
+  width: 11%;
+}
+
+.market-trades-table .trade-col-pct {
+  width: 7%;
+}
+
+.market-trades-table .trade-col-hold {
+  width: 6%;
+}
+
 .market-trades-table .trade-col-reason {
-  width: 14%;
+  width: 10%;
 }
 
 .market-trades-table .trade-col-fee,
 .market-trades-table .trade-col-tax {
-  width: 8%;
+  width: 6.5%;
 }
 
 .text-center {
