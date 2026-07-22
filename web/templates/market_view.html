@@ -46,6 +46,26 @@
       <div id="mvRangeMeta" class="market-range-meta"></div>
     </div>
     <div id="mvBacktestSummary" class="market-backtest-summary" hidden></div>
+
+    <div class="chart-grid market-returns-grid" id="mvReturnsPanel" hidden>
+      <div class="viz-panel">
+        <h3 id="mvHeatTitle">月度收益热力图</h3>
+        <div id="mvHeatChart" class="chart-md"></div>
+      </div>
+      <div class="table-panel">
+        <div class="market-table-head">
+          <h3 id="mvAnnualTitle">年度收益表</h3>
+          <p class="context-hint">括号内为与买入持有的差值（正为跑赢）</p>
+        </div>
+        <div class="table-shell">
+          <table id="mvAnnualTable">
+            <thead></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
     <div id="mvPriceChart" class="chart-kline market-price-chart"></div>
 
     <div id="mvTrendWrap" class="market-subchart-wrap">
@@ -121,22 +141,6 @@
           <tr><td colspan="10">暂无交易明细。</td></tr>
         </tbody>
       </table>
-    </div>
-  </div>
-
-  <div class="chart-grid market-returns-grid" id="mvReturnsPanel" hidden>
-    <div class="viz-panel">
-      <h3 id="mvHeatTitle">月度收益热力图</h3>
-      <div id="mvHeatChart" class="chart-md"></div>
-    </div>
-    <div class="table-panel">
-      <h3 id="mvAnnualTitle">年度收益表</h3>
-      <div class="table-shell">
-        <table id="mvAnnualTable">
-          <thead></thead>
-          <tbody></tbody>
-        </table>
-      </div>
     </div>
   </div>
 
@@ -1080,14 +1084,6 @@
     return '';
   }
 
-  function diffCellHtml(value, formatter) {
-    const n = Number(value);
-    if (!Number.isFinite(n)) return '<span>-</span>';
-    const sign = n > 0 ? '+' : '';
-    const cls = n > 0 ? 'pnl-profit' : (n < 0 ? 'pnl-loss' : '');
-    return `<span class="${cls}">${sign}${formatter(n)}</span>`;
-  }
-
   function renderMonthlyHeatmap(monthly) {
     const chart = ensureHeatChart();
     if (!chart) return;
@@ -1134,64 +1130,52 @@
     setTimeout(() => { if (heatChart) heatChart.resize(); }, 0);
   }
 
+  function valueWithDiff(value, benchmark, formatter) {
+    // 主值 + 括号内与买入持有的差值；差值为正红色、为负绿色（A 股配色）
+    const v = Number(value);
+    if (!Number.isFinite(v)) return '-';
+    let html = `<span class="annual-value">${esc(formatter(v))}</span>`;
+    const b = Number(benchmark);
+    if (Number.isFinite(b)) {
+      const d = v - b;
+      const sign = d > 0 ? '+' : '';
+      const cls = d > 0 ? 'pnl-profit' : (d < 0 ? 'pnl-loss' : 'annual-diff-flat');
+      html += `<span class="annual-diff ${cls}">(${sign}${esc(formatter(d))})</span>`;
+    }
+    return html;
+  }
+
   function renderAnnualTable(rows, strategyName) {
     if (!annualTableHeadEl || !annualTableBodyEl) return;
-    const hasBenchmark = (rows || []).some((r) => (
-      Number.isFinite(Number(r?.benchmark_return)) || Number.isFinite(Number(r?.benchmark_sharpe))
-    ));
-    const benchmarkCols = hasBenchmark ? 4 : 0;
     annualTableHeadEl.innerHTML = `
       <tr>
-        <th rowspan="2">年份</th>
-        <th colspan="5" class="table-group-head">策略${strategyName ? `（${esc(strategyName)}）` : ''}</th>
-        ${hasBenchmark ? '<th colspan="4" class="table-group-head">买入持有</th>' : ''}
-      </tr>
-      <tr>
+        <th>年份</th>
         <th>收益</th>
         <th>夏普</th>
+        <th>最大回撤</th>
+        <th>卡玛比</th>
         <th>交易数</th>
         <th>胜率</th>
         <th>盈亏比</th>
-        ${hasBenchmark ? `
-          <th>收益</th>
-          <th>收益超额</th>
-          <th>夏普</th>
-          <th>夏普差值</th>
-        ` : ''}
       </tr>
     `;
 
     if (!rows || !rows.length) {
-      annualTableBodyEl.innerHTML = `<tr><td colspan="${6 + benchmarkCols}">暂无年度收益数据</td></tr>`;
+      annualTableBodyEl.innerHTML = '<tr><td colspan="8">暂无年度收益数据</td></tr>';
       return;
     }
-    annualTableBodyEl.innerHTML = rows.map((r) => {
-      const benchmarkCells = hasBenchmark ? (() => {
-        const returnExcess = Number.isFinite(Number(r?.return)) && Number.isFinite(Number(r?.benchmark_return))
-          ? Number(r.return) - Number(r.benchmark_return)
-          : null;
-        const sharpeExcess = Number.isFinite(Number(r?.sharpe)) && Number.isFinite(Number(r?.benchmark_sharpe))
-          ? Number(r.sharpe) - Number(r.benchmark_sharpe)
-          : null;
-        return `
-          <td class="num-cell ${metricTone(r?.benchmark_return, 'return')}">${pct(r?.benchmark_return)}</td>
-          <td class="num-cell">${diffCellHtml(returnExcess, pct)}</td>
-          <td class="num-cell ${metricTone(r?.benchmark_sharpe, 'score')}">${num(r?.benchmark_sharpe, 2)}</td>
-          <td class="num-cell">${diffCellHtml(sharpeExcess, (v) => num(v, 2))}</td>
-        `;
-      })() : '';
-      return `
-        <tr>
-          <th scope="row" class="year-cell">${r.year ?? '-'}</th>
-          <td class="num-cell ${metricTone(r.return, 'return')}">${pct(r.return)}</td>
-          <td class="num-cell ${metricTone(r.sharpe, 'score')}">${num(r.sharpe, 2)}</td>
-          <td class="num-cell">${Number.isFinite(Number(r.trade_count)) ? Math.round(Number(r.trade_count)) : '-'}</td>
-          <td class="num-cell ${metricTone(r.win_rate, 'score')}">${pct(r.win_rate)}</td>
-          <td class="num-cell ${metricTone(r.profit_factor, 'score')}">${num(r.profit_factor, 2)}</td>
-          ${benchmarkCells}
-        </tr>
-      `;
-    }).join('');
+    annualTableBodyEl.innerHTML = rows.map((r) => `
+      <tr>
+        <th scope="row" class="year-cell">${r.year ?? '-'}</th>
+        <td class="num-cell ${metricTone(r.return, 'return')}">${valueWithDiff(r.return, r.benchmark_return, pct)}</td>
+        <td class="num-cell ${metricTone(r.sharpe, 'score')}">${valueWithDiff(r.sharpe, r.benchmark_sharpe, (v) => num(v, 2))}</td>
+        <td class="num-cell ${metricTone(r.max_drawdown, 'risk')}">${valueWithDiff(r.max_drawdown, r.benchmark_max_drawdown, pct)}</td>
+        <td class="num-cell ${metricTone(r.calmar, 'score')}">${valueWithDiff(r.calmar, r.benchmark_calmar, (v) => num(v, 2))}</td>
+        <td class="num-cell">${Number.isFinite(Number(r.trade_count)) ? Math.round(Number(r.trade_count)) : '-'}</td>
+        <td class="num-cell ${metricTone(r.win_rate, 'score')}">${pct(r.win_rate)}</td>
+        <td class="num-cell ${metricTone(r.profit_factor, 'score')}">${num(r.profit_factor, 2)}</td>
+      </tr>
+    `).join('');
   }
 
   function renderBacktestReturns(result) {
@@ -1199,7 +1183,7 @@
     const source = pickBacktestSource(result);
     const strategyName = source?.strategy_name || strategyLabel(source) || '';
     if (heatTitleEl) heatTitleEl.textContent = `月度收益热力图${strategyName ? `（${strategyName}）` : ''}`;
-    if (annualTitleEl) annualTitleEl.textContent = '年度收益表';
+    if (annualTitleEl) annualTitleEl.textContent = `年度收益表${strategyName ? `（${strategyName}）` : ''}`;
     returnsPanelEl.hidden = false;
     renderMonthlyHeatmap(source?.monthly_heatmap || {});
     renderAnnualTable(source?.annual_returns || [], strategyName);
@@ -1518,7 +1502,7 @@
           symbol,
           start_date: backtestStartEl.value,
           end_date: backtestEndEl.value,
-          initial_capital: 1000000,
+          initial_capital: 100000,
           slippage: 0.002,
           fee_rate: 0.0000854,
           fee_min: 5,

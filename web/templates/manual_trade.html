@@ -20,7 +20,7 @@
   <div id="mtResult" hidden>
     <div class="viz-panel">
       <h3 id="mtSummaryTitle">止损价</h3>
-      <div class="mt-stat-grid" id="mtStopStats"></div>
+      <div class="mt-stop-grid" id="mtStopStats"></div>
     </div>
 
     <div class="viz-panel">
@@ -77,6 +77,8 @@
     container.innerHTML = stats.map(function(stat) {
       const cls = ['mt-stat'];
       if (stat.primary) cls.push('mt-stat-primary');
+      if (stat.cls === 'metric-positive') cls.push('mt-stat-pos');
+      if (stat.cls === 'metric-negative') cls.push('mt-stat-neg');
       const valueCls = 'mt-stat-value' + (stat.cls ? ' ' + stat.cls : '');
       const note = stat.note ? '<span class="mt-stat-note">' + esc(stat.note) + '</span>' : '';
       return '<div class="' + cls.join(' ') + '">' +
@@ -85,6 +87,50 @@
         note +
         '</div>';
     }).join('');
+  }
+
+  function stopPill(triggered, okText, dangerText) {
+    return '<span class="mt-stop-pill ' + (triggered ? 'is-danger' : 'is-ok') + '">' +
+      esc(triggered ? dangerText : okText) + '</span>';
+  }
+
+  function renderStopStats(stops, data) {
+    const hardTriggered = !!stops.hard_stop_triggered;
+    const chandTriggered = !!stops.chandelier_stop_triggered;
+    stopStatsEl.innerHTML =
+      '<div class="mt-stop-card mt-stop-hard">' +
+        '<div class="mt-stop-card-head">' +
+          '<span class="mt-stat-label">硬止损价</span>' +
+          stopPill(hardTriggered, '未击穿', '⚠ 已击穿') +
+        '</div>' +
+        '<span class="mt-stop-price">' + esc(fmtPrice(stops.hard_stop_price)) + '</span>' +
+        '<span class="mt-stat-note">买入价 − ' + esc(stops.hard_stop_atr_mul) + '×ATR(买入日) · 距买入价 ' +
+          esc(fmtPct(stops.hard_stop_pct)) +
+          (hardTriggered ? ' · 于 ' + esc(stops.hard_stop_trigger_date) + ' 被击穿' : '') + '</span>' +
+      '</div>' +
+      '<div class="mt-stop-card mt-stop-chandelier">' +
+        '<div class="mt-stop-card-head">' +
+          '<span class="mt-stat-label">吊灯止损价</span>' +
+          stopPill(chandTriggered, '未跌破', '⚠ 已跌破') +
+        '</div>' +
+        '<span class="mt-stop-price">' + esc(fmtPrice(stops.chandelier_stop_price)) + '</span>' +
+        '<span class="mt-stat-note">买入以来最高价 − ' + esc(stops.chandelier_stop_atr_mul) + '×ATR(最新) · 距最高价 ' +
+          esc(fmtPct(stops.chandelier_stop_pct_from_high)) + '</span>' +
+      '</div>' +
+      '<div class="mt-stop-card mt-stop-dist">' +
+        '<div class="mt-stop-card-head"><span class="mt-stat-label">现价距硬止损</span></div>' +
+        '<span class="mt-stop-price ' + pctClass(stops.hard_stop_distance_pct) + '">' +
+          esc(fmtPct(stops.hard_stop_distance_pct)) + '</span>' +
+        '<span class="mt-stat-note">最新价 ' + esc(fmtPrice(stops.latest_price)) + ' / 止损价 ' +
+          esc(fmtPrice(stops.hard_stop_price)) + '</span>' +
+      '</div>' +
+      '<div class="mt-stop-card mt-stop-dist">' +
+        '<div class="mt-stop-card-head"><span class="mt-stat-label">现价距吊灯止损</span></div>' +
+        '<span class="mt-stop-price ' + pctClass(stops.chandelier_stop_distance_pct) + '">' +
+          esc(fmtPct(stops.chandelier_stop_distance_pct)) + '</span>' +
+        '<span class="mt-stat-note">最新价 ' + esc(fmtPrice(stops.latest_price)) + ' / 止损价 ' +
+          esc(fmtPrice(stops.chandelier_stop_price)) + '</span>' +
+      '</div>';
   }
 
   async function loadSymbolOptions() {
@@ -184,45 +230,7 @@
     summaryTitleEl.textContent = '止损价 — ' + title +
       (data.is_intraday ? '（含今日盘中实时数据 ' + intradayTime + '）' : '');
 
-    renderStats(stopStatsEl, [
-      {
-        label: '硬止损价',
-        value: fmtPrice(stops.hard_stop_price),
-        cls: stops.hard_stop_triggered ? 'metric-positive' : '',
-        primary: true,
-        note: '买入价 − ' + stops.hard_stop_atr_mul + '×ATR(买入日)，' + fmtPct(stops.hard_stop_pct) +
-          (stops.hard_stop_triggered
-            ? '；⚠️ 已于 ' + stops.hard_stop_trigger_date + ' 被击穿'
-            : '；未被击穿'),
-      },
-      {
-        label: '吊灯止损价',
-        value: fmtPrice(stops.chandelier_stop_price),
-        cls: stops.chandelier_stop_triggered ? 'metric-positive' : '',
-        primary: true,
-        note: '买入以来最高价 − ' + stops.chandelier_stop_atr_mul + '×ATR(最新)，距最高价 ' +
-          fmtPct(stops.chandelier_stop_pct_from_high) +
-          (stops.chandelier_stop_triggered ? '；⚠️ 最新价已跌破' : '；未跌破'),
-      },
-      {label: 'ATR(买入日)', value: fmtPrice(stops.atr_at_buy), note: '硬止损基准'},
-      {label: 'ATR(最新)', value: fmtPrice(stops.current_atr), note: '吊灯止损基准'},
-      {label: '买入以来最高价', value: fmtPrice(stops.highest_since_buy)},
-      {
-        label: '最新价',
-        value: fmtPrice(stops.latest_price),
-        note: data.is_intraday ? '盘中实时 ' + intradayTime : data.latest_date + ' 收盘',
-      },
-      {
-        label: '现价距硬止损',
-        value: fmtPct(stops.hard_stop_distance_pct),
-        cls: pctClass(stops.hard_stop_distance_pct),
-      },
-      {
-        label: '现价距吊灯止损',
-        value: fmtPct(stops.chandelier_stop_distance_pct),
-        cls: pctClass(stops.chandelier_stop_distance_pct),
-      },
-    ]);
+    renderStopStats(stops, data);
 
     renderStats(holdingStatsEl, [
       {
@@ -230,19 +238,11 @@
         value: String(holding.hold_days),
         note: data.start_date + ' ~ ' + data.latest_date,
       },
-      {
-        label: '持有点数',
-        value: (Number(holding.pnl_points) > 0 ? '+' : '') + fmtPrice(holding.pnl_points),
-        cls: pctClass(holding.pnl_points),
-        note: fmtPct(holding.pnl_pct),
-      },
       {label: '最大浮盈', value: fmtPct(holding.max_gain_pct), cls: pctClass(holding.max_gain_pct)},
-      {label: '累计收益率', value: fmtPct(holding.total_return), cls: pctClass(holding.total_return)},
-      {label: '年化收益率', value: fmtPct(holding.annual_return), cls: pctClass(holding.annual_return)},
+      {label: '累计收益率', value: fmtPct(holding.total_return), cls: pctClass(holding.total_return), primary: true},
       {label: '最大回撤', value: fmtPct(holding.max_drawdown), cls: pctClass(holding.max_drawdown)},
-      {label: '夏普比率', value: Number(holding.sharpe).toFixed(2)},
-      {label: '索提诺比率', value: Number(holding.sortino).toFixed(2)},
-      {label: '卡玛比率', value: Number(holding.calmar).toFixed(2)},
+      {label: '夏普比率', value: Number(holding.sharpe).toFixed(2), cls: pctClass(holding.sharpe)},
+      {label: '卡玛比率', value: Number(holding.calmar).toFixed(2), cls: pctClass(holding.calmar)},
     ]);
 
     resultEl.hidden = false;

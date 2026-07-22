@@ -30,7 +30,7 @@ class RuleBacktestRunRequest(BaseModel):
     symbol: str
     start_date: str = Field(default="")
     end_date: str = Field(default="")
-    initial_capital: float = Field(default=1_000_000)
+    initial_capital: float = Field(default=100_000)
     slippage: float = Field(default=0.002)
     fee_rate: float = Field(default=DEFAULT_FEE_RATE)
     fee_min: float = Field(default=5.0)

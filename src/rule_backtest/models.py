@@ -16,7 +16,7 @@ DEFAULT_FEE_RATE = 0.0000854
 
 @dataclass(frozen=True, slots=True)
 class BacktestExecutionConfig:
-    initial_capital: float = 1_000_000.0
+    initial_capital: float = 100_000.0
     signal_timing: str = "close"
     fill_timing: str = "close"
     fee_rate: float = DEFAULT_FEE_RATE
