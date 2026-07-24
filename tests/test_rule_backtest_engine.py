@@ -12,6 +12,7 @@ from core import indicators as core_ind
 from data.storage.db import Database
 from rule_backtest import BacktestExecutionConfig, RuleBacktestRequest, SingleSymbolAllInBacktestEngine
 from rule_backtest.loader import StrategyLoader
+from rule_backtest.models import PositionState
 from rule_backtest.service import RuleBacktestService
 
 SAMPLE_STRATEGY = {
@@ -790,6 +791,90 @@ class RuleBacktestLoaderServiceTest(unittest.TestCase):
         ids = {item["id"] for item in indicators}
         self.assertIn("sma", ids)
         self.assertIn("bias_atr_normed", ids)
+
+
+class CooldownStateValueTest(unittest.TestCase):
+    """days_since_last_exit（离场冷却期）：卖出后至少过 X 个交易日才能再入场。"""
+
+    def _run(self, strategy: dict, bars: pd.DataFrame) -> dict:
+        return SingleSymbolAllInBacktestEngine().run(
+            RuleBacktestRequest(
+                strategy=strategy,
+                symbol="TEST",
+                bars=bars,
+                execution=BacktestExecutionConfig(slippage=0.0, fee_rate=0.0, fee_min=0.0),
+            )
+        )
+
+    @staticmethod
+    def _trade_day_indices(result: dict, bars: pd.DataFrame) -> dict[str, list[int]]:
+        day_to_idx = {str(day): idx for idx, day in enumerate(bars["date"])}
+        out: dict[str, list[int]] = {"BUY": [], "SELL": []}
+        for trade in result["trades"]:
+            out[trade["side"]].append(day_to_idx[trade["date"]])
+        return out
+
+    @staticmethod
+    def _cooldown_strategy(min_days: float) -> dict:
+        return {
+            "id": "cooldown",
+            "entry": {
+                "type": "group",
+                "combinator": "all",
+                "children": [
+                    {  # 恒真：没有冷却限制时每天都想入场
+                        "left": {"type": "literal", "value": 1},
+                        "operator": ">=",
+                        "right": {"type": "literal", "value": 0},
+                    },
+                    {
+                        "left": {"type": "state_value", "name": "days_since_last_exit"},
+                        "operator": ">=",
+                        "right": {"type": "literal", "value": min_days},
+                    },
+                ],
+            },
+            "exit": {
+                "type": "group",
+                "combinator": "any",
+                "children": [
+                    {
+                        "left": {"type": "price", "field": "close"},
+                        "operator": "<=",
+                        "right": {"type": "literal", "value": 95},
+                    }
+                ],
+            },
+        }
+
+    def test_cooldown_blocks_reentry_within_x_days(self) -> None:
+        # idx 4 和 idx 8 收盘 90 → 触发卖出；其余日子恒真条件想入场。
+        closes = [100.0] * 4 + [90.0] + [100.0] * 3 + [90.0] + [100.0] * 5
+        bars = make_bars(closes)
+        result = self._run(self._cooldown_strategy(3), bars)
+        indices = self._trade_day_indices(result, bars)
+
+        self.assertEqual([4, 8], indices["SELL"])
+        # idx 0：从未卖出 → 冷却条件视为满足，首次入场不被阻塞。
+        # 卖出日 idx 4 → 差值 idx5=1、idx6=2 均被挡，idx7=3 才允许再入场；
+        # 卖出日 idx 8 → 同理 idx11 再入场。
+        self.assertEqual([0, 7, 11], indices["BUY"])
+
+    def test_never_sold_gte_passes_but_lte_does_not(self) -> None:
+        bars = make_bars([100.0] * 10)
+        # `<= X` 与 None（从未卖出）比较不通过 → 全程无交易。
+        strategy = self._cooldown_strategy(3)
+        strategy["entry"]["children"][1]["operator"] = "<="
+        result = self._run(strategy, bars)
+        self.assertEqual([], result["trades"])
+
+    def test_reset_preserves_last_exit_bar_idx(self) -> None:
+        # 冷却期状态是账户级历史，持仓 reset 不得清除。
+        position = PositionState(qty=100, entry_price=10.0)
+        position.last_exit_bar_idx = 4
+        position.reset()
+        self.assertFalse(position.is_open)
+        self.assertEqual(4, position.last_exit_bar_idx)
 
 
 if __name__ == "__main__":

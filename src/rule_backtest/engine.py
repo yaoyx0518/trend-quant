@@ -113,6 +113,9 @@ class SingleSymbolAllInBacktestEngine:
                     debug_day["decision"] = {"side": "SELL", "reason": reason}
                     debug_day["execution_trace"] = trade
                 position.reset()
+                # 冷却期记账：last_exit_bar_idx 用 all_bars 坐标系（与
+                # resolver 逐日切片的 len(bars)-1 一致），reset() 不清除它。
+                position.last_exit_bar_idx = len(day_bars) - 1
                 sold_today = True
 
             entry_passed = False
@@ -408,6 +411,7 @@ class SingleSymbolAllInBacktestEngine:
             "hard_stop": float(position.hard_stop),
             "highest_high_since_entry": float(position.highest_high_since_entry),
             "chandelier_stop": float(position.chandelier_stop),
+            "last_exit_bar_idx": position.last_exit_bar_idx,
         }
 
     @staticmethod

@@ -8,7 +8,13 @@ from rule_backtest.registry import IndicatorSpec, ParamSpec, default_indicator_r
 SUPPORTED_OPERATORS = {">=", "<=", "cross_above", "cross_below"}
 SUPPORTED_PRICE_FIELDS = {"open", "high", "low", "close", "volume", "amount"}
 SUPPORTED_VALUE_TYPES = {"price", "literal", "indicator", "state_value"}
-SUPPORTED_STATE_VALUES = {"entry_price", "hard_stop", "highest_high_since_entry", "chandelier_stop"}
+SUPPORTED_STATE_VALUES = {
+    "entry_price",
+    "hard_stop",
+    "highest_high_since_entry",
+    "chandelier_stop",
+    "days_since_last_exit",
+}
 
 
 @dataclass(slots=True)

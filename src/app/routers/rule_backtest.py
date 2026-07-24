@@ -79,7 +79,13 @@ async def get_rule_backtest_meta() -> dict:
         "instruments": service.list_instruments(),
         "indicators": service.list_indicators(),
         # Frontend form defaults (single source — JS must not hardcode these).
-        "state_values": ["entry_price", "hard_stop", "highest_high_since_entry", "chandelier_stop"],
+        "state_values": [
+            "entry_price",
+            "hard_stop",
+            "highest_high_since_entry",
+            "chandelier_stop",
+            "days_since_last_exit",
+        ],
         "stop_defaults": {
             "hard_stop": {"atr_period": 20, "atr_mul": 1.5},
             "chandelier_stop": {"atr_period": 20, "atr_mul": 2.5},

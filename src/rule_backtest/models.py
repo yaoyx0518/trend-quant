@@ -52,6 +52,10 @@ class PositionState:
     hard_stop: float = 0.0
     highest_high_since_entry: float = 0.0
     chandelier_stop: float = 0.0
+    # 上次卖出所在的 bar 下标（all_bars 坐标系），供 days_since_last_exit
+    # 状态值做「离场冷却期」判断。与止损状态不同：它属于账户级历史，
+    # 跨持仓周期存活，reset() 刻意不清除；None 表示本轮回测从未卖出。
+    last_exit_bar_idx: int | None = None
 
     @property
     def is_open(self) -> bool:
@@ -66,3 +70,4 @@ class PositionState:
         self.hard_stop = 0.0
         self.highest_high_since_entry = 0.0
         self.chandelier_stop = 0.0
+        # last_exit_bar_idx 不在此清除 —— 见字段注释。

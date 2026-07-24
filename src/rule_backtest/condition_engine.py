@@ -76,6 +76,16 @@ class ConditionEngine:
                 passed = float(left_value) >= float(right_value)
             elif operator == "<=":
                 passed = float(left_value) <= float(right_value)
+        elif operator == ">=" and left_value is None and right_value is not None:
+            # 离场冷却期特判：days_since_last_exit 从未卖出时为 None，
+            # 语义为「无冷却限制」—— `>= X` 直接通过，首次入场不被阻塞。
+            # （`<= X` 与 None 比较仍不通过，cross 操作符也不做特判。）
+            left_spec = condition.get("left", {}) or {}
+            if (
+                str(left_spec.get("type", "")).strip() == "state_value"
+                and str(left_spec.get("name", "")).strip() == "days_since_last_exit"
+            ):
+                passed = True
 
         trace = {
             "condition_id": condition.get("id"),
