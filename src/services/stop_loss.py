@@ -35,6 +35,10 @@ from data.storage.db import get_db
 
 logger = logging.getLogger(__name__)
 
+#: 哨兵值：调用方未提供预取的盘中合成K线 —— 按默认路径实时拉取。
+#: 显式传 None 表示「已确认无盘中数据，直接用 EOD」（交易记录列表的同 symbol 去重用）。
+UNSET_INTRADAY_BAR: object = object()
+
 
 class StopLossError(ValueError):
     """止损计算中的业务错误（无效输入 / 数据不足）。"""
@@ -69,12 +73,19 @@ def _fetch_intraday_bar(symbol: str, df: pd.DataFrame) -> dict | None:
         return None
 
 
+def fetch_intraday_bar(symbol: str, df: pd.DataFrame) -> dict | None:
+    """``_fetch_intraday_bar`` 的公开包装：交易记录列表按 symbol 预取去重用。"""
+    return _fetch_intraday_bar(symbol, df)
+
+
 def compute_stop_loss(
     symbol: str,
     buy_date: str,
     buy_price: float,
     db=None,
     intraday: bool = True,
+    end_date: str | None = None,
+    intraday_bar: dict | None | object = UNSET_INTRADAY_BAR,
 ) -> dict:
     """计算给定买入的硬止损价和吊灯止损价。
 
@@ -84,6 +95,10 @@ def compute_stop_loss(
 
     ``intraday=True``（默认）时，交易时段内会把实时报价合成的当日K线计入
     最高价 / 最新价 / 止损触发判断；ATR 仍为历史完整K线口径（见模块 docstring）。
+    ``intraday_bar`` 显式传入（含 None）时跳过实时拉取，直接使用该值。
+
+    ``end_date`` 用于已清仓交易：数据与 ATR 均截断到该日（含），
+    "最新价 / 买入以来最高价" 都按截止日口径，且强制关闭 intraday。
 
     Raises:
         StopLossError: 标的无效、无数据或 ATR 异常。
@@ -97,6 +112,16 @@ def compute_stop_loss(
         raise StopLossError(f"无效的买入日期: {buy_date}") from exc
     if buy_price <= 0:
         raise StopLossError("买入价格必须大于 0")
+
+    end_ts: pd.Timestamp | None = None
+    if end_date is not None:
+        try:
+            end_ts = pd.Timestamp(end_date)
+        except (ValueError, TypeError) as exc:
+            raise StopLossError(f"无效的截止日期: {end_date}") from exc
+        if end_ts < buy_ts:
+            raise StopLossError(f"截止日期 {end_date} 早于买入日期 {buy_date}")
+        intraday = False  # 历史截断口径，不叠加盘中
 
     db = db or get_db()
     df = db.load_market_data(symbol)
@@ -117,6 +142,8 @@ def compute_stop_loss(
     # ATR from the precomputed cache (single source, D11); the store falls
     # back to a live full-history compute when the cache is stale/missing.
     atr_series = get_series(symbol, "atr", db=db)
+    if end_ts is not None:
+        atr_series = atr_series[atr_series.index <= end_ts]
     if atr_series.empty:
         raise StopLossError("数据不足，无法计算 ATR")
 
@@ -126,10 +153,21 @@ def compute_stop_loss(
 
     df = df.copy()
     df["time"] = pd.to_datetime(df["time"], errors="coerce")
+    if end_ts is not None:
+        df = df[df["time"] <= end_ts]
+        if df.empty:
+            raise StopLossError(f"{symbol} 在 {end_date}（含）之前无数据")
 
     # 盘中实时叠加：合成当日K线计入最高价/最新价。
     # ATR 刻意不叠加当日不完整K线（与实时看板同一口径），故无需重算。
-    synth = _fetch_intraday_bar(symbol, df) if intraday else None
+    if intraday:
+        synth = (
+            _fetch_intraday_bar(symbol, df)
+            if intraday_bar is UNSET_INTRADAY_BAR
+            else intraday_bar
+        )
+    else:
+        synth = None
     if synth is not None:
         today = pd.Timestamp(synth["time"]).normalize()
         df = df[df["time"] < today]  # 防御：剔除可能已存在的当日行

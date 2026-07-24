@@ -14,7 +14,7 @@ import pandas as pd
 from core.display import load_instrument_name_map
 from data.storage.db import get_db
 from rule_backtest.metrics import compute_summary
-from services.stop_loss import StopLossError, compute_stop_loss
+from services.stop_loss import UNSET_INTRADAY_BAR, StopLossError, compute_stop_loss
 
 __all__ = ["ManualTradeError", "compute_manual_trade"]
 
@@ -29,6 +29,8 @@ def compute_manual_trade(
     buy_price: float,
     db=None,
     intraday: bool = True,
+    end_date: str | None = None,
+    intraday_bar: dict | None | object = UNSET_INTRADAY_BAR,
 ) -> dict:
     """止损价 + 持仓指标的一站式计算（手工交易页面的后端）。
 
@@ -38,19 +40,34 @@ def compute_manual_trade(
 
     ``intraday=True``（默认）时，交易时段内会把实时报价合成的当日K线计入
     净值序列 / 止损触发 / 最高价 / 最新价（ATR 仍为历史完整K线口径，
-    见 ``services/stop_loss.py`` docstring）。
+    见 ``services/stop_loss.py`` docstring）。``intraday_bar`` 显式传入
+    （含 None）时跳过实时拉取，直接复用该值（列表接口同 symbol 去重）。
+
+    ``end_date`` 用于已清仓交易：净值序列截断到该日（含），强制关闭
+    intraday，所有指标按截止日口径。
 
     Raises:
         StopLossError: 标的无效、无数据（来自 ``compute_stop_loss``）。
         ManualTradeError: 买入日期晚于最新数据。
     """
-    stops = compute_stop_loss(symbol, buy_date, buy_price, db=db, intraday=intraday)
+    stops = compute_stop_loss(
+        symbol,
+        buy_date,
+        buy_price,
+        db=db,
+        intraday=intraday,
+        end_date=end_date,
+        intraday_bar=intraday_bar,
+    )
     symbol = stops["symbol"]
     buy_ts = pd.Timestamp(buy_date)
+    end_ts = pd.Timestamp(end_date) if end_date is not None else None
 
     db = db or get_db()
     df = db.load_market_data(symbol).copy()
     df["time"] = pd.to_datetime(df["time"], errors="coerce")
+    if end_ts is not None:
+        df = df[df["time"] <= end_ts]
 
     since = df[df["time"] >= buy_ts]
     if since.empty:
